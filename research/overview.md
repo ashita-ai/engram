@@ -23,7 +23,7 @@ Key evidence:
 - Procedural memory is neurally distinct from declarative memory ([Milner, 1962](https://www.sciencedirect.com/topics/neuroscience/implicit-memory))
 - Working memory has limited capacity and different dynamics than long-term storage ([Baddeley, 1974](https://en.wikipedia.org/wiki/Baddeley%27s_model_of_working_memory))
 
-See: [Memory Systems](memory-systems.md)
+See: [Theoretical Foundations](foundations.md)
 
 ---
 
@@ -101,7 +101,7 @@ Selective strengthening occurs naturally through retrieval:
 
 **Engineering implication**: Unbounded memory growth causes relevance problems. Forgetting keeps the store focused on what matters.
 
-See: [Forgetting Curves](forgetting.md), [Retrieval and Strengthening](retrieval.md)
+See: [Theoretical Foundations](foundations.md)
 
 ---
 
@@ -129,7 +129,7 @@ Recent neuroscience shows multiple consolidation pathways:
 
 **Engineering implication**: Real-time LLM extraction is expensive and error-prone. Batched offline processing is cheaper and allows error correction.
 
-See: [Consolidation](consolidation.md)
+See: [Theoretical Foundations](foundations.md)
 
 ---
 
@@ -149,7 +149,7 @@ The levels of processing framework shows deeper encoding produces stronger memor
 
 **Engineering implication**: Raw storage is shallow. Extracting meaning creates richer indices and better retrieval.
 
-See: [Encoding Depth](encoding.md)
+See: [Theoretical Foundations](foundations.md)
 
 ---
 
@@ -172,15 +172,10 @@ We use cognitive science as design inspiration, not strict implementation. These
 
 ---
 
-## Research Pages
+## Further Reading
 
-- [Memory Systems](memory-systems.md) — Why multiple memory types
-- [Accuracy Problem](accuracy.md) — Why ground truth preservation matters
-- [Forgetting Curves](forgetting.md) — Why intelligent forgetting
-- [Consolidation](consolidation.md) — Why deferred processing
-- [Encoding Depth](encoding.md) — Why semantic extraction
-- [Retrieval and Strengthening](retrieval.md) — Why access reinforces memory
-- [Procedural Memory](procedural.md) — Why behavioral preferences
+- [Accuracy & Hallucination Prevention](accuracy.md) — The core problem Engram solves
+- [Theoretical Foundations](foundations.md) — Cognitive science background
 
 ---
 

@@ -1,176 +1,163 @@
 # Architecture
 
-Engram is a memory system for LLM applications built on cognitive science principles rather than ad-hoc engineering.
+Engram is a memory system for LLM applications built on Pydantic AI with durable execution.
+
+## Stack
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Application                             │
+├─────────────────────────────────────────────────────────────┤
+│                      Engram API                              │
+│         encode() / recall() / consolidate() / decay()        │
+├─────────────────────────────────────────────────────────────┤
+│                     Pydantic AI                              │
+│              Agents with structured outputs                   │
+├─────────────────────────────────────────────────────────────┤
+│               Durable Execution (pick one)                   │
+│         ┌──────────┬──────────┬──────────┐                   │
+│         │ Temporal │  DBOS    │  Prefect │                   │
+│         └──────────┴──────────┴──────────┘                   │
+├─────────────────────────────────────────────────────────────┤
+│                       Qdrant                                 │
+│              Vector storage for all memory types             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Durable Execution Options
+
+Engram's `consolidate()` operation runs LLM extraction in the background. For production, wrap agents with durable execution:
+
+### Option 1: DBOS (Recommended for simplicity)
+
+Lightweight, in-process. Just needs PostgreSQL or SQLite.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.ext.dbos import DBOSAgent
+from pydantic import BaseModel
+
+class ConsolidationResult(BaseModel):
+    facts: list[Fact]
+    confidence_scores: dict[str, float]
+
+consolidation_agent = Agent(
+    "openai:gpt-4",
+    result_type=ConsolidationResult,
+)
+
+# Wrap for durability - survives crashes, resumes from checkpoint
+durable_agent = DBOSAgent(consolidation_agent)
+
+async def consolidate(episodes: list[Episode]):
+    result = await durable_agent.run(
+        f"Extract facts from: {format_episodes(episodes)}"
+    )
+    await store_facts(result.data.facts)
+```
+
+**Pros**: No extra infrastructure, automatic checkpointing, in-process
+**Cons**: Single-node only
+
+### Option 2: Temporal (Enterprise)
+
+Full workflow orchestration. Requires Temporal server.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.ext.temporal import TemporalAgent
+
+consolidation_agent = Agent(
+    "openai:gpt-4",
+    result_type=ConsolidationResult,
+)
+
+durable_agent = TemporalAgent(consolidation_agent)
+
+# Same API - Temporal handles durability transparently
+async def consolidate(episodes: list[Episode]):
+    result = await durable_agent.run(
+        f"Extract facts from: {format_episodes(episodes)}"
+    )
+    await store_facts(result.data.facts)
+```
+
+**Pros**: Enterprise-grade, distributed, full visibility
+**Cons**: Requires Temporal server/cloud
+
+### Option 3: Prefect (Orchestration + UI)
+
+Full orchestration with dashboard. Cloud or self-hosted.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.ext.prefect import PrefectAgent
+
+consolidation_agent = Agent(
+    "openai:gpt-4",
+    result_type=ConsolidationResult,
+)
+
+durable_agent = PrefectAgent(consolidation_agent)
+
+async def consolidate(episodes: list[Episode]):
+    result = await durable_agent.run(
+        f"Extract facts from: {format_episodes(episodes)}"
+    )
+    await store_facts(result.data.facts)
+```
+
+**Pros**: Great UI, cloud platform, scheduling built-in
+**Cons**: More setup than DBOS
+
+### Comparison
+
+| Feature | DBOS | Temporal | Prefect |
+|---------|------|----------|---------|
+| Infrastructure | PostgreSQL/SQLite | Temporal server | Prefect server/cloud |
+| Complexity | Low | Medium | Medium |
+| Distributed | No | Yes | Yes |
+| UI/Dashboard | No | Yes | Yes |
+| Best for | MVP, simple deployments | Enterprise, complex workflows | Teams wanting visibility |
 
 ## Design Principles
 
 ### 1. Ground Truth Preservation
 
-Raw interactions are stored as immutable episodic memories. All derived knowledge (facts, inferences, preferences) maintains a reference back to source episodes. If extraction or consolidation introduces errors, the original data is always available for re-derivation.
+Raw interactions stored as immutable episodic memories. All derived knowledge traces back to source. Errors are correctable.
 
-### 2. Separation of Certainty
+### 2. Confidence Tracking
 
-Not all memories are equal. Engram distinguishes between:
+Every memory carries provenance:
 
-- **Verbatim**: Direct quotes, explicit statements
-- **Extracted**: Pattern-matched facts with high confidence
-- **Inferred**: LLM-synthesized knowledge with inherent uncertainty
-- **Consolidated**: Patterns derived from multiple episodes
-
-Each memory carries its source type and confidence score. Retrieval can filter by certainty threshold.
+| Source Type | Confidence | Method |
+|-------------|------------|--------|
+| `verbatim` | 100% | Direct quote |
+| `extracted` | High | Pattern matching (deterministic) |
+| `inferred` | Variable | LLM-derived |
 
 ### 3. Deferred Processing
 
-Expensive LLM operations are batched and deferred, not triggered per-message:
+Expensive LLM work is batched and deferred:
 
 | Operation | When | Cost |
 |-----------|------|------|
 | Episode storage | Immediate | Low (embed + store) |
 | Factual extraction | Immediate | Low (pattern matching) |
-| Semantic inference | Background | Medium (LLM) |
+| Semantic inference | Background | Medium (LLM, durable) |
 | Consolidation | Scheduled | Medium (LLM, batched) |
 | Decay | Scheduled | Low (math) |
 
-This avoids the token explosion and latency problems of per-message LLM processing.
-
-### 4. Explicit Memory Types
-
-Different memory types have different characteristics and require different handling:
-
-| Type | Mutability | Decay Rate | Confidence | Index Strategy |
-|------|------------|------------|------------|----------------|
-| Episodic | Immutable | Fast | High (verbatim) | Time + relevance |
-| Factual | Immutable | Slow | High (extracted) | Pure relevance |
-| Semantic | Mutable | Slow | Variable | Pure relevance |
-| Procedural | Mutable | Very slow | Variable | Context-filtered |
-
 ## Memory Types
 
-### Episodic Memory
-
-Raw interactions exactly as they occurred.
-
-```python
-EpisodicMemory(
-    content="User: What's the best way to handle async in Python?",
-    timestamp=datetime(2024, 1, 15, 14, 30),
-    session_id="sess_abc123",
-    source="verbatim",
-    confidence=1.0
-)
-```
-
-Properties:
-- Never modified after creation
-- Source of truth for all derived memories
-- Decays relatively quickly unless accessed
-- Indexed by time and semantic similarity
-
-### Factual Memory
-
-Explicit facts extracted through deterministic pattern matching.
-
-```python
-FactualMemory(
-    content="email: john@example.com",
-    category="contact",
-    source_episode_id="ep_xyz789",
-    extraction_method="pattern",  # not LLM
-    confidence=0.95
-)
-```
-
-Properties:
-- Extracted via regex, NER, or structured parsing
-- No LLM interpretation — deterministic
-- High confidence, low risk of corruption
-- Slow decay, high retrieval priority
-
-Examples of factual extraction:
-- "My name is [X]" → `name: X`
-- "I work at [X]" → `employer: X`
-- "My email is [X]" → `email: X`
-- "I'm using Python [X]" → `tool: Python, version: X`
-
-### Semantic Memory
-
-Inferred knowledge synthesized from episodes.
-
-```python
-SemanticMemory(
-    content="User is experienced with async Python patterns",
-    source_episode_ids=["ep_001", "ep_042", "ep_089"],
-    source="inferred",
-    confidence=0.7,
-    last_consolidated=datetime(2024, 1, 20)
-)
-```
-
-Properties:
-- Derived through LLM inference
-- Tagged as uncertain — confidence < 1.0
-- Can be rebuilt from source episodes if corrupted
-- Updated through consolidation
-
-### Procedural Memory
-
-Learned behavioral patterns and preferences.
-
-```python
-ProceduralMemory(
-    content="User prefers concise code examples over lengthy explanations",
-    trigger_context="code_assistance",
-    source_episode_ids=["ep_012", "ep_034", "ep_056"],
-    confidence=0.8
-)
-```
-
-Properties:
-- Activated by context matching, not direct query
-- Inferred from patterns across episodes
-- Influences response style, not content
-- Very slow decay
-
-### Working Memory
-
-Current conversation context. Volatile, not persisted.
-
-```python
-WorkingMemory(
-    items=["current_task: debug auth flow", "file: src/auth.py", "error: token expired"],
-    capacity=7,  # Miller's Law
-    attention_weights=[0.9, 0.7, 0.95]
-)
-```
-
-Properties:
-- Limited capacity (~7 items)
-- Determines what gets encoded to long-term storage
-- Cleared between sessions
-- High-attention items more likely to be encoded
-
-### Scratchpad (Agent State)
-
-Lossless execution context for agent workflows.
-
-```python
-Scratchpad(
-    task_id="task_abc",
-    state={
-        "current_file": "/src/auth.py",
-        "line_number": 142,
-        "pending_actions": ["run_tests", "commit"],
-        "variables": {"token": "eyJ..."}
-    },
-    checkpoints=[...]
-)
-```
-
-Properties:
-- Exact, lossless storage — no summarization
-- Temporal ordering preserved
-- Supports checkpoint/restore
-- Separate from cognitive memory types
+| Type | Mutability | Decay | Confidence | Storage |
+|------|------------|-------|------------|---------|
+| **Episodic** | Immutable | Fast | High (verbatim) | Qdrant |
+| **Factual** | Immutable | Slow | High (extracted) | Qdrant |
+| **Semantic** | Mutable | Slow | Variable | Qdrant |
+| **Procedural** | Mutable | Very slow | Variable | Qdrant |
+| **Working** | Volatile | N/A | N/A | In-memory |
+| **Scratchpad** | Mutable | N/A | N/A | Qdrant |
 
 ## Data Flow
 
@@ -178,37 +165,37 @@ Properties:
 Interaction
     │
     ▼
-┌─────────────────────────────────────────────────────┐
-│                    ENCODE                            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
-│  │  Embed +    │  │   Pattern   │  │  Importance │ │
-│  │   Store     │  │   Extract   │  │   Scoring   │ │
-│  │  Episode    │  │   Facts     │  │             │ │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘ │
-└─────────┼────────────────┼────────────────┼─────────┘
-          │                │                │
-          ▼                ▼                ▼
-     [Episodic]       [Factual]      [importance]
-          │                              score
-          │                                │
-          └──────────────┬─────────────────┘
-                         │
-          ┌──────────────┴──────────────┐
-          │      BACKGROUND JOBS         │
-          │  ┌──────────┐ ┌──────────┐  │
-          │  │Consolidate│ │  Decay   │  │
-          │  │(scheduled)│ │(scheduled)│  │
-          │  └─────┬─────┘ └─────┬────┘  │
-          └────────┼─────────────┼───────┘
-                   │             │
-                   ▼             ▼
-              [Semantic]    [updated
-              [Procedural]   scores]
+┌─────────────────────────────────────────────────────────────┐
+│                         ENCODE                               │
+│   ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│   │ Store       │  │ Pattern     │  │ Score               │ │
+│   │ Episode     │  │ Extract     │  │ Importance          │ │
+│   │ (verbatim)  │  │ Facts       │  │                     │ │
+│   └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘ │
+└──────────┼────────────────┼────────────────────┼────────────┘
+           │                │                    │
+           ▼                ▼                    ▼
+      [Episodic]       [Factual]           [importance]
+           │                                    │
+           └──────────────┬─────────────────────┘
+                          │
+           ┌──────────────┴──────────────┐
+           │  BACKGROUND (Durable)        │
+           │  ┌──────────┐ ┌──────────┐  │
+           │  │Consolidate│ │  Decay   │  │
+           │  │(Pydantic  │ │          │  │
+           │  │ AI Agent) │ │          │  │
+           │  └─────┬─────┘ └─────┬────┘  │
+           └────────┼─────────────┼───────┘
+                    │             │
+                    ▼             ▼
+               [Semantic]    [updated
+               [Procedural]   scores]
 ```
 
-## Storage Architecture
+## Storage: Qdrant
 
-All memory types are stored in Qdrant with type-specific collections and indexing strategies.
+All memory types stored in Qdrant with type-specific collections:
 
 ```
 qdrant/
@@ -220,77 +207,106 @@ qdrant/
 │   └── payload (content, category, source_episode_id, confidence)
 ├── semantic/
 │   ├── vectors (embeddings)
-│   └── payload (content, source_episode_ids, confidence, last_consolidated)
+│   └── payload (content, source_episode_ids, confidence)
 └── procedural/
     ├── vectors (embeddings)
     └── payload (content, trigger_context, confidence)
 ```
 
-### Indexing Strategies
+### Indexing
 
-**Episodic**: HNSW with time-decay weighting. Recent memories score higher.
+- **Episodic**: HNSW with time-decay weighting
+- **Factual/Semantic**: Standard HNSW
+- **Procedural**: HNSW with context filtering
 
-**Factual**: Standard HNSW. Pure semantic relevance.
-
-**Semantic**: Standard HNSW. Pure semantic relevance.
-
-**Procedural**: HNSW with context filtering. Only retrieve when trigger context matches.
-
-## Retrieval
+## API
 
 ```python
+from engram import MemoryStore
+
+memory = MemoryStore(
+    qdrant_url="...",
+    user_id="user_123",
+    durable_backend="dbos"  # or "temporal" or "prefect"
+)
+
+# Store (immediate, preserves ground truth)
+await memory.encode(interaction, extract_facts=True)
+
+# Retrieve (with confidence filtering)
 memories = await memory.recall(
     query="What databases does the user work with?",
-    memory_types=["factual", "semantic"],  # skip episodic noise
-    min_confidence=0.7,                     # only high-confidence
-    limit=10
+    memory_types=["factual", "semantic"],
+    min_confidence=0.7,
+    include_sources=True
 )
-```
 
-Retrieval parameters:
-- `memory_types`: Which stores to search
-- `min_confidence`: Filter by certainty
-- `recency_weight`: Balance relevance vs recency (for episodic)
-- `include_sources`: Return source episode IDs for verification
+# Verify a fact against its source
+verified = await memory.verify(fact_id)
+
+# Background operations (run as durable workflows)
+await memory.consolidate()
+await memory.decay()
+```
 
 ## Background Operations
 
 ### Consolidation
 
-Runs on schedule (e.g., hourly, daily). Analyzes accumulated episodes to extract semantic patterns.
+Runs on schedule. Extracts semantic patterns from episodes using Pydantic AI:
 
 ```python
-# Pseudocode
-episodes = fetch_unconsolidated_episodes(since=last_consolidation)
-clusters = cluster_by_topic(episodes)
-for cluster in clusters:
-    if len(cluster) >= consolidation_threshold:
-        semantic_fact = llm_extract_pattern(cluster)
-        store_semantic(semantic_fact, source_episodes=cluster)
-        mark_consolidated(cluster)
+from pydantic import BaseModel
+from pydantic_ai import Agent
+
+class ExtractedFacts(BaseModel):
+    facts: list[str]
+    confidence: float
+    reasoning: str
+
+consolidation_agent = Agent(
+    "openai:gpt-4",
+    result_type=ExtractedFacts,
+    system_prompt="""
+    Extract semantic facts from these conversation episodes.
+    Only extract facts with high confidence.
+    Explain your reasoning.
+    """
+)
+
+async def consolidate():
+    episodes = await get_unconsolidated_episodes()
+    result = await consolidation_agent.run(format_episodes(episodes))
+
+    for fact in result.data.facts:
+        await store_semantic(
+            content=fact,
+            source_episode_ids=[e.id for e in episodes],
+            confidence=result.data.confidence
+        )
 ```
 
 ### Decay
 
-Runs on schedule. Updates importance scores based on time and access patterns.
+Updates importance scores based on time and access:
 
 ```python
-# Pseudocode
-for memory in all_memories:
-    time_factor = exp(-time_since_creation / decay_constant)
-    access_factor = 1.0 + (0.1 * access_count)  # retrieval strengthens
-    importance_factor = memory.importance  # high-importance decays slower
+async def decay():
+    for memory in await get_all_memories():
+        time_factor = exp(-time_since_access / decay_constant)
+        access_factor = 1.0 + (0.1 * access_count)
+        importance_factor = memory.importance
 
-    new_score = base_score * time_factor * access_factor * importance_factor
+        new_score = base_score * time_factor * access_factor * importance_factor
 
-    if new_score < deletion_threshold:
-        delete(memory)
-    else:
-        update_score(memory, new_score)
+        if new_score < deletion_threshold:
+            await archive(memory)
+        else:
+            await update_score(memory, new_score)
 ```
 
-Decay constants vary by memory type:
-- Episodic: Fast decay (days)
-- Factual: Slow decay (months)
-- Semantic: Slow decay (months)
-- Procedural: Very slow decay (years)
+Decay constants by type:
+- Episodic: Fast (days)
+- Factual: Slow (months)
+- Semantic: Slow (months)
+- Procedural: Very slow (years)
