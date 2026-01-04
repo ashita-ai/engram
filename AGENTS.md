@@ -76,16 +76,16 @@ uv run pre-commit run --all-files
 
 ## Key Concepts
 
-### Memory Types
+### Memory Types (6 Total)
 
 | Type | Purpose | Confidence |
 |------|---------|------------|
+| Working | Current session context (in-memory, not persisted) | N/A |
 | Episode | Immutable ground truth (raw interactions) | N/A (verbatim) |
 | Fact | Pattern-extracted facts (emails, phones, dates) | 0.9 (extracted) |
 | SemanticMemory | LLM-inferred knowledge | 0.6 (inferred) |
 | ProceduralMemory | Behavioral patterns | 0.6 (inferred) |
 | InhibitoryFact | What is NOT true (negations) | 0.7 (inferred) |
-| Working | Current session context (in-memory) | N/A |
 
 ### Confidence Scoring
 
