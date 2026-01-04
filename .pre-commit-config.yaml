@@ -1,0 +1,42 @@
+# Pre-commit hooks for Engram
+# Install: uv run pre-commit install
+# Run all: uv run pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Use local mypy hook to match CI exactly (runs on full src/engram/ directory)
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy src/engram/
+        language: system
+        types: [python]
+        files: ^src/engram/
+        pass_filenames: false
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # Check for secrets
+  - repo: local
+    hooks:
+      - id: no-secrets
+        name: Check for secrets
+        entry: bash -c 'grep -rE "sk-[a-zA-Z0-9]{20,}|sk-ant-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9]{35}" src/ tests/ && echo "SECRETS FOUND - commit blocked" && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
