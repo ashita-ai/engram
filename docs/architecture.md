@@ -214,25 +214,14 @@ Interaction
 
 ## Storage: Qdrant
 
-All memory types stored in Qdrant with type-specific collections:
+All persistent memory types stored in Qdrant with type-specific collections (Working memory is in-memory only):
 
 ```
-qdrant/
-├── episodic/
-│   ├── vectors (embeddings)
-│   └── payload (content, timestamp, session_id, importance)
-├── factual/
-│   ├── vectors (embeddings)
-│   └── payload (content, category, source_episode_id, event_at, derived_at, confidence)
-├── semantic/
-│   ├── vectors (embeddings)
-│   └── payload (content, source_episode_ids, related_ids, confidence, selectivity_score)
-├── procedural/
-│   ├── vectors (embeddings)
-│   └── payload (content, trigger_context, access_count, confidence)
-└── inhibitory/
-    ├── vectors (embeddings)
-    └── payload (content, negates_pattern, source_episode_ids, confidence)
+engram_episodic     → vectors + payload (content, timestamp, session_id, importance)
+engram_factual      → vectors + payload (content, category, source_episode_id, event_at, derived_at, confidence)
+engram_semantic     → vectors + payload (content, source_episode_ids, related_ids, confidence, selectivity_score)
+engram_procedural   → vectors + payload (content, trigger_context, access_count, confidence)
+engram_inhibitory   → vectors + payload (content, negates_pattern, source_episode_ids, confidence)
 ```
 
 ### Indexing

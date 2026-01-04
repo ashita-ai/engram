@@ -111,7 +111,7 @@ flowchart LR
 | **Episodic** | Highest | Verbatim storage | Ground truth, audit trail |
 | **Factual** | High | Pattern extraction | Emails, dates, names |
 | **Semantic** | Variable | LLM inference | Preferences, context |
-| **Procedural** | High | Pattern detection | Behavioral preferences |
+| **Procedural** | Variable | LLM inference | Behavioral preferences |
 | **Inhibitory** | Variable | Negation detection | What is NOT true |
 
 ## Preventing Hallucinations

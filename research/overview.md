@@ -127,9 +127,11 @@ Recent neuroscience shows multiple consolidation pathways:
 
 ---
 
-### 6. Deep Semantic Processing
+### 6. Two-Phase Semantic Processing
 
-**Design**: The `encode()` operation extracts meaning (facts, relationships, preferences), not just stores text.
+**Design**: Engram separates encoding into two phases:
+1. `encode()` — Stores verbatim + extracts deterministic facts (immediate, no LLM)
+2. `consolidate()` — Extracts relationships, preferences, patterns (background, LLM)
 
 **Research basis**:
 
@@ -141,7 +143,7 @@ The levels of processing framework shows deeper encoding produces stronger memor
 > "Elaboration—connecting new information to existing knowledge—enhances depth and produces more retrieval cues."
 > — [Craik & Tulving, 1975](https://www.simplypsychology.org/levelsofprocessing.html)
 
-**Engineering implication**: Raw storage is shallow. Extracting meaning creates richer indices and better retrieval.
+**Engineering implication**: Deep processing improves retrieval, but LLM extraction is slow and error-prone. Engram defers LLM work to background consolidation where errors can be caught and corrected.
 
 ---
 
