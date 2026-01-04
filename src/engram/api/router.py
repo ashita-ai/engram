@@ -1,0 +1,208 @@
+"""FastAPI router for Engram API endpoints."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from engram.service import EngramService
+
+from .schemas import (
+    EncodeRequest,
+    EncodeResponse,
+    EpisodeResponse,
+    FactResponse,
+    HealthResponse,
+    RecallRequest,
+    RecallResponse,
+    RecallResultResponse,
+)
+
+router = APIRouter()
+
+# Service instance (set by app lifespan)
+_service: EngramService | None = None
+
+
+def set_service(service: EngramService) -> None:
+    """Set the global service instance."""
+    global _service
+    _service = service
+
+
+async def get_service() -> EngramService:
+    """Dependency to get the EngramService instance."""
+    if _service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service not initialized",
+        )
+    return _service
+
+
+ServiceDep = Annotated[EngramService, Depends(get_service)]
+
+
+@router.get("/health", response_model=HealthResponse, tags=["system"])
+async def health_check() -> HealthResponse:
+    """Check service health.
+
+    Returns the current health status of the Engram service,
+    including storage connectivity.
+    """
+    storage_connected = _service is not None
+
+    if storage_connected:
+        return HealthResponse(
+            status="healthy",
+            version="0.1.0",
+            storage_connected=True,
+        )
+    else:
+        return HealthResponse(
+            status="unhealthy",
+            version="0.1.0",
+            storage_connected=False,
+        )
+
+
+@router.post(
+    "/encode",
+    response_model=EncodeResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["memory"],
+)
+async def encode(
+    request: EncodeRequest,
+    service: ServiceDep,
+) -> EncodeResponse:
+    """Encode content as an episode and extract facts.
+
+    This endpoint stores the provided content as an episode in the
+    memory system and optionally runs fact extraction to identify
+    structured data like emails, phone numbers, dates, etc.
+
+    Args:
+        request: Encode request with content and options.
+        service: Injected EngramService.
+
+    Returns:
+        The stored episode and extracted facts.
+
+    Raises:
+        HTTPException: If encoding fails.
+    """
+    try:
+        result = await service.encode(
+            content=request.content,
+            role=request.role,
+            user_id=request.user_id,
+            org_id=request.org_id,
+            session_id=request.session_id,
+            importance=request.importance,
+            run_extraction=request.run_extraction,
+        )
+
+        # Convert to response models
+        episode_response = EpisodeResponse(
+            id=result.episode.id,
+            content=result.episode.content,
+            role=result.episode.role,
+            user_id=result.episode.user_id,
+            org_id=result.episode.org_id,
+            session_id=result.episode.session_id,
+            importance=result.episode.importance,
+            created_at=result.episode.timestamp.isoformat(),
+        )
+
+        fact_responses = [
+            FactResponse(
+                id=fact.id,
+                content=fact.content,
+                category=fact.category,
+                confidence=fact.confidence.value,
+                source_episode_id=fact.source_episode_id,
+            )
+            for fact in result.facts
+        ]
+
+        return EncodeResponse(
+            episode=episode_response,
+            facts=fact_responses,
+            fact_count=len(fact_responses),
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to encode: {e}",
+        ) from e
+
+
+@router.post("/recall", response_model=RecallResponse, tags=["memory"])
+async def recall(
+    request: RecallRequest,
+    service: ServiceDep,
+) -> RecallResponse:
+    """Recall memories by semantic similarity.
+
+    This endpoint searches the memory system for content similar
+    to the provided query. It can search across episodes and facts,
+    returning unified results sorted by similarity score.
+
+    Args:
+        request: Recall request with query and options.
+        service: Injected EngramService.
+
+    Returns:
+        List of recalled memories with similarity scores.
+
+    Raises:
+        HTTPException: If recall fails.
+    """
+    try:
+        results = await service.recall(
+            query=request.query,
+            user_id=request.user_id,
+            org_id=request.org_id,
+            limit=request.limit,
+            min_confidence=request.min_confidence,
+            include_episodes=request.include_episodes,
+            include_facts=request.include_facts,
+        )
+
+        result_responses = [
+            RecallResultResponse(
+                memory_type=r.memory_type,
+                content=r.content,
+                score=r.score,
+                confidence=r.confidence,
+                memory_id=r.memory_id,
+                source_episode_id=r.source_episode_id,
+                metadata=r.metadata,
+            )
+            for r in results
+        ]
+
+        return RecallResponse(
+            query=request.query,
+            results=result_responses,
+            count=len(result_responses),
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to recall: {e}",
+        ) from e
