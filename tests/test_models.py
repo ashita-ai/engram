@@ -12,7 +12,6 @@ from engram.models import (
     ExtractionMethod,
     Fact,
     InhibitoryFact,
-    MemoryBase,
     ProceduralMemory,
     SemanticMemory,
     generate_id,
@@ -357,9 +356,7 @@ class TestEpisode:
         """org_id should be optional."""
         ep = Episode(content="Test", role="user", user_id="user_123")
         assert ep.org_id is None
-        ep_with_org = Episode(
-            content="Test", role="user", user_id="user_123", org_id="org_456"
-        )
+        ep_with_org = Episode(content="Test", role="user", user_id="user_123", org_id="org_456")
         assert ep_with_org.org_id == "org_456"
 
     def test_optional_session_id(self):
