@@ -1,37 +1,59 @@
 # Engram
 
-A memory system for AI applications, inspired by cognitive science.
+**Memory you can trust.**
+
+A memory system for AI applications that preserves ground truth, tracks confidence, and prevents hallucinations.
 
 ## The Problem
 
-AI applications need to remember things across conversations. Common approaches have tradeoffs:
+AI memory systems have an accuracy crisis. Recent benchmarks show:
 
-| Approach | Tradeoff |
-|----------|----------|
-| **Stuff it in the prompt** | Hits token limits. Gets expensive and slow. |
-| **Summarize old conversations** | Loses important details. Can't recall specifics. |
-| **Store everything in a vector database** | Never forgets anything. Retrieves irrelevant noise over time. |
-| **LLM extraction on every message** | Compounds extraction errors. Loses source data. |
+> "All systems achieve answer accuracies below 56%, with hallucination rate and omission rate remaining high... Systems suffer omission rates above 50%."
+>
+> — [HaluMem: Hallucinations in LLM Memory Systems](https://arxiv.org/html/2511.03506)
 
-The fundamental issue: these approaches don't distinguish between types of information or track where knowledge came from.
+Why? Most systems use LLM extraction on every message. This compounds errors:
 
-## Approach
+| Approach | What Goes Wrong |
+|----------|----------------|
+| **Summarize conversations** | Loses details. Can't recall specifics. |
+| **LLM extraction on write** | Extraction errors become permanent. Hallucinations propagate. |
+| **Store in vector DB only** | No structure. Retrieves irrelevant noise. |
 
-Engram uses a few key ideas:
+The fundamental issue: once source data is lost, errors cannot be corrected.
 
-1. **Multiple memory types** — Different information needs different handling. A user's email address is not the same as an inferred preference.
+## The Solution
 
-2. **Preserve ground truth** — Raw conversations are stored verbatim. Everything else is derived and can be rebuilt if needed.
+Engram preserves ground truth and tracks confidence:
 
-3. **Track confidence** — Know what's certain (direct quotes) vs. uncertain (inferences).
+1. **Store first, derive later** — Raw conversations stored verbatim. LLM extraction happens in background where errors can be caught.
 
-4. **Forget intelligently** — Old, unimportant memories fade. Important memories persist.
+2. **Track confidence** — Every fact carries provenance: `verbatim` (100%), `extracted` (high), `inferred` (variable).
 
-5. **Defer expensive work** — Don't run LLM extraction on every message. Batch it. Keep the fast path fast.
+3. **Verify on retrieval** — Applications filter by confidence. High-stakes queries use only trusted facts.
+
+4. **Enable recovery** — Derived facts trace to sources. Errors can be corrected by re-deriving.
+
+## How Trust Works
+
+```
+User: "My email is john@example.com"
+    ↓
+Episodic Memory (immutable, verbatim)
+    ↓
+Factual Memory: email=john@example.com
+├── Source: Episode #1234
+├── Extraction: pattern match (deterministic)
+└── Confidence: 1.0
+
+Later query: "What's the user's email?"
+    ↓
+Retrieval with min_confidence=0.9
+    ↓
+Returns: john@example.com (verified against source)
+```
 
 ## Memory Types
-
-Engram maintains six types of memory:
 
 ```mermaid
 graph TB
@@ -71,50 +93,59 @@ graph TB
     class QD storage
 ```
 
-| Type | What It Stores | Example | How It's Created |
-|------|---------------|---------|------------------|
-| **Working** | Current conversation context | Active task, recent messages | Automatic |
-| **Episodic** | Raw conversations, verbatim | "User asked about Python async on Tuesday" | Stored immediately |
-| **Factual** | Explicit facts, high confidence | `email: john@example.com` | Pattern extraction (no LLM) |
-| **Semantic** | Inferred knowledge, uncertain | "User is experienced with databases" | LLM consolidation (background) |
-| **Procedural** | Learned behaviors | "User prefers concise responses" | Pattern detection over time |
-| **Scratchpad** | Agent execution state | File paths, variables, task progress | Explicit storage |
+| Type | Confidence | Source | Use Case |
+|------|------------|--------|----------|
+| **Episodic** | 100% | Verbatim storage | Ground truth, audit trail |
+| **Factual** | High | Pattern extraction | Emails, dates, names |
+| **Semantic** | Variable | LLM inference | Preferences, context |
+| **Procedural** | High | Pattern detection | Behavioral preferences |
 
-## Key Design Decisions
+## Preventing Hallucinations
 
-### Ground Truth is Sacred
+### 1. Deterministic Extraction First
 
-Every derived memory points back to source episodes. If extraction makes a mistake, you can re-derive from the original. Nothing is lost.
+Pattern matching before LLMs — no hallucination possible:
 
-### Confidence is Explicit
+```python
+# High confidence, reproducible
+EMAIL_PATTERN = r'\b[\w.-]+@[\w.-]+\.\w+\b'
+facts = extract_patterns(message, [EMAIL_PATTERN])
+```
 
-Every memory carries a confidence score and source type:
-- `verbatim` — Direct quote, 100% confidence
-- `extracted` — Pattern-matched fact, high confidence
-- `inferred` — LLM-derived, variable confidence
+### 2. Defer LLM Work
 
-Retrieval can filter by confidence: "Give me only facts I can trust."
+Batch in background where errors can be caught:
 
-### Forgetting is a Feature
+```python
+# Critical path: store ground truth only
+await memory.encode(interaction)  # Fast, no LLM
 
-Memories decay over time following the [Ebbinghaus forgetting curve](research/ebbinghaus-forgetting-curve.md):
-- Unimportant memories fade quickly
-- Accessed memories get reinforced
-- High-importance memories persist indefinitely
+# Background: derive with oversight
+await memory.consolidate()  # LLM extraction, batched
+```
 
-This keeps the memory store relevant and fast.
+### 3. Confidence-Gated Retrieval
 
-### Fast Path Stays Fast
+Applications choose their trust level:
 
-Expensive LLM work happens in the background:
+```python
+# High-stakes: only verified facts
+trusted = await memory.recall(query, min_confidence=0.9)
 
-| Operation | When | Cost |
-|-----------|------|------|
-| Store episode | Every message | Low (embed + store) |
-| Extract facts | Every message | Low (regex, no LLM) |
-| Infer semantics | Background job | Medium (LLM, batched) |
-| Consolidate | Scheduled | Medium (LLM, batched) |
-| Decay | Scheduled | Low (math only) |
+# Exploratory: include inferences
+all_relevant = await memory.recall(query, min_confidence=0.5)
+```
+
+### 4. Source Verification
+
+Trace any fact back to its source:
+
+```python
+# Debug: why does the system believe this?
+fact = await memory.get_fact("user_email")
+episodes = await memory.get_sources(fact.source_ids)
+# → Shows original conversation where email was mentioned
+```
 
 ## Usage
 
@@ -123,44 +154,55 @@ from engram import MemoryStore
 
 memory = MemoryStore(qdrant_url="...", user_id="user_123")
 
-# Store an interaction (immediate, cheap)
+# Store interaction (immediate, preserves ground truth)
 await memory.encode(interaction, extract_facts=True)
 
-# Retrieve relevant memories
+# Retrieve with confidence filtering
 memories = await memory.recall(
     query="What databases does the user work with?",
     memory_types=["factual", "semantic"],
     min_confidence=0.7
 )
 
-# Background: consolidate episodes into semantic knowledge
-await memory.consolidate()
+# Verify a specific fact
+verified = await memory.verify(fact_id)
 
-# Background: apply forgetting curves
+# Background: consolidate and decay
+await memory.consolidate()
 await memory.decay()
 ```
 
-## Research Foundations
+## Design Principles
 
-Engram is inspired by cognitive science research. We use these theories as design inspiration, not strict implementation targets. See [research/overview.md](research/overview.md) for:
+### Ground Truth is Sacred
 
-- Theoretical foundations (Atkinson-Shiffrin, Tulving, Ebbinghaus, etc.)
-- How Engram maps to cognitive science
-- Known limitations of these models
-- Why we use them anyway
+Every derived memory points back to source episodes. If extraction makes a mistake, re-derive from the original.
 
-| Principle | Research | Application |
-|-----------|----------|-------------|
-| Separate memory systems | Atkinson-Shiffrin (1968) | Different memory types |
-| Episodic vs semantic | Tulving (1972) | Events consolidate into facts |
-| Forgetting curves | Ebbinghaus (1885) | Exponential decay based on importance |
-| Deep processing | Craik & Lockhart (1972) | Extract meaning, not just store text |
-| Retrieval strengthens | Spaced repetition research | Accessed memories persist longer |
+### Confidence is Explicit
+
+| Source Type | Confidence | Method |
+|-------------|------------|--------|
+| `verbatim` | 100% | Direct quote |
+| `extracted` | High | Pattern-matched, deterministic |
+| `inferred` | Variable | LLM-derived |
+
+### Forgetting is a Feature
+
+Memories decay over time. Unimportant memories fade; important ones persist. This keeps the store relevant.
+
+### Fast Path Stays Fast
+
+| Operation | When | Cost |
+|-----------|------|------|
+| Store episode | Every message | Low (embed + store) |
+| Extract facts | Every message | Low (regex, no LLM) |
+| Infer semantics | Background | Medium (LLM, batched) |
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — Memory types, data flow, storage design
-- [Related Work](docs/related-work.md) — LLM memory systems, cognitive science updates
+- [Accuracy & Hallucination Prevention](research/accuracy.md) — Why ground truth matters
+- [Architecture](docs/architecture.md) — Memory types, data flow, storage
+- [Research Foundations](research/overview.md) — Theoretical basis
 
 ## Status
 

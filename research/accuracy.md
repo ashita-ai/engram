@@ -119,6 +119,129 @@ LLM extraction:
 - May hallucinate
 - Should be deferred and batched
 
+## Detecting Hallucinations
+
+Engram enables hallucination detection through source verification:
+
+### Verification Strategies
+
+| Strategy | How It Works | When to Use |
+|----------|--------------|-------------|
+| **Source check** | Trace derived fact to episode, verify content | High-stakes facts |
+| **Confidence threshold** | Only use facts above confidence threshold | All retrieval |
+| **Multi-source** | Require multiple episodes supporting a fact | Important decisions |
+| **Recency check** | Weight recent episodes higher | Time-sensitive facts |
+
+### Implementation
+
+```python
+async def verify_fact(fact):
+    """Verify a derived fact against its source episodes."""
+    # Get source episodes
+    episodes = await get_episodes(fact.source_ids)
+
+    # Re-extract from source
+    re_extracted = await extract_fact(episodes, fact.key)
+
+    # Compare
+    if re_extracted != fact.value:
+        return VerificationResult(
+            status="mismatch",
+            original=fact.value,
+            re_extracted=re_extracted,
+            confidence=0.0
+        )
+
+    return VerificationResult(
+        status="verified",
+        value=fact.value,
+        confidence=fact.confidence
+    )
+```
+
+### Consistency Checks
+
+Detect contradictions in the memory store:
+
+```python
+async def check_consistency(memory_store, user_id):
+    """Find contradicting facts in the memory store."""
+    facts = await get_all_facts(user_id)
+
+    contradictions = []
+    for fact_a, fact_b in combinations(facts, 2):
+        if fact_a.key == fact_b.key and fact_a.value != fact_b.value:
+            contradictions.append((fact_a, fact_b))
+
+    return contradictions
+```
+
+## Preventing Hallucinations
+
+Prevention is better than detection:
+
+### 1. Deterministic Extraction First
+
+Use pattern matching before LLMs:
+
+```python
+# High confidence - no hallucination possible
+EMAIL_PATTERN = r'\b[\w.-]+@[\w.-]+\.\w+\b'
+PHONE_PATTERN = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'
+
+def extract_deterministic(text):
+    facts = []
+    for email in re.findall(EMAIL_PATTERN, text):
+        facts.append(Fact(key="email", value=email, confidence=1.0))
+    return facts
+```
+
+### 2. Defer LLM Extraction
+
+Batch LLM work in background where errors can be caught:
+
+```python
+# Don't do this on critical path
+# fact = await llm_extract(message)  # Can hallucinate
+
+# Do this instead
+await store_episode(message)  # Ground truth preserved
+# Later, in background:
+await consolidate()  # LLM extraction with review
+```
+
+### 3. Multi-Episode Confirmation
+
+Require multiple sources before creating semantic facts:
+
+```python
+async def create_semantic_fact(pattern, episodes):
+    """Only create fact if supported by multiple episodes."""
+    supporting = [ep for ep in episodes if pattern in ep.content]
+
+    if len(supporting) < MIN_SUPPORTING_EPISODES:
+        return None  # Not enough evidence
+
+    return SemanticFact(
+        content=pattern,
+        confidence=len(supporting) / len(episodes),
+        sources=[ep.id for ep in supporting]
+    )
+```
+
+### 4. Confidence-Gated Retrieval
+
+Filter by confidence at retrieval time:
+
+```python
+# Application can choose trust level
+trusted_facts = await memory.recall(
+    query=query,
+    min_confidence=0.9,  # Only high-confidence facts
+    source_types=["verbatim", "extracted"]  # No inferred
+)
+```
+
 ## Data Provenance
 
 Ground truth preservation provides complete provenance:
