@@ -70,9 +70,7 @@ class SearchMixin:
         )
 
         return [
-            self._payload_to_memory(r.payload, Episode)
-            for r in results
-            if r.payload is not None
+            self._payload_to_memory(r.payload, Episode) for r in results if r.payload is not None
         ]
 
     async def search_facts(
@@ -115,11 +113,7 @@ class SearchMixin:
             limit=limit,
         )
 
-        return [
-            self._payload_to_memory(r.payload, Fact)
-            for r in results
-            if r.payload is not None
-        ]
+        return [self._payload_to_memory(r.payload, Fact) for r in results if r.payload is not None]
 
     async def search_semantic(
         self,

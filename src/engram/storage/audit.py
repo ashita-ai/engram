@@ -118,9 +118,7 @@ class AuditMixin:
         )
 
         entries: list[AuditEntry] = [
-            self._payload_to_memory(r.payload, AuditEntry)
-            for r in results
-            if r.payload is not None
+            self._payload_to_memory(r.payload, AuditEntry) for r in results if r.payload is not None
         ]
 
         # Sort by timestamp descending

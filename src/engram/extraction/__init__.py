@@ -37,12 +37,14 @@ def default_pipeline() -> ExtractionPipeline:
     Returns:
         ExtractionPipeline configured with email, phone, URL, and date extractors.
     """
-    return ExtractionPipeline([
-        EmailExtractor(),
-        PhoneExtractor(),
-        URLExtractor(),
-        DateExtractor(),
-    ])
+    return ExtractionPipeline(
+        [
+            EmailExtractor(),
+            PhoneExtractor(),
+            URLExtractor(),
+            DateExtractor(),
+        ]
+    )
 
 
 __all__ = [
