@@ -141,3 +141,8 @@ ignore = [
 [tool.black]
 line-length = 100
 target-version = ["py311"]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+]
