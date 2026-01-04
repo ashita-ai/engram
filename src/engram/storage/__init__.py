@@ -13,7 +13,8 @@ Example:
     ```
 """
 
-from .client import COLLECTION_NAMES, DEFAULT_EMBEDDING_DIM, EngramStorage
+from .base import COLLECTION_NAMES, DEFAULT_EMBEDDING_DIM
+from .client import EngramStorage
 
 __all__ = [
     "EngramStorage",
