@@ -219,8 +219,10 @@ Memories decay over time. Unimportant memories fade; important ones persist. Thi
 
 ## Documentation
 
-- [Accuracy & Hallucination Prevention](research/accuracy.md) — Why ground truth matters
 - [Architecture](docs/architecture.md) — Memory types, data flow, storage
+- [API Design](docs/api-design.md) — SDK, REST API, integration patterns
+- [Design Notes](docs/design.md) — Stack decisions and rationale
+- [Accuracy & Hallucination Prevention](research/accuracy.md) — Why ground truth matters
 - [Research Foundations](research/overview.md) — Theoretical basis
 - [Competitive Analysis](research/competitive.md) — How Engram compares to alternatives
 
