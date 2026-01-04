@@ -1,11 +1,17 @@
 """Base models and shared types for Engram memory system."""
 
+from __future__ import annotations
+
 from datetime import UTC, datetime, timedelta
 from enum import Enum
 from math import log
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from engram.config import ConfidenceWeights
 
 
 class ExtractionMethod(str, Enum):
@@ -45,7 +51,8 @@ class ConfidenceScore(BaseModel):
         recency_weight: float = 0.15,
         verification_weight: float = 0.10,
         decay_half_life_days: int = 365,
-    ) -> "ConfidenceScore":
+        contradiction_penalty: float = 0.10,
+    ) -> ConfidenceScore:
         """Recompute confidence value from all factors.
 
         Uses weighted sum of:
@@ -62,6 +69,7 @@ class ConfidenceScore(BaseModel):
             recency_weight: Weight for recency (default 0.15)
             verification_weight: Weight for validation (default 0.10)
             decay_half_life_days: Days for recency to halve (default 365)
+            contradiction_penalty: Fraction to reduce per contradiction (default 0.10)
 
         Returns:
             Self with updated value field.
@@ -90,26 +98,48 @@ class ConfidenceScore(BaseModel):
             + verification_score * verification_weight
         )
 
-        # Contradiction penalty: reduce by 10% per contradiction, floor at 0.1
+        # Contradiction penalty: reduce by penalty% per contradiction, floor at 0.1
         if self.contradictions > 0:
-            penalty = 0.9**self.contradictions
-            raw_score = max(0.1, raw_score * penalty)
+            penalty_multiplier = (1.0 - contradiction_penalty) ** self.contradictions
+            raw_score = max(0.1, raw_score * penalty_multiplier)
 
         self.value = min(1.0, max(0.0, raw_score))
         return self
 
+    def recompute_with_weights(self, weights: ConfidenceWeights) -> ConfidenceScore:
+        """Recompute confidence using a ConfidenceWeights configuration.
+
+        Convenience method that unpacks weights from a ConfidenceWeights object.
+
+        Args:
+            weights: ConfidenceWeights configuration object.
+
+        Returns:
+            Self with updated value field.
+        """
+        return self.recompute(
+            extraction_weight=weights.extraction,
+            corroboration_weight=weights.corroboration,
+            recency_weight=weights.recency,
+            verification_weight=weights.verification,
+            decay_half_life_days=weights.decay_half_life_days,
+            contradiction_penalty=weights.contradiction_penalty,
+        )
+
     def explain(self) -> str:
         """Generate human-readable explanation of confidence score.
 
-        Example: "0.85: extracted, 3 sources, confirmed 2 days ago"
+        Example: "0.85: extracted, 3 sources, verified, confirmed 2 days ago"
         """
         time_ago = self._time_ago(self.last_confirmed)
         parts = [
             f"{self.value:.2f}:",
             self.extraction_method.value,
             f"{self.supporting_episodes} source{'s' if self.supporting_episodes != 1 else ''}",
-            f"confirmed {time_ago}",
         ]
+        if self.verified:
+            parts.append("verified")
+        parts.append(f"confirmed {time_ago}")
         if self.contradictions > 0:
             parts.append(
                 f"{self.contradictions} contradiction{'s' if self.contradictions != 1 else ''}"
@@ -141,7 +171,7 @@ class ConfidenceScore(BaseModel):
             return f"{years} year{'s' if years != 1 else ''} ago"
 
     @classmethod
-    def for_verbatim(cls) -> "ConfidenceScore":
+    def for_verbatim(cls) -> ConfidenceScore:
         """Create confidence score for verbatim (exact quote) extraction."""
         return cls(
             value=1.0,
@@ -150,7 +180,7 @@ class ConfidenceScore(BaseModel):
         )
 
     @classmethod
-    def for_extracted(cls, supporting_episodes: int = 1) -> "ConfidenceScore":
+    def for_extracted(cls, supporting_episodes: int = 1) -> ConfidenceScore:
         """Create confidence score for pattern-extracted content."""
         return cls(
             value=0.9,
@@ -160,9 +190,7 @@ class ConfidenceScore(BaseModel):
         )
 
     @classmethod
-    def for_inferred(
-        cls, confidence: float = 0.6, supporting_episodes: int = 1
-    ) -> "ConfidenceScore":
+    def for_inferred(cls, confidence: float = 0.6, supporting_episodes: int = 1) -> ConfidenceScore:
         """Create confidence score for LLM-inferred content."""
         return cls(
             value=confidence,

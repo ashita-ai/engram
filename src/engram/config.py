@@ -56,6 +56,12 @@ class ConfidenceWeights(BaseModel):
         ge=1,
         description="Days for confidence to halve without confirmation",
     )
+    contradiction_penalty: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description="Fraction to reduce confidence per contradiction",
+    )
 
     def validate_weights_sum(self) -> bool:
         """Check if weights sum to approximately 1.0."""

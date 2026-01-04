@@ -268,6 +268,50 @@ class TestConfidenceScore:
         # verification=1.0 * 0.7 = 0.7 dominates
         assert score.value >= 0.7
 
+    def test_recompute_with_weights(self):
+        """recompute_with_weights should use ConfidenceWeights config."""
+        from engram.config import ConfidenceWeights
+
+        weights = ConfidenceWeights(
+            extraction=0.6,
+            corroboration=0.2,
+            recency=0.1,
+            verification=0.1,
+            decay_half_life_days=180,
+            contradiction_penalty=0.20,
+        )
+        score = ConfidenceScore.for_extracted()
+        score.recompute_with_weights(weights)
+        # extraction_base=0.9 * 0.6 = 0.54 dominates
+        assert 0.5 <= score.value <= 0.8
+
+    def test_recompute_custom_contradiction_penalty(self):
+        """Custom contradiction penalty should affect score."""
+        score = ConfidenceScore(
+            value=0.9,
+            extraction_method=ExtractionMethod.EXTRACTED,
+            extraction_base=0.9,
+            contradictions=1,
+        )
+        # 20% penalty per contradiction
+        score.recompute(contradiction_penalty=0.20)
+        # With 1 contradiction: multiplier = 0.8
+        assert score.value < 0.65
+
+    def test_explain_shows_verified(self):
+        """explain() should show verified status when true."""
+        score = ConfidenceScore.for_extracted()
+        score.verified = True
+        explanation = score.explain()
+        assert "verified" in explanation
+
+    def test_explain_hides_verified_when_false(self):
+        """explain() should not show verified when false."""
+        score = ConfidenceScore.for_extracted()
+        score.verified = False
+        explanation = score.explain()
+        assert "verified" not in explanation
+
 
 class TestEpisode:
     """Tests for Episode model."""
