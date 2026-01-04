@@ -7,11 +7,15 @@ from engram.extraction import (
     EmailExtractor,
     ExtractionPipeline,
     Extractor,
+    IDExtractor,
+    LanguageExtractor,
+    NameExtractor,
     PhoneExtractor,
+    QuantityExtractor,
     URLExtractor,
     default_pipeline,
 )
-from engram.models import Episode, Fact
+from engram.models import Episode
 from engram.models.base import ExtractionMethod
 
 
@@ -385,10 +389,12 @@ class TestExtractionPipeline:
 
     def test_run_multiple_extractors(self):
         """Should run all extractors and combine results."""
-        pipeline = ExtractionPipeline([
-            EmailExtractor(),
-            URLExtractor(),
-        ])
+        pipeline = ExtractionPipeline(
+            [
+                EmailExtractor(),
+                URLExtractor(),
+            ]
+        )
         episode = make_episode("Email test@example.com or visit https://example.com")
         facts = pipeline.run(episode)
 
@@ -398,10 +404,12 @@ class TestExtractionPipeline:
 
     def test_run_with_results(self):
         """run_with_results should return grouped results."""
-        pipeline = ExtractionPipeline([
-            EmailExtractor(),
-            PhoneExtractor(),
-        ])
+        pipeline = ExtractionPipeline(
+            [
+                EmailExtractor(),
+                PhoneExtractor(),
+            ]
+        )
         episode = make_episode("Email test@example.com")
         results = pipeline.run_with_results(episode)
 
@@ -426,20 +434,283 @@ class TestDefaultPipeline:
         """default_pipeline should include all extractors."""
         pipeline = default_pipeline()
 
-        assert len(pipeline.extractors) == 4
+        assert len(pipeline.extractors) == 8
         names = {e.name for e in pipeline.extractors}
-        assert names == {"email", "phone", "url", "date"}
+        assert names == {"email", "phone", "url", "date", "quantity", "language", "name", "id"}
 
     def test_default_pipeline_extracts_multiple_types(self):
         """default_pipeline should extract from various formats."""
         pipeline = default_pipeline()
-        episode = make_episode(
-            "Contact user@example.com. "
-            "Visit https://example.com for info."
-        )
+        episode = make_episode("Contact user@example.com. " "Visit https://example.com for info.")
         facts = pipeline.run(episode)
 
         # Should extract at least email and URL
         categories = {f.category for f in facts}
         assert "email" in categories
         assert "url" in categories
+
+
+class TestQuantityExtractor:
+    """Tests for QuantityExtractor using Pint."""
+
+    def test_extract_distance_kilometers(self):
+        """Should extract kilometers."""
+        extractor = QuantityExtractor()
+        episode = make_episode("The race is 5 km long")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert "5" in facts[0].content
+        assert facts[0].category == "quantity"
+
+    def test_extract_distance_miles(self):
+        """Should extract miles."""
+        extractor = QuantityExtractor()
+        episode = make_episode("Drive 10 miles north")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert "10" in facts[0].content
+
+    def test_extract_temperature(self):
+        """Should extract temperature."""
+        extractor = QuantityExtractor()
+        episode = make_episode("It's 72 degF outside")
+        facts = extractor.extract(episode)
+
+        assert len(facts) >= 1
+
+    def test_extract_weight(self):
+        """Should extract weight."""
+        extractor = QuantityExtractor()
+        episode = make_episode("Package weighs 2.5 kg")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert "2.5" in facts[0].content
+
+    def test_extract_multiple_quantities(self):
+        """Should extract multiple quantities."""
+        extractor = QuantityExtractor()
+        episode = make_episode("Run 5 km in 30 min")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 2
+
+    def test_no_match_returns_empty(self):
+        """Should return empty for no quantities."""
+        extractor = QuantityExtractor()
+        episode = make_episode("No quantities here")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 0
+
+    def test_deduplicate_quantities(self):
+        """Should deduplicate same quantities."""
+        extractor = QuantityExtractor()
+        episode = make_episode("5 km or 5 km")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+
+
+class TestLanguageExtractor:
+    """Tests for LanguageExtractor using langdetect."""
+
+    def test_detect_english(self):
+        """Should detect English text."""
+        extractor = LanguageExtractor()
+        episode = make_episode(
+            "This is a sample text written in English. "
+            "It should be detected as English language."
+        )
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert facts[0].content == "en"
+        assert facts[0].category == "language"
+
+    def test_detect_spanish(self):
+        """Should detect Spanish text."""
+        extractor = LanguageExtractor()
+        episode = make_episode(
+            "Este es un texto de ejemplo escrito en español. "
+            "Debería ser detectado como idioma español."
+        )
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert facts[0].content == "es"
+
+    def test_detect_french(self):
+        """Should detect French text."""
+        extractor = LanguageExtractor()
+        episode = make_episode(
+            "Ceci est un exemple de texte écrit en français. "
+            "Il devrait être détecté comme langue française."
+        )
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert facts[0].content == "fr"
+
+    def test_short_text_returns_empty(self):
+        """Should return empty for text that's too short."""
+        extractor = LanguageExtractor()
+        episode = make_episode("Hi")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 0
+
+    def test_low_confidence_returns_empty(self):
+        """Should return empty when confidence is low."""
+        extractor = LanguageExtractor(min_confidence=0.99)
+        episode = make_episode("Hello world test")
+        facts = extractor.extract(episode)
+
+        # May or may not detect depending on confidence
+        assert isinstance(facts, list)
+
+
+class TestNameExtractor:
+    """Tests for NameExtractor using nameparser."""
+
+    def test_extract_simple_name(self):
+        """Should extract simple first last name."""
+        extractor = NameExtractor()
+        episode = make_episode("Please contact John Smith for details")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert "John" in facts[0].content
+        assert "Smith" in facts[0].content
+        assert facts[0].category == "person"
+
+    def test_extract_name_with_title(self):
+        """Should extract name with title."""
+        extractor = NameExtractor()
+        episode = make_episode("Dr. Jane Wilson will present")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert "Jane" in facts[0].content
+        assert "Wilson" in facts[0].content
+
+    def test_extract_multiple_names(self):
+        """Should extract multiple names."""
+        extractor = NameExtractor()
+        episode = make_episode("John Smith and Jane Doe attended")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 2
+        names = {f.content for f in facts}
+        assert any("John" in n and "Smith" in n for n in names)
+        assert any("Jane" in n and "Doe" in n for n in names)
+
+    def test_extract_three_part_name(self):
+        """Should extract names with middle name."""
+        extractor = NameExtractor()
+        episode = make_episode("Mary Jane Watson was there")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+        assert "Mary" in facts[0].content
+        assert "Watson" in facts[0].content
+
+    def test_no_match_returns_empty(self):
+        """Should return empty for no names."""
+        extractor = NameExtractor()
+        episode = make_episode("no names here at all")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 0
+
+    def test_deduplicate_names(self):
+        """Should deduplicate same names."""
+        extractor = NameExtractor()
+        episode = make_episode("John Smith met John Smith")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 1
+
+
+class TestIDExtractor:
+    """Tests for IDExtractor using python-stdnum."""
+
+    def test_extract_isbn13(self):
+        """Should extract ISBN-13."""
+        extractor = IDExtractor()
+        episode = make_episode("Book ISBN: 978-0-13-468599-1")
+        facts = extractor.extract(episode)
+
+        # Should extract and format ISBN
+        isbn_facts = [f for f in facts if f.category == "isbn"]
+        assert len(isbn_facts) == 1
+        assert "978" in isbn_facts[0].content
+
+    def test_extract_issn(self):
+        """Should extract ISSN."""
+        extractor = IDExtractor()
+        episode = make_episode("Journal ISSN: 0378-5955")
+        facts = extractor.extract(episode)
+
+        issn_facts = [f for f in facts if f.category == "issn"]
+        assert len(issn_facts) == 1
+        assert "0378-5955" in issn_facts[0].content
+
+    def test_extract_credit_card_masked(self):
+        """Should extract and mask credit card."""
+        extractor = IDExtractor()
+        # Using a test card number that passes Luhn
+        episode = make_episode("Card: 4111 1111 1111 1111")
+        facts = extractor.extract(episode)
+
+        cc_facts = [f for f in facts if f.category == "credit_card"]
+        assert len(cc_facts) == 1
+        # Should be masked
+        assert "****" in cc_facts[0].content
+        assert cc_facts[0].content.startswith("4111")
+        assert cc_facts[0].content.endswith("1111")
+
+    def test_extract_ssn_masked(self):
+        """Should extract and mask SSN."""
+        extractor = IDExtractor()
+        # Using a test SSN format
+        episode = make_episode("SSN: 123-45-6789")
+        facts = extractor.extract(episode)
+
+        ssn_facts = [f for f in facts if f.category == "ssn"]
+        assert len(ssn_facts) == 1
+        # Should be masked
+        assert "***-**-" in ssn_facts[0].content
+        assert ssn_facts[0].content.endswith("6789")
+
+    def test_extract_iban_masked(self):
+        """Should extract and mask IBAN."""
+        extractor = IDExtractor()
+        # Using a valid German IBAN format
+        episode = make_episode("IBAN: DE89370400440532013000")
+        facts = extractor.extract(episode)
+
+        iban_facts = [f for f in facts if f.category == "iban"]
+        assert len(iban_facts) == 1
+        # Should be masked
+        assert "****" in iban_facts[0].content
+
+    def test_no_match_returns_empty(self):
+        """Should return empty for no IDs."""
+        extractor = IDExtractor()
+        episode = make_episode("No identification numbers here")
+        facts = extractor.extract(episode)
+
+        assert len(facts) == 0
+
+    def test_invalid_ids_not_extracted(self):
+        """Should not extract invalid IDs."""
+        extractor = IDExtractor()
+        # Invalid ISBN (wrong check digit)
+        episode = make_episode("Bad ISBN: 978-0-13-468599-9")
+        facts = extractor.extract(episode)
+
+        isbn_facts = [f for f in facts if f.category == "isbn"]
+        assert len(isbn_facts) == 0

@@ -27,7 +27,11 @@ Example:
 from .base import ExtractionPipeline, ExtractionResult, Extractor
 from .date import DateExtractor
 from .email import EmailExtractor
+from .language import LanguageExtractor
+from .name import NameExtractor
 from .phone import PhoneExtractor
+from .quantity import QuantityExtractor
+from .stdnum import IDExtractor
 from .url import URLExtractor
 
 
@@ -35,7 +39,7 @@ def default_pipeline() -> ExtractionPipeline:
     """Create a pipeline with all default extractors.
 
     Returns:
-        ExtractionPipeline configured with email, phone, URL, and date extractors.
+        ExtractionPipeline configured with all 8 extractors.
     """
     return ExtractionPipeline(
         [
@@ -43,6 +47,10 @@ def default_pipeline() -> ExtractionPipeline:
             PhoneExtractor(),
             URLExtractor(),
             DateExtractor(),
+            QuantityExtractor(),
+            LanguageExtractor(),
+            NameExtractor(),
+            IDExtractor(),
         ]
     )
 
@@ -57,6 +65,10 @@ __all__ = [
     "PhoneExtractor",
     "URLExtractor",
     "DateExtractor",
+    "QuantityExtractor",
+    "LanguageExtractor",
+    "NameExtractor",
+    "IDExtractor",
     # Factory
     "default_pipeline",
 ]
