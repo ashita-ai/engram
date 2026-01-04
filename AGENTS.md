@@ -18,6 +18,8 @@
 - Follow async/await patterns for all database operations
 - Update README.md when adding user-facing features
 - Add docstrings to public functions
+- **Use Pydantic for ALL data models** — no dataclasses, no TypedDict, no NamedTuple
+- **Use Pydantic AI for ALL LLM interactions** — structured outputs, type-safe responses
 
 ### Ask First
 
@@ -150,14 +152,116 @@ git push -u origin feature/my-feature
 
 ---
 
+## Pydantic (Required for All Data Models)
+
+All data structures MUST use Pydantic. No exceptions.
+
+### Model Pattern
+
+```python
+from pydantic import BaseModel, ConfigDict, Field
+
+class MyModel(BaseModel):
+    """Always add docstrings."""
+
+    model_config = ConfigDict(extra="forbid")  # Catch typos
+
+    id: str = Field(description="Unique identifier")
+    value: float = Field(ge=0.0, le=1.0, description="Bounded value")
+    items: list[str] = Field(default_factory=list)
+```
+
+### Rules
+
+- `ConfigDict(extra="forbid")` on all models (catches field typos)
+- Use `Field()` for validation constraints and descriptions
+- Use `model_dump(mode="json")` for serialization
+- Use `model_validate()` for deserialization
+- Never use `@dataclass`, `TypedDict`, or `NamedTuple`
+
+### Settings Pattern
+
+```python
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="ENGRAM_")
+
+    api_key: str | None = Field(default=None)
+    debug: bool = Field(default=False)
+```
+
+---
+
+## Pydantic AI (Required for All LLM Interactions)
+
+All LLM calls MUST use Pydantic AI with structured outputs. No raw API calls.
+
+### Basic Pattern
+
+```python
+from pydantic import BaseModel
+from pydantic_ai import Agent
+
+class ExtractedFacts(BaseModel):
+    """Structured output from LLM extraction."""
+    facts: list[str]
+    confidence: float
+    reasoning: str
+
+extraction_agent = Agent(
+    "openai:gpt-4o-mini",
+    result_type=ExtractedFacts,
+    system_prompt="Extract factual statements from the conversation.",
+)
+
+async def extract_facts(text: str) -> ExtractedFacts:
+    result = await extraction_agent.run(text)
+    return result.data  # Type-safe ExtractedFacts
+```
+
+### Consolidation Agent Example
+
+```python
+from pydantic import BaseModel
+from pydantic_ai import Agent
+
+class ConsolidationResult(BaseModel):
+    """Output from memory consolidation."""
+    semantic_facts: list[str]
+    links: list[tuple[str, str]]  # (memory_id, related_id)
+    pruned_ids: list[str]
+    confidence: float
+
+consolidation_agent = Agent(
+    "openai:gpt-4o-mini",
+    result_type=ConsolidationResult,
+    system_prompt="""
+    Analyze episodes and extract semantic knowledge.
+    Identify relationships between memories.
+    Flag weak associations for pruning.
+    """,
+)
+```
+
+### Why Pydantic AI?
+
+- **Type safety**: Responses are validated Pydantic models, not raw dicts
+- **Structured outputs**: LLM returns exactly what you expect
+- **Retries**: Automatic retry on validation failures
+- **Observability**: Built-in logging and tracing
+
+---
+
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `models/` | Pydantic models for all memory types |
 | `storage/` | Qdrant client and collection management |
-| `extraction/` | Pattern matchers and LLM extractors |
-| `consolidation/` | Background processing workflows |
+| `extraction/` | Pattern matchers and LLM extractors (Pydantic AI agents) |
+| `consolidation/` | Background processing workflows (Pydantic AI agents) |
 | `config.py` | Settings and confidence weights |
 
 ---
