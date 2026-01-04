@@ -18,6 +18,7 @@
 - Follow async/await patterns for all database operations
 - Update README.md when adding user-facing features
 - Add docstrings to public functions
+- **Use Pydantic AI for ALL LLM interactions** — structured outputs, type-safe responses
 
 ### Ask First
 
@@ -150,14 +151,74 @@ git push -u origin feature/my-feature
 
 ---
 
+## Pydantic AI (Required for All LLM Interactions)
+
+All LLM calls MUST use Pydantic AI with structured outputs. No raw API calls.
+
+### Basic Pattern
+
+```python
+from pydantic import BaseModel
+from pydantic_ai import Agent
+
+class ExtractedFacts(BaseModel):
+    """Structured output from LLM extraction."""
+    facts: list[str]
+    confidence: float
+    reasoning: str
+
+extraction_agent = Agent(
+    "openai:gpt-4o-mini",
+    result_type=ExtractedFacts,
+    system_prompt="Extract factual statements from the conversation.",
+)
+
+async def extract_facts(text: str) -> ExtractedFacts:
+    result = await extraction_agent.run(text)
+    return result.data  # Type-safe ExtractedFacts
+```
+
+### Consolidation Agent Example
+
+```python
+from pydantic import BaseModel
+from pydantic_ai import Agent
+
+class ConsolidationResult(BaseModel):
+    """Output from memory consolidation."""
+    semantic_facts: list[str]
+    links: list[tuple[str, str]]  # (memory_id, related_id)
+    pruned_ids: list[str]
+    confidence: float
+
+consolidation_agent = Agent(
+    "openai:gpt-4o-mini",
+    result_type=ConsolidationResult,
+    system_prompt="""
+    Analyze episodes and extract semantic knowledge.
+    Identify relationships between memories.
+    Flag weak associations for pruning.
+    """,
+)
+```
+
+### Why Pydantic AI?
+
+- **Type safety**: Responses are validated Pydantic models, not raw dicts
+- **Structured outputs**: LLM returns exactly what you expect
+- **Retries**: Automatic retry on validation failures
+- **Observability**: Built-in logging and tracing
+
+---
+
 ## Key Files
 
 | File | Purpose |
 |------|---------|
 | `models/` | Pydantic models for all memory types |
 | `storage/` | Qdrant client and collection management |
-| `extraction/` | Pattern matchers and LLM extractors |
-| `consolidation/` | Background processing workflows |
+| `extraction/` | Pattern matchers and LLM extractors (Pydantic AI agents) |
+| `consolidation/` | Background processing workflows (Pydantic AI agents) |
 | `config.py` | Settings and confidence weights |
 
 ---
