@@ -67,7 +67,7 @@ from pydantic_ai import Agent
 
 class ExtractedFacts(BaseModel):
     facts: list[str]
-    confidence: float
+    confidence: float                # LLM's extraction confidence (becomes part of composite score)
     reasoning: str
 
 consolidation_agent = Agent(

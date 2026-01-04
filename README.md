@@ -32,7 +32,7 @@ Engram preserves ground truth and tracks confidence:
 
 1. **Store first, derive later** — Raw conversations stored verbatim. LLM extraction happens in background where errors can be caught.
 
-2. **Track confidence** — Every fact carries provenance: `verbatim` (highest), `extracted` (high), `inferred` (variable).
+2. **Track confidence** — Every fact carries a composite confidence score: extraction method + corroboration + recency + verification. Fully auditable.
 
 3. **Verify on retrieval** — Applications filter by confidence. High-stakes queries use only trusted facts.
 
@@ -192,13 +192,18 @@ await memory.decay()
 
 Every derived memory points back to source episodes. If extraction makes a mistake, re-derive from the original.
 
-### Confidence is Explicit
+### Confidence is Composite and Auditable
 
-| Source Type | Confidence | Method |
-|-------------|------------|--------|
-| `verbatim` | Highest | Direct quote, immutable source |
-| `extracted` | High | Pattern-matched, deterministic |
-| `inferred` | Variable | LLM-derived |
+Confidence isn't a single number — it's a composite score you can explain:
+
+| Factor | Weight | Example |
+|--------|--------|---------|
+| Extraction method | 50% | Pattern-matched = 0.9, LLM-inferred = 0.6 |
+| Corroboration | 25% | 5 supporting episodes > 1 episode |
+| Recency | 15% | Confirmed yesterday > confirmed last year |
+| Verification | 10% | Email format valid, date in range |
+
+Every score is auditable: *"0.73 because: extracted (0.9 base), 3 sources, last confirmed 2 months ago."*
 
 ### Forgetting is a Feature
 

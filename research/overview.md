@@ -52,7 +52,13 @@ See: [Accuracy Problem](accuracy.md)
 
 ### 3. Confidence Tracking
 
-**Design**: Every memory carries explicit confidence metadata: `verbatim` (highest), `extracted` (high, deterministic), `inferred` (variable, LLM-derived).
+**Design**: Every memory carries a composite confidence score combining multiple signals:
+- **Extraction method** (50%): `verbatim` (1.0), `extracted` (0.9), `inferred` (0.6)
+- **Corroboration** (25%): Multiple sources increase confidence
+- **Recency** (15%): Recently confirmed facts score higher
+- **Verification** (10%): Format checks (valid email, reasonable date)
+
+Scores are fully auditable — every confidence value can be explained.
 
 **Research basis**:
 
@@ -69,7 +75,7 @@ Signal detection theory provides a formal framework:
 > "Memory decisions involve both the strength of the memory trace and a criterion for responding. Confidence reflects distance from the criterion."
 > — [Wixted & Mickes, 2010](https://pubmed.ncbi.nlm.nih.gov/20192556/)
 
-**Engineering implication**: Retrieval systems should expose confidence so applications can filter by reliability. "Give me only facts I trust" requires knowing what's trustworthy.
+**Engineering implication**: Retrieval systems should expose confidence so applications can filter by reliability. Composite scoring with corroboration and recency factors provides richer signal than extraction method alone.
 
 ---
 

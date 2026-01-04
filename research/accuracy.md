@@ -85,17 +85,22 @@ Episode (immutable) → Derived Facts → Application
 
 ## Confidence Tracking
 
-Ground truth preservation enables explicit confidence:
+Ground truth preservation enables composite confidence scoring:
 
-| Source Type | Confidence | Method |
-|-------------|------------|--------|
-| `verbatim` | Highest | Direct quote from episode, immutable source |
-| `extracted` | High | Pattern-matched, deterministic |
-| `inferred` | Variable | LLM-derived, uncertain |
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Extraction method | 50% | verbatim=1.0, extracted=0.9, inferred=0.6 |
+| Corroboration | 25% | Multiple sources increase score |
+| Recency | 15% | Recently confirmed facts score higher |
+| Verification | 10% | Format checks passed (valid email, etc.) |
+
+Every score is auditable — you can explain *why* confidence is 0.73.
 
 Applications can filter by confidence:
 - High-stakes decisions: `min_confidence=0.9`
 - Exploratory queries: `min_confidence=0.5`
+
+**Confidence decay:** Facts not re-confirmed decay over time (~63% after 1 year), keeping the store current.
 
 ## Deterministic vs. LLM Extraction
 

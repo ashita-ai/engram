@@ -93,17 +93,20 @@ Like Zep, we preserve raw interactions. Unlike Zep:
 - Clear separation between episodic (immutable) and derived (mutable)
 - Recovery path when extraction fails
 
-### 2. Confidence Tracking
+### 2. Composite Confidence Scoring
 
-Unique to Engram:
+Unique to Engram — confidence is a composite score, not a single tier:
 
-| Source | Confidence | Example |
-|--------|------------|---------|
-| `verbatim` | Highest | Direct quote, immutable source |
-| `extracted` | High | Pattern-matched email |
-| `inferred` | Variable | LLM-derived preference |
+| Factor | Weight | What it measures |
+|--------|--------|------------------|
+| Extraction method | 50% | verbatim (1.0), extracted (0.9), inferred (0.6) |
+| Corroboration | 25% | How many episodes support this fact |
+| Recency | 15% | When was this last confirmed |
+| Verification | 10% | Format/validity checks passed |
 
-Applications filter by confidence. High-stakes queries use only trusted facts.
+**Key differentiator:** Scores are fully auditable. You can explain *why* confidence is 0.73, not just that it is.
+
+Applications filter by confidence. High-stakes queries use only trusted facts. Facts decay if not re-confirmed.
 
 ### 3. Deterministic Extraction First
 

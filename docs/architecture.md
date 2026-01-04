@@ -34,13 +34,67 @@ Raw interactions stored as immutable episodic memories. All derived knowledge tr
 
 ### 2. Confidence Tracking
 
-Every memory carries provenance:
+Every derived memory carries a composite confidence score with full auditability:
 
-| Source Type | Confidence | Method |
-|-------------|------------|--------|
-| `verbatim` | Highest | Direct quote, immutable source |
-| `extracted` | High | Pattern matching (deterministic) |
-| `inferred` | Variable | LLM-derived |
+```python
+class ConfidenceScore(BaseModel):
+    value: float                      # Final score 0.0-1.0
+    extraction_method: str            # verbatim/extracted/inferred
+    extraction_base: float            # Base score from method
+    supporting_episodes: int          # Corroboration count
+    last_confirmed: datetime          # When last seen/confirmed
+    contradictions: int               # Conflicting evidence count
+```
+
+**Hybrid formula (configurable weights with sane defaults):**
+
+```python
+class ConfidenceWeights(BaseModel):
+    extraction: float = 0.50          # How it was extracted
+    corroboration: float = 0.25       # How many sources support it
+    recency: float = 0.15             # How recently confirmed
+    verification: float = 0.10        # Format/validity checks
+    decay_half_life_days: int = 365   # How fast unconfirmed facts decay
+
+# Default weights sum to 1.0
+confidence = (
+    extraction_base * weights.extraction +
+    corroboration_score * weights.corroboration +
+    recency_score * weights.recency +
+    verification_score * weights.verification
+)
+```
+
+Configure via environment or constructor:
+```python
+memory = MemoryStore(
+    confidence_weights=ConfidenceWeights(
+        extraction=0.6,      # Trust extraction method more
+        corroboration=0.2,   # Less emphasis on multiple sources
+        recency=0.1,
+        verification=0.1,
+    )
+)
+```
+
+**Base scores by extraction method:**
+
+| Method | Base Score | Rationale |
+|--------|------------|-----------|
+| `verbatim` | 1.0 | Exact quote, immutable |
+| `extracted` | 0.9 | Deterministic pattern match |
+| `inferred` | 0.6 | LLM-derived, uncertain |
+
+**Corroboration boost:** Same fact from 5 episodes scores higher than 1 episode.
+
+**Confidence decay (configurable half-life):**
+```python
+# Default: ~63% retained after 1 year, configurable per use case
+decay_half_life_days: int = 365  # Can be set in ConfidenceWeights
+confidence *= exp(-days_since_confirmed / decay_half_life_days)
+```
+
+**Why auditable:** Every confidence score can be explained — "0.73 because: extracted (0.9 base), 3 supporting episodes, last confirmed 2 months ago, no contradictions."
 
 ### 3. Bi-Temporal Awareness
 
@@ -130,7 +184,7 @@ class Fact(BaseModel):
     source_episode_id: str
     event_at: datetime                   # When fact was true
     derived_at: datetime                 # When we extracted it
-    confidence: float                    # High (pattern-matched)
+    confidence: ConfidenceScore          # Composite score with auditability
     embedding: list[float]
 ```
 
@@ -144,7 +198,7 @@ class SemanticMemory(BaseModel):
     related_ids: list[str]               # Links to related memories
     event_at: datetime
     derived_at: datetime
-    confidence: float                    # Variable (LLM-derived)
+    confidence: ConfidenceScore          # Composite score with auditability
     selectivity_score: float             # 0 = broad, 1 = highly selective
     consolidation_passes: int            # How many times refined
     embedding: list[float]
@@ -159,7 +213,7 @@ class ProceduralMemory(BaseModel):
     trigger_context: str                 # When this applies
     source_episode_ids: list[str]
     related_ids: list[str]
-    confidence: float
+    confidence: ConfidenceScore          # Composite score with auditability
     access_count: int                    # Reinforcement through use
     embedding: list[float]
 ```
@@ -173,7 +227,7 @@ class InhibitoryFact(BaseModel):
     negates_pattern: str                 # Pattern this inhibits
     source_episode_ids: list[str]
     derived_at: datetime
-    confidence: float
+    confidence: ConfidenceScore          # Composite score with auditability
     embedding: list[float]
 ```
 
