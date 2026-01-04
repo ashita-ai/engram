@@ -72,6 +72,7 @@ flowchart LR
         FACT{{📊 FACTUAL}}
         SEM([💡 SEMANTIC])
         PROC([⚙️ PROCEDURAL])
+        INH([🚫 INHIBITORY])
     end
 
     subgraph STORE [" "]
@@ -81,18 +82,21 @@ flowchart LR
 
     WM ==>|encode| EP
     EP -->|extract| FACT
+    EP -->|negate| INH
     EP -->|consolidate| SEM
 
     EP -.->|store| QD
     FACT -.->|store| QD
     SEM -.->|store| QD
     PROC -.->|store| QD
+    INH -.->|store| QD
 
     style WM fill:#fbbf24,stroke:#b45309,stroke-width:3px,color:#1c1917
     style EP fill:#a78bfa,stroke:#7c3aed,stroke-width:3px,color:#1c1917
     style FACT fill:#60a5fa,stroke:#2563eb,stroke-width:3px,color:#1c1917
     style SEM fill:#34d399,stroke:#059669,stroke-width:3px,color:#1c1917
     style PROC fill:#f472b6,stroke:#db2777,stroke-width:3px,color:#1c1917
+    style INH fill:#f87171,stroke:#dc2626,stroke-width:3px,color:#1c1917
     style QD fill:#fb923c,stroke:#c2410c,stroke-width:3px,color:#1c1917
 
     style INPUT fill:transparent,stroke:#fbbf24,stroke-width:2px,stroke-dasharray:5
@@ -106,6 +110,7 @@ flowchart LR
 | **Factual** | High | Pattern extraction | Emails, dates, names |
 | **Semantic** | Variable | LLM inference | Preferences, context |
 | **Procedural** | High | Pattern detection | Behavioral preferences |
+| **Inhibitory** | Variable | Negation detection | What is NOT true |
 
 ## Preventing Hallucinations
 

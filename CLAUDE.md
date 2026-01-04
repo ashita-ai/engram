@@ -48,8 +48,9 @@ Be careful about claims regarding cognitive science foundations. Engram is **ins
 
 ## Memory Types
 
-The five memory types are engineering constructs:
+The six memory types are engineering constructs:
 - **Working, Episodic, Semantic, Procedural** — Inspired by cognitive science
 - **Factual** — Engineering subdivision (verbatim vs inferred) not from cognitive science
+- **Inhibitory** — Inspired by CCK+ interneurons in memory selectivity (Tomé et al.)
 
 Be explicit about which are science-inspired and which are engineering additions.
