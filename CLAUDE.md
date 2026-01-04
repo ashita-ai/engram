@@ -1,5 +1,27 @@
 # Engram Development Guidelines
 
+## Security (CRITICAL)
+
+**NEVER commit secrets to the repository.**
+
+### Prohibited:
+- `.env` files (use `.env.example` with placeholders only)
+- API keys, tokens, passwords in ANY file
+- Credentials in code, docs, examples, tests, or config
+- Hardcoded URLs with auth tokens
+
+### Required:
+- All secrets via environment variables
+- `.env` is in `.gitignore` (verified)
+- `.env.example` has placeholder values only
+- Pre-commit check: `grep -r "sk-\|sk-ant-\|AIza" src/ tests/ && echo "SECRETS FOUND" || echo "OK"`
+
+### If secrets are accidentally committed:
+1. Do NOT just delete and commit again (still in git history)
+2. Rotate the exposed credentials immediately
+3. Use `git filter-branch` or BFG to remove from history
+4. Force push (with team coordination)
+
 ## Scientific Claims
 
 Be careful about claims regarding cognitive science foundations. Engram is **inspired by** cognitive science, not a strict implementation of it.
