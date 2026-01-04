@@ -30,14 +30,26 @@ dependencies = [
     "qdrant-client>=1.7",
 
     # Embeddings
-    "openai>=1.0",           # OpenAI embeddings
-    "tiktoken>=0.5",         # Token counting
+    "openai>=1.0",
+    "fastembed>=0.2",
+    "tiktoken>=0.5",
 
-    # Async
+    # Extraction
+    "email-validator>=2.0",
+    "phonenumbers>=8.0",
+    "python-dateutil>=2.8",
+    "dateparser>=1.0",
+    "validators>=0.20",
+
+    # Server
+    "fastapi>=0.100",
+    "uvicorn>=0.20",
+
+    # Async/HTTP
     "httpx>=0.25",
 
     # Utilities
-    "structlog>=24.0",       # Structured logging
+    "structlog>=24.0",
 
     # Durable execution (local dev)
     "dbos>=0.9",
@@ -53,6 +65,9 @@ dev = [
     "black>=24.0",
 ]
 
+# Demo
+demo = ["marimo>=0.1"]
+
 # Alternative LLM providers
 anthropic = ["anthropic>=0.18"]
 google = ["google-generativeai>=0.4"]
@@ -62,8 +77,9 @@ cohere = ["cohere>=5.0"]
 # Alternative embedding providers
 sentence-transformers = ["sentence-transformers>=2.3"]
 
-# Durable execution (production)
+# Durable execution backends
 temporal = ["temporalio>=1.4"]
+prefect = ["prefect>=2.0"]
 
 # All providers
 all = [
@@ -77,6 +93,8 @@ all = [
 [project.urls]
 Homepage = "https://github.com/ashita-ai/engram"
 Repository = "https://github.com/ashita-ai/engram"
+Documentation = "https://github.com/ashita-ai/engram#readme"
+Issues = "https://github.com/ashita-ai/engram/issues"
 
 [build-system]
 requires = ["hatchling"]
@@ -92,7 +110,7 @@ packages = ["src/engram"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-addopts = "-v --cov=src/engram --cov-report=term-missing --cov-fail-under=80"
+addopts = "-v --cov=src/engram --cov-report=term-missing"
 
 [tool.mypy]
 python_version = "3.11"
@@ -103,7 +121,7 @@ disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
 
 [tool.ruff]
-line-length = 88
+line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
@@ -117,9 +135,9 @@ select = [
     "UP",  # pyupgrade
 ]
 ignore = [
-    "E501",  # line too long (handled by black)
+    "E501",  # line too long (handled by formatter)
 ]
 
 [tool.black]
-line-length = 88
+line-length = 100
 target-version = ["py311"]

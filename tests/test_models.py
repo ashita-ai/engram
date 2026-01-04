@@ -1,0 +1,506 @@
+"""Unit tests for Engram memory models."""
+
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from pydantic import ValidationError
+
+from engram.models import (
+    AuditEntry,
+    ConfidenceScore,
+    Episode,
+    ExtractionMethod,
+    Fact,
+    InhibitoryFact,
+    MemoryBase,
+    ProceduralMemory,
+    SemanticMemory,
+    generate_id,
+)
+
+
+class TestGenerateId:
+    """Tests for the generate_id function."""
+
+    def test_generates_unique_ids(self):
+        """Each call should produce a unique ID."""
+        ids = [generate_id("test") for _ in range(100)]
+        assert len(ids) == len(set(ids))
+
+    def test_includes_prefix(self):
+        """Generated ID should start with the prefix."""
+        assert generate_id("ep").startswith("ep_")
+        assert generate_id("fact").startswith("fact_")
+        assert generate_id("sem").startswith("sem_")
+
+    def test_consistent_format(self):
+        """ID should be prefix_12chars."""
+        id_ = generate_id("test")
+        prefix, suffix = id_.split("_")
+        assert prefix == "test"
+        assert len(suffix) == 12
+
+
+class TestExtractionMethod:
+    """Tests for the ExtractionMethod enum."""
+
+    def test_enum_values(self):
+        """Verify expected enum values exist."""
+        assert ExtractionMethod.VERBATIM.value == "verbatim"
+        assert ExtractionMethod.EXTRACTED.value == "extracted"
+        assert ExtractionMethod.INFERRED.value == "inferred"
+
+    def test_string_enum(self):
+        """ExtractionMethod should be usable as string."""
+        method = ExtractionMethod.VERBATIM
+        assert str(method) == "ExtractionMethod.VERBATIM"
+        assert method.value == "verbatim"
+
+
+class TestConfidenceScore:
+    """Tests for ConfidenceScore model."""
+
+    def test_for_verbatim(self):
+        """Verbatim extraction should have confidence 1.0."""
+        score = ConfidenceScore.for_verbatim()
+        assert score.value == 1.0
+        assert score.extraction_method == ExtractionMethod.VERBATIM
+        assert score.extraction_base == 1.0
+        assert score.supporting_episodes == 1
+
+    def test_for_extracted(self):
+        """Pattern extraction should have confidence 0.9."""
+        score = ConfidenceScore.for_extracted()
+        assert score.value == 0.9
+        assert score.extraction_method == ExtractionMethod.EXTRACTED
+        assert score.extraction_base == 0.9
+
+    def test_for_extracted_with_sources(self):
+        """Multiple supporting sources should be recorded."""
+        score = ConfidenceScore.for_extracted(supporting_episodes=3)
+        assert score.supporting_episodes == 3
+
+    def test_for_inferred(self):
+        """LLM inference should have default confidence 0.6."""
+        score = ConfidenceScore.for_inferred()
+        assert score.value == 0.6
+        assert score.extraction_method == ExtractionMethod.INFERRED
+        assert score.extraction_base == 0.6
+
+    def test_for_inferred_custom_confidence(self):
+        """Custom confidence can be specified for inferred."""
+        score = ConfidenceScore.for_inferred(confidence=0.75)
+        assert score.value == 0.75
+
+    def test_value_bounds(self):
+        """Confidence value must be between 0 and 1."""
+        with pytest.raises(ValidationError):
+            ConfidenceScore(
+                value=1.5,
+                extraction_method=ExtractionMethod.VERBATIM,
+                extraction_base=1.0,
+            )
+        with pytest.raises(ValidationError):
+            ConfidenceScore(
+                value=-0.1,
+                extraction_method=ExtractionMethod.VERBATIM,
+                extraction_base=1.0,
+            )
+
+    def test_contradictions_non_negative(self):
+        """Contradictions count cannot be negative."""
+        with pytest.raises(ValidationError):
+            ConfidenceScore(
+                value=0.9,
+                extraction_method=ExtractionMethod.EXTRACTED,
+                extraction_base=0.9,
+                contradictions=-1,
+            )
+
+    def test_explain_basic(self):
+        """explain() should return human-readable description."""
+        score = ConfidenceScore.for_extracted(supporting_episodes=2)
+        explanation = score.explain()
+        assert "0.90:" in explanation
+        assert "extracted" in explanation
+        assert "2 sources" in explanation
+
+    def test_explain_with_contradictions(self):
+        """explain() should include contradictions if present."""
+        score = ConfidenceScore(
+            value=0.8,
+            extraction_method=ExtractionMethod.EXTRACTED,
+            extraction_base=0.9,
+            contradictions=2,
+        )
+        explanation = score.explain()
+        assert "2 contradictions" in explanation
+
+    def test_explain_singular_source(self):
+        """explain() should use singular 'source' for 1 source."""
+        score = ConfidenceScore.for_extracted(supporting_episodes=1)
+        explanation = score.explain()
+        assert "1 source" in explanation
+        assert "1 sources" not in explanation
+
+    def test_time_ago_just_now(self):
+        """Recent timestamps should show 'just now'."""
+        score = ConfidenceScore.for_verbatim()
+        explanation = score.explain()
+        assert "just now" in explanation
+
+    def test_time_ago_days(self):
+        """Timestamps days ago should show 'X days ago'."""
+        three_days_ago = datetime.now(UTC) - timedelta(days=3)
+        score = ConfidenceScore(
+            value=0.9,
+            extraction_method=ExtractionMethod.EXTRACTED,
+            extraction_base=0.9,
+            last_confirmed=three_days_ago,
+        )
+        explanation = score.explain()
+        assert "3 days ago" in explanation
+
+    def test_extra_fields_forbidden(self):
+        """Extra fields should raise an error."""
+        with pytest.raises(ValidationError):
+            ConfidenceScore(
+                value=0.9,
+                extraction_method=ExtractionMethod.EXTRACTED,
+                extraction_base=0.9,
+                unknown_field="test",
+            )
+
+
+class TestEpisode:
+    """Tests for Episode model."""
+
+    def test_create_episode(self):
+        """Basic episode creation."""
+        ep = Episode(content="Hello world", role="user", user_id="user_123")
+        assert ep.content == "Hello world"
+        assert ep.role == "user"
+        assert ep.user_id == "user_123"
+        assert ep.id.startswith("ep_")
+
+    def test_default_timestamp(self):
+        """Episodes should get a default timestamp."""
+        ep = Episode(content="Test", role="user", user_id="user_123")
+        assert ep.timestamp is not None
+        assert isinstance(ep.timestamp, datetime)
+
+    def test_default_importance(self):
+        """Default importance should be 0.5."""
+        ep = Episode(content="Test", role="user", user_id="user_123")
+        assert ep.importance == 0.5
+
+    def test_importance_bounds(self):
+        """Importance must be between 0 and 1."""
+        with pytest.raises(ValidationError):
+            Episode(content="Test", role="user", user_id="user_123", importance=1.5)
+
+    def test_str_representation(self):
+        """String representation should show role and content preview."""
+        ep = Episode(content="Short message", role="user", user_id="user_123")
+        assert "user" in str(ep)
+        assert "Short message" in str(ep)
+
+    def test_str_long_content_truncated(self):
+        """Long content should be truncated in string representation."""
+        long_content = "x" * 100
+        ep = Episode(content=long_content, role="assistant", user_id="user_123")
+        assert "..." in str(ep)
+        assert len(str(ep)) < 100
+
+    def test_optional_org_id(self):
+        """org_id should be optional."""
+        ep = Episode(content="Test", role="user", user_id="user_123")
+        assert ep.org_id is None
+        ep_with_org = Episode(
+            content="Test", role="user", user_id="user_123", org_id="org_456"
+        )
+        assert ep_with_org.org_id == "org_456"
+
+    def test_optional_session_id(self):
+        """session_id should be optional."""
+        ep = Episode(content="Test", role="user", user_id="user_123")
+        assert ep.session_id is None
+
+    def test_optional_embedding(self):
+        """embedding should be optional."""
+        ep = Episode(content="Test", role="user", user_id="user_123")
+        assert ep.embedding is None
+        ep_with_embedding = Episode(
+            content="Test", role="user", user_id="user_123", embedding=[0.1, 0.2, 0.3]
+        )
+        assert ep_with_embedding.embedding == [0.1, 0.2, 0.3]
+
+
+class TestFact:
+    """Tests for Fact model."""
+
+    def test_create_fact(self):
+        """Basic fact creation."""
+        fact = Fact(
+            content="email=john@example.com",
+            category="email",
+            source_episode_id="ep_123",
+            user_id="user_123",
+        )
+        assert fact.content == "email=john@example.com"
+        assert fact.category == "email"
+        assert fact.id.startswith("fact_")
+
+    def test_default_confidence_is_extracted(self):
+        """Default confidence should be for extracted pattern."""
+        fact = Fact(
+            content="test",
+            category="email",
+            source_episode_id="ep_123",
+            user_id="user_123",
+        )
+        assert fact.confidence.value == 0.9
+        assert fact.confidence.extraction_method == ExtractionMethod.EXTRACTED
+
+    def test_from_extraction_factory(self):
+        """from_extraction factory method should work correctly."""
+        fact = Fact.from_extraction(
+            content="phone=555-1234",
+            category="phone",
+            source_episode_id="ep_456",
+            user_id="user_123",
+            org_id="org_789",
+        )
+        assert fact.content == "phone=555-1234"
+        assert fact.category == "phone"
+        assert fact.source_episode_id == "ep_456"
+        assert fact.user_id == "user_123"
+        assert fact.org_id == "org_789"
+        assert fact.confidence.value == 0.9
+
+    def test_str_representation(self):
+        """String representation should show category and content."""
+        fact = Fact(
+            content="email@test.com",
+            category="email",
+            source_episode_id="ep_123",
+            user_id="user_123",
+        )
+        assert "email" in str(fact)
+        assert "email@test.com" in str(fact)
+
+
+class TestSemanticMemory:
+    """Tests for SemanticMemory model."""
+
+    def test_create_semantic_memory(self):
+        """Basic semantic memory creation."""
+        mem = SemanticMemory(
+            content="User works in software development",
+            user_id="user_123",
+        )
+        assert mem.content == "User works in software development"
+        assert mem.id.startswith("sem_")
+
+    def test_default_confidence_is_inferred(self):
+        """Default confidence should be for inferred content."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        assert mem.confidence.value == 0.6
+        assert mem.confidence.extraction_method == ExtractionMethod.INFERRED
+
+    def test_default_selectivity_score(self):
+        """Default selectivity should be 0.0 (newly created)."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        assert mem.selectivity_score == 0.0
+
+    def test_add_link(self):
+        """add_link should add unique related IDs."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        mem.add_link("mem_1")
+        mem.add_link("mem_2")
+        mem.add_link("mem_1")  # Duplicate
+        assert mem.related_ids == ["mem_1", "mem_2"]
+
+    def test_increase_selectivity(self):
+        """increase_selectivity should increment score and passes."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        assert mem.selectivity_score == 0.0
+        assert mem.consolidation_passes == 1
+        mem.increase_selectivity()
+        assert mem.selectivity_score == 0.1
+        assert mem.consolidation_passes == 2
+
+    def test_increase_selectivity_caps_at_one(self):
+        """Selectivity should cap at 1.0."""
+        mem = SemanticMemory(content="Test", user_id="user_123", selectivity_score=0.95)
+        mem.increase_selectivity(delta=0.1)
+        assert mem.selectivity_score == 1.0
+
+    def test_decrease_selectivity(self):
+        """decrease_selectivity should decrement score."""
+        mem = SemanticMemory(content="Test", user_id="user_123", selectivity_score=0.5)
+        mem.decrease_selectivity()
+        assert mem.selectivity_score == 0.4
+
+    def test_decrease_selectivity_caps_at_zero(self):
+        """Selectivity should cap at 0.0."""
+        mem = SemanticMemory(content="Test", user_id="user_123", selectivity_score=0.05)
+        mem.decrease_selectivity(delta=0.1)
+        assert mem.selectivity_score == 0.0
+
+    def test_str_representation(self):
+        """String representation should show content preview."""
+        mem = SemanticMemory(content="Short content", user_id="user_123")
+        assert "Short content" in str(mem)
+
+
+class TestProceduralMemory:
+    """Tests for ProceduralMemory model."""
+
+    def test_create_procedural_memory(self):
+        """Basic procedural memory creation."""
+        mem = ProceduralMemory(
+            content="User prefers Python code examples",
+            user_id="user_123",
+        )
+        assert mem.content == "User prefers Python code examples"
+        assert mem.id.startswith("proc_")
+
+    def test_default_access_count(self):
+        """Default access count should be 0."""
+        mem = ProceduralMemory(content="Test", user_id="user_123")
+        assert mem.access_count == 0
+
+    def test_reinforce(self):
+        """reinforce() should increment access count."""
+        mem = ProceduralMemory(content="Test", user_id="user_123")
+        mem.reinforce()
+        assert mem.access_count == 1
+        mem.reinforce()
+        assert mem.access_count == 2
+
+    def test_add_link(self):
+        """add_link should add unique related IDs."""
+        mem = ProceduralMemory(content="Test", user_id="user_123")
+        mem.add_link("mem_1")
+        mem.add_link("mem_2")
+        mem.add_link("mem_1")  # Duplicate
+        assert mem.related_ids == ["mem_1", "mem_2"]
+
+    def test_trigger_context(self):
+        """trigger_context should be configurable."""
+        mem = ProceduralMemory(
+            content="User likes detailed explanations",
+            trigger_context="when explaining code",
+            user_id="user_123",
+        )
+        assert mem.trigger_context == "when explaining code"
+
+
+class TestInhibitoryFact:
+    """Tests for InhibitoryFact model."""
+
+    def test_create_inhibitory_fact(self):
+        """Basic inhibitory fact creation."""
+        fact = InhibitoryFact(
+            content="User does NOT use MongoDB",
+            negates_pattern="mongodb",
+            user_id="user_123",
+        )
+        assert fact.content == "User does NOT use MongoDB"
+        assert fact.negates_pattern == "mongodb"
+        assert fact.id.startswith("inh_")
+
+    def test_default_confidence(self):
+        """Default confidence should be inferred at 0.7."""
+        fact = InhibitoryFact(
+            content="Test negation",
+            negates_pattern="test",
+            user_id="user_123",
+        )
+        assert fact.confidence.value == 0.7
+        assert fact.confidence.extraction_method == ExtractionMethod.INFERRED
+
+    def test_str_representation(self):
+        """String representation should show negation content."""
+        fact = InhibitoryFact(
+            content="User does NOT like verbose output",
+            negates_pattern="verbose",
+            user_id="user_123",
+        )
+        assert "User does NOT like verbose output" in str(fact)
+
+
+class TestAuditEntry:
+    """Tests for AuditEntry model."""
+
+    def test_create_audit_entry(self):
+        """Basic audit entry creation."""
+        entry = AuditEntry(event="test", user_id="user_123")
+        assert entry.event == "test"
+        assert entry.user_id == "user_123"
+        assert entry.id.startswith("audit_")
+
+    def test_for_encode(self):
+        """for_encode factory should create encode audit entry."""
+        entry = AuditEntry.for_encode(
+            user_id="user_123",
+            episode_id="ep_456",
+            facts_count=3,
+            duration_ms=150,
+        )
+        assert entry.event == "encode"
+        assert entry.user_id == "user_123"
+        assert entry.details["episode_id"] == "ep_456"
+        assert entry.details["facts_count"] == 3
+        assert entry.duration_ms == 150
+
+    def test_for_recall(self):
+        """for_recall factory should create recall audit entry."""
+        entry = AuditEntry.for_recall(
+            user_id="user_123",
+            query_hash="abc123",
+            results_count=5,
+            memory_types=["episode", "fact"],
+        )
+        assert entry.event == "recall"
+        assert entry.details["query_hash"] == "abc123"
+        assert entry.details["results_count"] == 5
+        assert entry.details["memory_types"] == ["episode", "fact"]
+
+    def test_for_consolidate(self):
+        """for_consolidate factory should create consolidate audit entry."""
+        entry = AuditEntry.for_consolidate(
+            user_id="user_123",
+            episode_ids=["ep_1", "ep_2"],
+            facts_created=2,
+            links_created=1,
+        )
+        assert entry.event == "consolidate"
+        assert entry.details["episode_ids"] == ["ep_1", "ep_2"]
+        assert entry.details["facts_created"] == 2
+        assert entry.details["links_created"] == 1
+
+    def test_for_decay(self):
+        """for_decay factory should create decay audit entry."""
+        entry = AuditEntry.for_decay(
+            user_id="user_123",
+            memories_updated=10,
+            memories_archived=2,
+        )
+        assert entry.event == "decay"
+        assert entry.details["memories_updated"] == 10
+        assert entry.details["memories_archived"] == 2
+
+    def test_str_representation(self):
+        """String representation should show event and user."""
+        entry = AuditEntry(event="encode", user_id="user_123")
+        assert "encode" in str(entry)
+        assert "user_123" in str(entry)
+
+    def test_optional_fields(self):
+        """Optional fields should be None by default."""
+        entry = AuditEntry(event="test", user_id="user_123")
+        assert entry.org_id is None
+        assert entry.session_id is None
+        assert entry.duration_ms is None
