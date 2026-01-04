@@ -18,6 +18,7 @@
 - Follow async/await patterns for all database operations
 - Update README.md when adding user-facing features
 - Add docstrings to public functions
+- **Use Pydantic for ALL data models** — no dataclasses, no TypedDict, no NamedTuple
 - **Use Pydantic AI for ALL LLM interactions** — structured outputs, type-safe responses
 
 ### Ask First
@@ -147,6 +148,48 @@ uv run ruff check src/engram/ && uv run ruff format src/engram/ && uv run mypy s
 
 # 4. Commit, push, create PR
 git push -u origin feature/my-feature
+```
+
+---
+
+## Pydantic (Required for All Data Models)
+
+All data structures MUST use Pydantic. No exceptions.
+
+### Model Pattern
+
+```python
+from pydantic import BaseModel, ConfigDict, Field
+
+class MyModel(BaseModel):
+    """Always add docstrings."""
+
+    model_config = ConfigDict(extra="forbid")  # Catch typos
+
+    id: str = Field(description="Unique identifier")
+    value: float = Field(ge=0.0, le=1.0, description="Bounded value")
+    items: list[str] = Field(default_factory=list)
+```
+
+### Rules
+
+- `ConfigDict(extra="forbid")` on all models (catches field typos)
+- Use `Field()` for validation constraints and descriptions
+- Use `model_dump(mode="json")` for serialization
+- Use `model_validate()` for deserialization
+- Never use `@dataclass`, `TypedDict`, or `NamedTuple`
+
+### Settings Pattern
+
+```python
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="ENGRAM_")
+
+    api_key: str | None = Field(default=None)
+    debug: bool = Field(default=False)
 ```
 
 ---
