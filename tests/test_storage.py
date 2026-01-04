@@ -16,7 +16,6 @@ from engram.models import (
     SemanticMemory,
 )
 from engram.storage import EngramStorage
-from engram.storage.client import COLLECTION_NAMES
 
 # Use a small embedding dimension for tests
 TEST_EMBEDDING_DIM = 4

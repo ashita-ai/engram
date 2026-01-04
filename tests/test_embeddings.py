@@ -27,19 +27,20 @@ class TestOpenAIEmbedder:
 
     def test_init_default_model(self):
         """Should use text-embedding-3-small by default."""
-        embedder = OpenAIEmbedder()
+        # Use dummy key since OpenAI SDK requires it
+        embedder = OpenAIEmbedder(api_key="sk-test-dummy-key")
         assert embedder.model == "text-embedding-3-small"
         assert embedder.dimensions == 1536
 
     def test_init_large_model(self):
         """Should support text-embedding-3-large."""
-        embedder = OpenAIEmbedder(model="text-embedding-3-large")
+        embedder = OpenAIEmbedder(model="text-embedding-3-large", api_key="sk-test-dummy-key")
         assert embedder.model == "text-embedding-3-large"
         assert embedder.dimensions == 3072
 
     def test_init_ada_model(self):
         """Should support legacy ada-002 model."""
-        embedder = OpenAIEmbedder(model="text-embedding-ada-002")
+        embedder = OpenAIEmbedder(model="text-embedding-ada-002", api_key="sk-test-dummy-key")
         assert embedder.model == "text-embedding-ada-002"
         assert embedder.dimensions == 1536
 
@@ -51,7 +52,7 @@ class TestOpenAIEmbedder:
     @pytest.mark.asyncio
     async def test_embed_single(self):
         """Should embed single text."""
-        embedder = OpenAIEmbedder()
+        embedder = OpenAIEmbedder(api_key="sk-test-dummy-key")
 
         # Mock the API response
         mock_response = MagicMock()
@@ -72,7 +73,7 @@ class TestOpenAIEmbedder:
     @pytest.mark.asyncio
     async def test_embed_batch(self):
         """Should embed multiple texts."""
-        embedder = OpenAIEmbedder()
+        embedder = OpenAIEmbedder(api_key="sk-test-dummy-key")
 
         mock_response = MagicMock()
         mock_response.data = [
@@ -95,7 +96,7 @@ class TestOpenAIEmbedder:
     @pytest.mark.asyncio
     async def test_embed_batch_empty(self):
         """Should return empty list for empty input."""
-        embedder = OpenAIEmbedder()
+        embedder = OpenAIEmbedder(api_key="sk-test-dummy-key")
         result = await embedder.embed_batch([])
         assert result == []
 
@@ -176,12 +177,13 @@ class TestGetEmbedder:
 
     def test_default_returns_openai(self):
         """Default settings should return OpenAI embedder."""
-        embedder = get_embedder()
+        settings = Settings(openai_api_key="sk-test-dummy-key")
+        embedder = get_embedder(settings)
         assert isinstance(embedder, OpenAIEmbedder)
 
     def test_openai_provider(self):
         """Should create OpenAI embedder for openai provider."""
-        settings = Settings(embedding_provider="openai")
+        settings = Settings(embedding_provider="openai", openai_api_key="sk-test-dummy-key")
         embedder = get_embedder(settings)
         assert isinstance(embedder, OpenAIEmbedder)
 
@@ -196,6 +198,7 @@ class TestGetEmbedder:
         settings = Settings(
             embedding_provider="openai",
             embedding_model="text-embedding-3-large",
+            openai_api_key="sk-test-dummy-key",
         )
         embedder = get_embedder(settings)
         assert isinstance(embedder, OpenAIEmbedder)
@@ -229,12 +232,12 @@ class TestEmbedderDimensions:
 
     def test_openai_small_dimensions(self):
         """OpenAI small model should have 1536 dimensions."""
-        embedder = OpenAIEmbedder(model="text-embedding-3-small")
+        embedder = OpenAIEmbedder(model="text-embedding-3-small", api_key="sk-test-dummy-key")
         assert embedder.dimensions == 1536
 
     def test_openai_large_dimensions(self):
         """OpenAI large model should have 3072 dimensions."""
-        embedder = OpenAIEmbedder(model="text-embedding-3-large")
+        embedder = OpenAIEmbedder(model="text-embedding-3-large", api_key="sk-test-dummy-key")
         assert embedder.dimensions == 3072
 
     def test_fastembed_small_dimensions(self):
