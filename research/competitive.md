@@ -4,12 +4,12 @@ Technical comparison of AI memory systems. Based on published papers and documen
 
 ## Summary
 
-| System | Ground Truth | Confidence Tracking | Forgetting | Architecture |
-|--------|--------------|---------------------|------------|--------------|
-| **Engram** | Yes | Yes (verbatim/extracted/inferred) | Yes (Ebbinghaus-inspired) | Pydantic AI + Qdrant |
-| **Mem0** | No | No | No | LLM extraction → graph |
-| **Zep/Graphiti** | Yes | No | No | Bi-temporal knowledge graph |
-| **Letta/MemGPT** | Partial | No | No | OS-inspired hierarchy |
+| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Selectivity |
+|--------|--------------|------------|------------|-------------|-----------------|-------------|
+| **Engram** | Yes | Yes | Yes | Yes | Yes | Yes |
+| **Mem0** | No | No | No | No | No | No |
+| **Zep/Graphiti** | Yes | No | No | Yes | Partial | No |
+| **Letta/MemGPT** | Partial | No | No | No | No | No |
 
 ## Mem0
 
@@ -133,7 +133,7 @@ Novel approaches from recent literature:
 
 **Value**: Enables "what did we know on date X?" queries. Useful for debugging and audit.
 
-**For Engram**: Our ground truth preservation provides implicit bi-temporal capability. Could add explicit `derived_at` timestamps if needed.
+**Engram**: Implements bi-temporal tracking with explicit `event_at` and `derived_at` timestamps on all derived memories.
 
 ### Dynamic Memory Linking (A-MEM)
 
@@ -143,7 +143,7 @@ Novel approaches from recent literature:
 
 **Results**: 2x improvement on multi-hop reasoning benchmarks.
 
-**For Engram**: Could add `related_ids` field to semantic memories, populated during consolidation.
+**Engram**: Implements dynamic linking via `related_ids` field on semantic and procedural memories, populated during consolidation.
 
 ### Hierarchical Cognitive Buffers
 
@@ -153,7 +153,7 @@ Novel approaches from recent literature:
 
 **Results**: 58.6% memory reuse vs 0% for naive RAG.
 
-**For Engram**: Maps to our existing memory type hierarchy. Will formalize promotion/demotion policies.
+**Engram**: Implements buffer promotion hierarchy (Working → Episodic → Semantic → Procedural) with explicit promotion triggers based on importance, repetition, and access patterns.
 
 ### Dynamic Engrams (Selectivity Through Consolidation)
 
@@ -166,7 +166,7 @@ Novel approaches from recent literature:
 - Inhibitory plasticity (CCK+ interneurons) is critical for selectivity
 - Training stimulus reactivation during consolidation required for selectivity to emerge
 
-**For Engram**: Will implement selectivity scoring that increases during consolidation passes, and inhibitory facts that track what is explicitly NOT true.
+**Engram**: Implements `selectivity_score` (0.0-1.0) that increases during consolidation passes, and `InhibitoryFact` memory type that tracks what is explicitly NOT true (e.g., "User does NOT use MongoDB").
 
 ---
 

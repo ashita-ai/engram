@@ -117,6 +117,7 @@ engram_episodic    # Raw interactions, immutable
 engram_factual     # Pattern-extracted facts
 engram_semantic    # LLM-inferred knowledge
 engram_procedural  # Behavioral patterns
+engram_inhibitory  # What is NOT true (negations)
 ```
 
 ### Durable Execution: DBOS (Local) + Temporal (Production)
@@ -279,7 +280,8 @@ engram/
 │       │   ├── episode.py      # Episodic memory model
 │       │   ├── fact.py         # Factual memory model
 │       │   ├── semantic.py     # Semantic memory model
-│       │   └── procedural.py   # Procedural memory model
+│       │   ├── procedural.py   # Procedural memory model
+│       │   └── inhibitory.py   # Inhibitory memory model (negations)
 │       ├── extraction/
 │       │   ├── __init__.py
 │       │   ├── patterns.py     # Deterministic extraction (regex)

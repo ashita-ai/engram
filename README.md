@@ -106,6 +106,7 @@ flowchart LR
 
 | Type | Confidence | Source | Use Case |
 |------|------------|--------|----------|
+| **Working** | N/A | Current context | Active conversation (in-memory, volatile) |
 | **Episodic** | Highest | Verbatim storage | Ground truth, audit trail |
 | **Factual** | High | Pattern extraction | Emails, dates, names |
 | **Semantic** | Variable | LLM inference | Preferences, context |
