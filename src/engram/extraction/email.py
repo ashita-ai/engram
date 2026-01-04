@@ -1,23 +1,22 @@
 """Email address extractor.
 
-Uses regex pattern matching with validation to extract email addresses
-from episode content.
+Uses email-validator library for RFC-compliant email extraction and validation.
 """
 
 from __future__ import annotations
 
 import re
 
+from email_validator import EmailNotValidError, validate_email
+
 from engram.models import Episode, Fact
 
 from .base import Extractor
 
-# RFC 5322 simplified pattern - catches most valid emails
-# Allows: local-part@domain.tld
-# Local part: alphanumeric, dots, hyphens, underscores, plus signs
-# Domain: alphanumeric, dots, hyphens
-EMAIL_PATTERN = re.compile(
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+# Simple pattern to find email candidates (liberal matching)
+# The actual validation is done by email-validator
+EMAIL_CANDIDATE_PATTERN = re.compile(
+    r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
     re.IGNORECASE,
 )
 
@@ -25,8 +24,8 @@ EMAIL_PATTERN = re.compile(
 class EmailExtractor(Extractor):
     """Extract email addresses from episode content.
 
-    Uses RFC 5322 simplified regex pattern to find email addresses.
-    Validates basic structure but does not verify deliverability.
+    Uses email-validator library for RFC-compliant validation.
+    Invalid emails are filtered out, valid ones are normalized.
 
     Example:
         ```python
@@ -47,11 +46,21 @@ class EmailExtractor(Extractor):
             episode: Episode containing text to search.
 
         Returns:
-            List of Facts, one per unique email found.
+            List of Facts, one per unique valid email found.
         """
-        matches = EMAIL_PATTERN.findall(episode.content)
+        candidates = EMAIL_CANDIDATE_PATTERN.findall(episode.content)
+        valid_emails: list[str] = []
 
-        # Deduplicate and normalize to lowercase
-        unique_emails = list(dict.fromkeys(email.lower() for email in matches))
+        for candidate in candidates:
+            try:
+                # validate_email normalizes and validates
+                result = validate_email(candidate, check_deliverability=False)
+                valid_emails.append(result.normalized)
+            except EmailNotValidError:
+                # Skip invalid emails
+                continue
+
+        # Deduplicate while preserving order
+        unique_emails = list(dict.fromkeys(valid_emails))
 
         return [self._create_fact(email, episode) for email in unique_emails]

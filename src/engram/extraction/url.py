@@ -1,25 +1,23 @@
 """URL extractor.
 
-Uses regex pattern matching to extract URLs from episode content.
-Supports http, https, and bare domain formats.
+Uses validators library for URL validation combined with regex for extraction.
 """
 
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
+
+import validators
 
 from engram.models import Episode, Fact
 
 from .base import Extractor
 
-# URL pattern - matches http://, https://, and www. prefixes
-# Captures path, query string, and fragments
-URL_PATTERN = re.compile(
-    r"(?:https?://|www\.)"  # Protocol or www
-    r"[A-Za-z0-9]"  # Must start with alphanumeric
-    r"[A-Za-z0-9.-]*"  # Domain characters
-    r"\.[A-Za-z]{2,}"  # TLD
-    r"(?:[/?#][^\s<>\"')*\]]*)?",  # Optional path/query/fragment
+# Pattern to find URL candidates (liberal matching)
+# Actual validation is done by validators library
+URL_CANDIDATE_PATTERN = re.compile(
+    r"(?:https?://|www\.)[^\s<>\"')\]]+",
     re.IGNORECASE,
 )
 
@@ -28,8 +26,8 @@ def normalize_url(url: str) -> str:
     """Normalize URL to consistent format.
 
     - Adds https:// if missing protocol
-    - Lowercases domain portion
-    - Removes trailing punctuation that was incorrectly captured
+    - Lowercases scheme and domain
+    - Removes trailing punctuation
 
     Args:
         url: Raw URL string.
@@ -37,22 +35,25 @@ def normalize_url(url: str) -> str:
     Returns:
         Normalized URL.
     """
-    # Remove trailing punctuation that might have been captured
+    # Remove trailing punctuation
     url = url.rstrip(".,;:!?")
 
     # Add protocol if missing
     if url.lower().startswith("www."):
         url = "https://" + url
 
-    # Lowercase the protocol and domain
-    # Split at first / after protocol
-    if "://" in url:
-        protocol, rest = url.split("://", 1)
-        if "/" in rest:
-            domain, path = rest.split("/", 1)
-            url = f"{protocol.lower()}://{domain.lower()}/{path}"
-        else:
-            url = f"{protocol.lower()}://{rest.lower()}"
+    # Parse and normalize
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.netloc:
+        # Lowercase scheme and netloc, keep path as-is
+        normalized = f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"
+        if parsed.path:
+            normalized += parsed.path
+        if parsed.query:
+            normalized += f"?{parsed.query}"
+        if parsed.fragment:
+            normalized += f"#{parsed.fragment}"
+        return normalized
 
     return url
 
@@ -60,12 +61,8 @@ def normalize_url(url: str) -> str:
 class URLExtractor(Extractor):
     """Extract URLs from episode content.
 
-    Supports various URL formats:
-    - Full URLs: https://example.com/path
-    - HTTP URLs: http://example.com
-    - WWW URLs: www.example.com (normalized to https://)
-
-    URLs are normalized for consistent storage.
+    Uses validators library for URL validation.
+    Supports http, https, and www prefixes.
 
     Example:
         ```python
@@ -86,12 +83,19 @@ class URLExtractor(Extractor):
             episode: Episode containing text to search.
 
         Returns:
-            List of Facts, one per unique URL found.
+            List of Facts, one per unique valid URL found.
         """
-        matches = URL_PATTERN.findall(episode.content)
+        candidates = URL_CANDIDATE_PATTERN.findall(episode.content)
+        valid_urls: list[str] = []
 
-        # Normalize and deduplicate
-        normalized = [normalize_url(url) for url in matches]
-        unique_urls = list(dict.fromkeys(normalized))
+        for candidate in candidates:
+            normalized = normalize_url(candidate)
+
+            # Validate the URL
+            if validators.url(normalized):
+                valid_urls.append(normalized)
+
+        # Deduplicate while preserving order
+        unique_urls = list(dict.fromkeys(valid_urls))
 
         return [self._create_fact(url, episode) for url in unique_urls]
