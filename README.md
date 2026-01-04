@@ -84,6 +84,7 @@ flowchart LR
     EP -->|extract| FACT
     EP -->|negate| INH
     EP -->|consolidate| SEM
+    EP -->|pattern| PROC
 
     EP -.->|store| QD
     FACT -.->|store| QD
