@@ -67,7 +67,5 @@ class ProceduralMemory(MemoryBase):
 
     def __str__(self) -> str:
         """String representation showing pattern content."""
-        content_preview = (
-            self.content[:50] + "..." if len(self.content) > 50 else self.content
-        )
+        content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
         return f"ProceduralMemory({content_preview!r})"

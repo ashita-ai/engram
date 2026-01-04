@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from enum import Enum
+from math import log
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,21 +29,74 @@ class ConfidenceScore(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     value: float = Field(ge=0.0, le=1.0, description="Final composite score 0.0-1.0")
-    extraction_method: ExtractionMethod = Field(
-        description="How this memory was extracted"
-    )
-    extraction_base: float = Field(
-        ge=0.0, le=1.0, description="Base score from extraction method"
-    )
-    supporting_episodes: int = Field(
-        default=1, ge=1, description="Number of corroborating sources"
-    )
+    extraction_method: ExtractionMethod = Field(description="How this memory was extracted")
+    extraction_base: float = Field(ge=0.0, le=1.0, description="Base score from extraction method")
+    supporting_episodes: int = Field(default=1, ge=1, description="Number of corroborating sources")
     last_confirmed: datetime = Field(
         default_factory=lambda: datetime.now(UTC), description="When last seen/confirmed"
     )
-    contradictions: int = Field(
-        default=0, ge=0, description="Number of conflicting evidence items"
-    )
+    contradictions: int = Field(default=0, ge=0, description="Number of conflicting evidence items")
+    verified: bool = Field(default=False, description="Whether format validation passed")
+
+    def recompute(
+        self,
+        extraction_weight: float = 0.50,
+        corroboration_weight: float = 0.25,
+        recency_weight: float = 0.15,
+        verification_weight: float = 0.10,
+        decay_half_life_days: int = 365,
+    ) -> "ConfidenceScore":
+        """Recompute confidence value from all factors.
+
+        Uses weighted sum of:
+        - extraction_base: Base score from extraction method
+        - corroboration: Logarithmic bonus for multiple sources
+        - recency: Exponential decay based on time since confirmation
+        - verification: Binary bonus if format validation passed
+
+        Contradictions apply a penalty that scales with count.
+
+        Args:
+            extraction_weight: Weight for extraction method (default 0.50)
+            corroboration_weight: Weight for source count (default 0.25)
+            recency_weight: Weight for recency (default 0.15)
+            verification_weight: Weight for validation (default 0.10)
+            decay_half_life_days: Days for recency to halve (default 365)
+
+        Returns:
+            Self with updated value field.
+        """
+        # Corroboration: logarithmic scale, 1 source = 0.5, 2 = 0.7, 5 = 0.85, 10 = 1.0
+        # Formula: min(1.0, 0.5 + 0.5 * log2(sources) / log2(10))
+        if self.supporting_episodes >= 10:
+            corroboration_score = 1.0
+        elif self.supporting_episodes == 1:
+            corroboration_score = 0.5
+        else:
+            corroboration_score = min(1.0, 0.5 + 0.5 * log(self.supporting_episodes) / log(10))
+
+        # Recency: exponential decay, 1.0 at confirmation, 0.5 at half-life
+        days_since = (datetime.now(UTC) - self.last_confirmed).days
+        recency_score = 0.5 ** (days_since / decay_half_life_days)
+
+        # Verification: binary 1.0 if verified, 0.0 if not
+        verification_score = 1.0 if self.verified else 0.0
+
+        # Weighted sum
+        raw_score = (
+            self.extraction_base * extraction_weight
+            + corroboration_score * corroboration_weight
+            + recency_score * recency_weight
+            + verification_score * verification_weight
+        )
+
+        # Contradiction penalty: reduce by 10% per contradiction, floor at 0.1
+        if self.contradictions > 0:
+            penalty = 0.9**self.contradictions
+            raw_score = max(0.1, raw_score * penalty)
+
+        self.value = min(1.0, max(0.0, raw_score))
+        return self
 
     def explain(self) -> str:
         """Generate human-readable explanation of confidence score.
@@ -57,7 +111,9 @@ class ConfidenceScore(BaseModel):
             f"confirmed {time_ago}",
         ]
         if self.contradictions > 0:
-            parts.append(f"{self.contradictions} contradiction{'s' if self.contradictions != 1 else ''}")
+            parts.append(
+                f"{self.contradictions} contradiction{'s' if self.contradictions != 1 else ''}"
+            )
         return ", ".join(parts)
 
     @staticmethod

@@ -32,9 +32,7 @@ class InhibitoryFact(MemoryBase):
 
     id: str = Field(default_factory=lambda: generate_id("inh"))
     content: str = Field(description="The negation statement")
-    negates_pattern: str = Field(
-        description="Pattern or keyword this inhibits in retrieval"
-    )
+    negates_pattern: str = Field(description="Pattern or keyword this inhibits in retrieval")
     source_episode_ids: list[str] = Field(
         default_factory=list,
         description="Episodes where this negation was stated",

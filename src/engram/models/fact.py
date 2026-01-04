@@ -28,9 +28,7 @@ class Fact(MemoryBase):
     id: str = Field(default_factory=lambda: generate_id("fact"))
     content: str = Field(description="The extracted fact content")
     category: str = Field(description="Fact category: email, phone, url, date, etc.")
-    source_episode_id: str = Field(
-        description="ID of the Episode this was extracted from"
-    )
+    source_episode_id: str = Field(description="ID of the Episode this was extracted from")
     event_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="When the fact was stated (from source)",

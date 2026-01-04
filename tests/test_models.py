@@ -171,6 +171,103 @@ class TestConfidenceScore:
                 unknown_field="test",
             )
 
+    def test_recompute_basic(self):
+        """recompute() should calculate weighted score."""
+        score = ConfidenceScore(
+            value=0.0,  # Will be recomputed
+            extraction_method=ExtractionMethod.EXTRACTED,
+            extraction_base=0.9,
+            supporting_episodes=1,
+            verified=False,
+        )
+        score.recompute()
+        # extraction: 0.9 * 0.5 = 0.45
+        # corroboration: 0.5 * 0.25 = 0.125 (1 source = 0.5)
+        # recency: ~1.0 * 0.15 = 0.15 (just now)
+        # verification: 0.0 * 0.10 = 0.0
+        # Total: ~0.725
+        assert 0.70 <= score.value <= 0.75
+
+    def test_recompute_with_verification(self):
+        """Verification should add to score."""
+        score = ConfidenceScore(
+            value=0.0,
+            extraction_method=ExtractionMethod.EXTRACTED,
+            extraction_base=0.9,
+            verified=True,
+        )
+        score.recompute()
+        # With verification: adds 0.10
+        assert score.value > 0.75
+
+    def test_recompute_multiple_sources(self):
+        """Multiple sources should increase corroboration score."""
+        score_1 = ConfidenceScore.for_extracted(supporting_episodes=1)
+        score_10 = ConfidenceScore.for_extracted(supporting_episodes=10)
+        score_1.recompute()
+        score_10.recompute()
+        # 10 sources should have higher confidence than 1
+        assert score_10.value > score_1.value
+
+    def test_recompute_with_contradictions(self):
+        """Contradictions should reduce confidence."""
+        score = ConfidenceScore(
+            value=0.9,
+            extraction_method=ExtractionMethod.EXTRACTED,
+            extraction_base=0.9,
+            contradictions=2,
+        )
+        score.recompute()
+        # 2 contradictions = 0.9^2 = 0.81 penalty
+        assert score.value < 0.7
+
+    def test_recompute_recency_decay(self):
+        """Old confirmations should have lower recency score."""
+        old_date = datetime.now(UTC) - timedelta(days=365)
+        score = ConfidenceScore(
+            value=0.9,
+            extraction_method=ExtractionMethod.EXTRACTED,
+            extraction_base=0.9,
+            last_confirmed=old_date,
+        )
+        score.recompute()
+        # 365 days = half-life, so recency contribution halved
+        fresh_score = ConfidenceScore.for_extracted()
+        fresh_score.recompute()
+        assert score.value < fresh_score.value
+
+    def test_recompute_verbatim_high(self):
+        """Verbatim extraction should have high base score."""
+        score = ConfidenceScore.for_verbatim()
+        score.verified = True
+        score.recompute()
+        # extraction_base=1.0, verified=True
+        assert score.value >= 0.75
+
+    def test_recompute_returns_self(self):
+        """recompute() should return self for chaining."""
+        score = ConfidenceScore.for_extracted()
+        result = score.recompute()
+        assert result is score
+
+    def test_recompute_custom_weights(self):
+        """Custom weights should affect score calculation."""
+        score = ConfidenceScore(
+            value=0.0,
+            extraction_method=ExtractionMethod.EXTRACTED,
+            extraction_base=0.9,
+            verified=True,
+        )
+        # Heavy weight on verification
+        score.recompute(
+            extraction_weight=0.1,
+            corroboration_weight=0.1,
+            recency_weight=0.1,
+            verification_weight=0.7,
+        )
+        # verification=1.0 * 0.7 = 0.7 dominates
+        assert score.value >= 0.7
+
 
 class TestEpisode:
     """Tests for Episode model."""

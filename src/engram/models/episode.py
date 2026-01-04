@@ -42,7 +42,5 @@ class Episode(MemoryBase):
 
     def __str__(self) -> str:
         """String representation showing role and truncated content."""
-        content_preview = (
-            self.content[:50] + "..." if len(self.content) > 50 else self.content
-        )
+        content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
         return f"Episode({self.role}: {content_preview!r})"
