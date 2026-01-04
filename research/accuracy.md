@@ -89,7 +89,7 @@ Ground truth preservation enables explicit confidence:
 
 | Source Type | Confidence | Method |
 |-------------|------------|--------|
-| `verbatim` | 100% | Direct quote from episode |
+| `verbatim` | Highest | Direct quote from episode, immutable source |
 | `extracted` | High | Pattern-matched, deterministic |
 | `inferred` | Variable | LLM-derived, uncertain |
 

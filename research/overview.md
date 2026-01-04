@@ -6,7 +6,7 @@ This document explains *why* Engram makes its specific design choices, with cita
 
 ### 1. Multiple Memory Types
 
-**Design**: Engram maintains six distinct memory types (working, episodic, factual, semantic, procedural, scratchpad) rather than a single undifferentiated store.
+**Design**: Engram maintains five distinct memory types (working, episodic, factual, semantic, procedural) rather than a single undifferentiated store.
 
 **Research basis**:
 
@@ -22,8 +22,6 @@ Key evidence:
 - Patients with hippocampal damage lose episodic memory while retaining semantic facts (H.M., [Scoville & Milner, 1957](https://pubmed.ncbi.nlm.nih.gov/13432090/))
 - Procedural memory is neurally distinct from declarative memory ([Milner, 1962](https://www.sciencedirect.com/topics/neuroscience/implicit-memory))
 - Working memory has limited capacity and different dynamics than long-term storage ([Baddeley, 1974](https://en.wikipedia.org/wiki/Baddeley%27s_model_of_working_memory))
-
-See: [Theoretical Foundations](foundations.md)
 
 ---
 
@@ -54,7 +52,7 @@ See: [Accuracy Problem](accuracy.md)
 
 ### 3. Confidence Tracking
 
-**Design**: Every memory carries explicit confidence metadata: `verbatim` (100%), `extracted` (high, deterministic), `inferred` (variable, LLM-derived).
+**Design**: Every memory carries explicit confidence metadata: `verbatim` (highest), `extracted` (high, deterministic), `inferred` (variable, LLM-derived).
 
 **Research basis**:
 
@@ -101,8 +99,6 @@ Selective strengthening occurs naturally through retrieval:
 
 **Engineering implication**: Unbounded memory growth causes relevance problems. Forgetting keeps the store focused on what matters.
 
-See: [Theoretical Foundations](foundations.md)
-
 ---
 
 ### 5. Deferred Consolidation
@@ -129,8 +125,6 @@ Recent neuroscience shows multiple consolidation pathways:
 
 **Engineering implication**: Real-time LLM extraction is expensive and error-prone. Batched offline processing is cheaper and allows error correction.
 
-See: [Theoretical Foundations](foundations.md)
-
 ---
 
 ### 6. Deep Semantic Processing
@@ -148,8 +142,6 @@ The levels of processing framework shows deeper encoding produces stronger memor
 > — [Craik & Tulving, 1975](https://www.simplypsychology.org/levelsofprocessing.html)
 
 **Engineering implication**: Raw storage is shallow. Extracting meaning creates richer indices and better retrieval.
-
-See: [Theoretical Foundations](foundations.md)
 
 ---
 
@@ -175,7 +167,7 @@ We use cognitive science as design inspiration, not strict implementation. These
 ## Further Reading
 
 - [Accuracy & Hallucination Prevention](accuracy.md) — The core problem Engram solves
-- [Theoretical Foundations](foundations.md) — Cognitive science background
+- [Competitive Analysis](competitive.md) — How Engram compares to alternatives
 
 ---
 
@@ -194,3 +186,4 @@ We use cognitive science as design inspiration, not strict implementation. These
 - [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) — Memory as compression under constraints
 - [Dual Pathways to LTM](https://www.news-medical.net/news/20241206/Researchers-discover-new-pathway-to-forming-long-term-memories-in-the-brain.aspx) — LTM can form independently of STM
 - [Molecular Memory Timers](https://www.sciencedaily.com/releases/2025/11/251130050712.htm) — Importance gating in memory persistence
+- [Dynamic and Selective Engrams](https://www.nature.com/articles/s41593-023-01551-w) — Tomé et al., Nature Neuroscience 2024: Memory engrams are dynamic (neurons drop in/out during consolidation) and become selective over time via inhibitory plasticity

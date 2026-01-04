@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/engram.jpg" alt="Engram Logo">
+</p>
+
 # Engram
 
 **Memory you can trust.**
@@ -28,7 +32,7 @@ Engram preserves ground truth and tracks confidence:
 
 1. **Store first, derive later** — Raw conversations stored verbatim. LLM extraction happens in background where errors can be caught.
 
-2. **Track confidence** — Every fact carries provenance: `verbatim` (100%), `extracted` (high), `inferred` (variable).
+2. **Track confidence** — Every fact carries provenance: `verbatim` (highest), `extracted` (high), `inferred` (variable).
 
 3. **Verify on retrieval** — Applications filter by confidence. High-stakes queries use only trusted facts.
 
@@ -56,46 +60,49 @@ Returns: john@example.com (verified against source)
 ## Memory Types
 
 ```mermaid
-graph TB
-    subgraph ENGRAM [" "]
+flowchart LR
+    subgraph INPUT [" "]
         direction TB
-
-        EP["<b>EPISODIC</b><br><i>verbatim</i>"]
-        FACT["<b>FACTUAL</b><br><i>extracted</i>"]
-        SEM["<b>SEMANTIC</b><br><i>inferred</i>"]
-        WM["<b>WORKING</b><br><i>current context</i>"]
-        PROC["<b>PROCEDURAL</b><br><i>preferences</i>"]
-
-        WM -->|encode| EP
-        EP -->|pattern match| FACT
-        EP -->|consolidate| SEM
+        WM([🧠 WORKING])
     end
 
-    QD[("<b>QDRANT</b>")]
+    subgraph CORE [" "]
+        direction TB
+        EP([📝 EPISODIC])
+        FACT{{📊 FACTUAL}}
+        SEM([💡 SEMANTIC])
+        PROC([⚙️ PROCEDURAL])
+    end
 
-    EP -.-> QD
-    FACT -.-> QD
-    SEM -.-> QD
-    PROC -.-> QD
+    subgraph STORE [" "]
+        direction TB
+        QD[(🗄️ QDRANT)]
+    end
 
-    classDef episodic fill:#c4b5fd,stroke:#7c3aed,stroke-width:2px,color:#1e1b4b
-    classDef factual fill:#93c5fd,stroke:#2563eb,stroke-width:2px,color:#1e3a5f
-    classDef semantic fill:#6ee7b7,stroke:#059669,stroke-width:2px,color:#064e3b
-    classDef working fill:#fcd34d,stroke:#d97706,stroke-width:2px,color:#78350f
-    classDef procedural fill:#f9a8d4,stroke:#db2777,stroke-width:2px,color:#500724
-    classDef storage fill:#fdba74,stroke:#ea580c,stroke-width:3px,color:#431407
+    WM ==>|encode| EP
+    EP -->|extract| FACT
+    EP -->|consolidate| SEM
 
-    class EP episodic
-    class FACT factual
-    class SEM semantic
-    class WM working
-    class PROC procedural
-    class QD storage
+    EP -.->|store| QD
+    FACT -.->|store| QD
+    SEM -.->|store| QD
+    PROC -.->|store| QD
+
+    style WM fill:#fbbf24,stroke:#b45309,stroke-width:3px,color:#1c1917
+    style EP fill:#a78bfa,stroke:#7c3aed,stroke-width:3px,color:#1c1917
+    style FACT fill:#60a5fa,stroke:#2563eb,stroke-width:3px,color:#1c1917
+    style SEM fill:#34d399,stroke:#059669,stroke-width:3px,color:#1c1917
+    style PROC fill:#f472b6,stroke:#db2777,stroke-width:3px,color:#1c1917
+    style QD fill:#fb923c,stroke:#c2410c,stroke-width:3px,color:#1c1917
+
+    style INPUT fill:transparent,stroke:#fbbf24,stroke-width:2px,stroke-dasharray:5
+    style CORE fill:transparent,stroke:#a78bfa,stroke-width:2px,stroke-dasharray:5
+    style STORE fill:transparent,stroke:#fb923c,stroke-width:2px,stroke-dasharray:5
 ```
 
 | Type | Confidence | Source | Use Case |
 |------|------------|--------|----------|
-| **Episodic** | 100% | Verbatim storage | Ground truth, audit trail |
+| **Episodic** | Highest | Verbatim storage | Ground truth, audit trail |
 | **Factual** | High | Pattern extraction | Emails, dates, names |
 | **Semantic** | Variable | LLM inference | Preferences, context |
 | **Procedural** | High | Pattern detection | Behavioral preferences |
@@ -182,7 +189,7 @@ Every derived memory points back to source episodes. If extraction makes a mista
 
 | Source Type | Confidence | Method |
 |-------------|------------|--------|
-| `verbatim` | 100% | Direct quote |
+| `verbatim` | Highest | Direct quote, immutable source |
 | `extracted` | High | Pattern-matched, deterministic |
 | `inferred` | Variable | LLM-derived |
 
@@ -203,6 +210,7 @@ Memories decay over time. Unimportant memories fade; important ones persist. Thi
 - [Accuracy & Hallucination Prevention](research/accuracy.md) — Why ground truth matters
 - [Architecture](docs/architecture.md) — Memory types, data flow, storage
 - [Research Foundations](research/overview.md) — Theoretical basis
+- [Competitive Analysis](research/competitive.md) — How Engram compares to alternatives
 
 ## Status
 

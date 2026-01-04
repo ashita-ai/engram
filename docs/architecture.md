@@ -2,6 +2,8 @@
 
 Engram is a memory system for LLM applications built on Pydantic AI with durable execution.
 
+> **Status**: Pre-alpha. This document describes the target architecture. Code examples show proposed APIs, not current implementations. Durable execution integrations (DBOS, Temporal, Prefect) are planned but not yet built.
+
 ## Stack
 
 ```
@@ -132,7 +134,7 @@ Every memory carries provenance:
 
 | Source Type | Confidence | Method |
 |-------------|------------|--------|
-| `verbatim` | 100% | Direct quote |
+| `verbatim` | Highest | Direct quote, immutable source |
 | `extracted` | High | Pattern matching (deterministic) |
 | `inferred` | Variable | LLM-derived |
 
@@ -152,12 +154,11 @@ Expensive LLM work is batched and deferred:
 
 | Type | Mutability | Decay | Confidence | Storage |
 |------|------------|-------|------------|---------|
-| **Episodic** | Immutable | Fast | High (verbatim) | Qdrant |
+| **Episodic** | Immutable | Fast | Highest (verbatim) | Qdrant |
 | **Factual** | Immutable | Slow | High (extracted) | Qdrant |
 | **Semantic** | Mutable | Slow | Variable | Qdrant |
 | **Procedural** | Mutable | Very slow | Variable | Qdrant |
 | **Working** | Volatile | N/A | N/A | In-memory |
-| **Scratchpad** | Mutable | N/A | N/A | Qdrant |
 
 ## Data Flow
 
@@ -310,3 +311,90 @@ Decay constants by type:
 - Factual: Slow (months)
 - Semantic: Slow (months)
 - Procedural: Very slow (years)
+
+## Planned Enhancements
+
+Features informed by recent research (2024-2025):
+
+### Dynamic Memory Linking
+
+Inspired by A-MEM (NeurIPS 2025), memories form explicit links to related memories:
+
+```python
+class SemanticMemory(BaseModel):
+    content: str
+    source_episode_ids: list[str]
+    confidence: float
+    related_ids: list[str] = []  # Links to related memories
+```
+
+During consolidation, identify related memories and populate links. Enables multi-hop reasoning: "User uses PostgreSQL" → "PostgreSQL is relational" → "User prefers relational DBs".
+
+### Bi-Temporal Timestamps
+
+Add explicit `derived_at` to track when facts were extracted:
+
+```python
+class Fact(BaseModel):
+    content: str
+    source_episode_id: str
+    event_at: datetime      # When the fact was true (from episode)
+    derived_at: datetime    # When we extracted it
+    confidence: float
+```
+
+Enables "what did we know on date X?" queries for debugging and audit.
+
+### Formalized Buffer Promotion
+
+The Cognitive Workspace paper shows 58.6% memory reuse with explicit promotion policies. Our memory types already form a hierarchy:
+
+```
+Working (volatile) → Episodic (fast decay) → Semantic (slow decay) → Procedural (very slow)
+```
+
+Promotion triggers:
+- High-importance episode → immediate semantic extraction
+- Repeated pattern → procedural memory
+- Low access + time → archive or delete
+
+### Selectivity Through Pruning
+
+Inspired by dynamic engram research ([Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)), memories start broad and become selective during consolidation:
+
+```python
+class SemanticMemory(BaseModel):
+    content: str
+    source_episode_ids: list[str]
+    confidence: float
+    selectivity_score: float = 0.0  # 0 = broad, 1 = highly selective
+    consolidation_passes: int = 0
+```
+
+During consolidation:
+1. Initial extraction captures broad associations (low selectivity)
+2. Subsequent passes prune weak/contradicted associations
+3. Selectivity score increases as memory stabilizes
+4. High-selectivity memories are more reliable for retrieval
+
+This mirrors biological findings: engram neurons transition from unselective → selective over ~12 hours, with only 10-40% overlap between encoding and recall populations.
+
+### Inhibitory Facts (Negative Knowledge)
+
+Also from dynamic engram research: inhibitory plasticity is critical for memory selectivity. CCK+ interneurons actively suppress irrelevant associations.
+
+```python
+class InhibitoryFact(BaseModel):
+    """Track what is explicitly NOT true to prevent false matches."""
+    content: str                    # "User does NOT use MongoDB"
+    negates_pattern: str            # Pattern this inhibits
+    source_episode_ids: list[str]
+    confidence: float
+```
+
+Use cases:
+- User corrects a misunderstanding → create inhibitory fact
+- Contradictory information detected → suppress weaker association
+- Explicit negation in conversation → "I don't use Windows"
+
+During retrieval, inhibitory facts filter out false positives before ranking
