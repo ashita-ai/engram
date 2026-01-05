@@ -48,7 +48,7 @@ Episodic Memory (immutable, verbatim)
 Factual Memory: email=john@example.com
 ├── Source: Episode #1234
 ├── Extraction: pattern match (deterministic)
-└── Confidence: 1.0
+└── Confidence: 0.9
 
 Later query: "What's the user's email?"
     ↓
