@@ -276,3 +276,52 @@ class SourcesResponse(BaseModel):
     memory_type: str
     sources: list[EpisodeResponse]
     count: int = Field(ge=0, description="Number of source episodes")
+
+
+class SourceEpisodeDetail(BaseModel):
+    """Detail about a source episode in verification result.
+
+    Attributes:
+        id: Episode ID.
+        content: Episode content.
+        role: Role of the speaker.
+        timestamp: ISO timestamp.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    content: str
+    role: str
+    timestamp: str
+
+
+class VerificationResponse(BaseModel):
+    """Response for verify endpoint.
+
+    Provides full traceability from a derived memory back to
+    its source episodes with an explanation of derivation.
+
+    Attributes:
+        memory_id: ID of the verified memory.
+        memory_type: Type of memory (fact, semantic, etc.).
+        content: The memory content.
+        verified: True if sources found and traceable.
+        source_episodes: Source episode details.
+        extraction_method: How memory was extracted.
+        confidence: Current confidence score.
+        explanation: Human-readable derivation trace.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(description="ID of the verified memory")
+    memory_type: str = Field(description="Type: fact, semantic, procedural, inhibitory")
+    content: str = Field(description="The memory content")
+    verified: bool = Field(description="True if sources found and traceable")
+    source_episodes: list[SourceEpisodeDetail] = Field(
+        default_factory=list, description="Source episode details"
+    )
+    extraction_method: str = Field(description="How memory was extracted")
+    confidence: float = Field(ge=0.0, le=1.0, description="Current confidence score")
+    explanation: str = Field(description="Human-readable derivation trace")

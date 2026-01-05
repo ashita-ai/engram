@@ -21,7 +21,9 @@ from .schemas import (
     RecallRequest,
     RecallResponse,
     RecallResultResponse,
+    SourceEpisodeDetail,
     SourcesResponse,
+    VerificationResponse,
     WorkingMemoryResponse,
 )
 
@@ -396,4 +398,98 @@ async def get_sources(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while retrieving memory sources",
+        ) from e
+
+
+@router.get("/memories/{memory_id}/verify", response_model=VerificationResponse, tags=["memory"])
+async def verify_memory(
+    memory_id: str,
+    user_id: str,
+    service: ServiceDep,
+) -> VerificationResponse:
+    """Verify a memory against its source episodes.
+
+    Traces a derived memory (fact, semantic, procedural, or inhibitory)
+    back to its source episode(s) and provides a human-readable explanation
+    of how it was derived. This is core to Engram's "memory you can trust"
+    value proposition.
+
+    Args:
+        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or inh_).
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+
+    Returns:
+        Verification result with source traceability and explanation.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if memory not found.
+
+    Example:
+        GET /memories/fact_abc123/verify?user_id=u1
+
+        Response:
+        {
+            "memory_id": "fact_abc123",
+            "memory_type": "fact",
+            "content": "email=john@example.com",
+            "verified": true,
+            "source_episodes": [
+                {"id": "ep_xyz", "content": "My email is john@example.com", ...}
+            ],
+            "extraction_method": "extracted",
+            "confidence": 0.9,
+            "explanation": "Pattern-matched email from source episode(s). ..."
+        }
+    """
+    # Validate memory ID format
+    valid_prefixes = ("fact_", "sem_", "proc_", "inh_")
+    if not memory_id.startswith(valid_prefixes):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Expected prefix: fact_, sem_, proc_, or inh_",
+        )
+
+    try:
+        result = await service.verify(memory_id, user_id)
+
+        # Convert source episodes to response format
+        source_episode_responses = [
+            SourceEpisodeDetail(
+                id=ep["id"],
+                content=ep["content"],
+                role=ep["role"],
+                timestamp=ep["timestamp"],
+            )
+            for ep in result.source_episodes
+        ]
+
+        return VerificationResponse(
+            memory_id=result.memory_id,
+            memory_type=result.memory_type,
+            content=result.content,
+            verified=result.verified,
+            source_episodes=source_episode_responses,
+            extraction_method=result.extraction_method,
+            confidence=result.confidence,
+            explanation=result.explanation,
+        )
+
+    except KeyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception("Failed to verify memory %s", memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while verifying the memory",
         ) from e

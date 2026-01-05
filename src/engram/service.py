@@ -90,6 +90,37 @@ class RecallResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class VerificationResult(BaseModel):
+    """Result of verifying a memory against its sources.
+
+    Provides full traceability from a derived memory back to
+    the source episode(s) it was extracted from.
+
+    Attributes:
+        memory_id: ID of the verified memory.
+        memory_type: Type of memory (fact, semantic, etc.).
+        content: The memory content.
+        verified: Whether sources were found and content matches.
+        source_episodes: Source episode contents.
+        extraction_method: How the memory was extracted.
+        confidence: Current confidence score.
+        explanation: Human-readable derivation trace.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(description="ID of the verified memory")
+    memory_type: str = Field(description="Type: fact, semantic, procedural, inhibitory")
+    content: str = Field(description="The memory content")
+    verified: bool = Field(description="True if sources found and traceable")
+    source_episodes: list[dict[str, Any]] = Field(
+        default_factory=list, description="Source episode details"
+    )
+    extraction_method: str = Field(description="How memory was extracted")
+    confidence: float = Field(ge=0.0, le=1.0, description="Current confidence score")
+    explanation: str = Field(description="Human-readable derivation trace")
+
+
 @dataclass
 class EngramService:
     """High-level Engram service for encoding and recalling memories.
@@ -503,3 +534,139 @@ class EngramService:
         episodes.sort(key=lambda e: e.timestamp)
 
         return episodes
+
+    async def verify(
+        self,
+        memory_id: str,
+        user_id: str,
+    ) -> VerificationResult:
+        """Verify a memory against its source episodes.
+
+        Traces a derived memory back to its source episode(s) and
+        generates a human-readable explanation of how it was derived.
+
+        Args:
+            memory_id: ID of the memory to verify.
+            user_id: User ID for multi-tenancy isolation.
+
+        Returns:
+            VerificationResult with source traceability and explanation.
+
+        Raises:
+            ValueError: If memory type cannot be determined from ID prefix.
+            KeyError: If memory not found.
+
+        Example:
+            ```python
+            # Verify a fact and see its derivation
+            result = await engram.verify("fact_abc123", user_id="u1")
+            print(result.explanation)
+            # "Extracted from episode ep_xyz on 2024-01-15.
+            #  Pattern match: email
+            #  Confidence: 0.90: extracted, 1 source, confirmed just now"
+
+            for ep in result.source_episodes:
+                print(f"Source: {ep['content']}")
+            ```
+        """
+        from engram.models import ConfidenceScore, ExtractionMethod
+
+        # Get memory and its metadata based on type
+        content: str
+        confidence: ConfidenceScore
+        memory_type: str
+        category: str = ""
+
+        if memory_id.startswith("fact_"):
+            memory_type = "fact"
+            fact = await self.storage.get_fact(memory_id, user_id)
+            if fact is None:
+                raise KeyError(f"Fact not found: {memory_id}")
+            content = fact.content
+            confidence = fact.confidence
+            category = fact.category
+
+        elif memory_id.startswith("sem_"):
+            memory_type = "semantic"
+            semantic = await self.storage.get_semantic(memory_id, user_id)
+            if semantic is None:
+                raise KeyError(f"SemanticMemory not found: {memory_id}")
+            content = semantic.content
+            confidence = semantic.confidence
+
+        elif memory_id.startswith("proc_"):
+            memory_type = "procedural"
+            procedural = await self.storage.get_procedural(memory_id, user_id)
+            if procedural is None:
+                raise KeyError(f"ProceduralMemory not found: {memory_id}")
+            content = procedural.content
+            confidence = procedural.confidence
+
+        elif memory_id.startswith("inh_"):
+            memory_type = "inhibitory"
+            inhibitory = await self.storage.get_inhibitory(memory_id, user_id)
+            if inhibitory is None:
+                raise KeyError(f"InhibitoryFact not found: {memory_id}")
+            content = inhibitory.content
+            confidence = inhibitory.confidence
+
+        else:
+            raise ValueError(
+                f"Cannot determine memory type from ID: {memory_id}. "
+                "Expected prefix: fact_, sem_, proc_, or inh_"
+            )
+
+        # Get source episodes
+        source_episodes = await self.get_sources(memory_id, user_id)
+
+        # Build source episode summaries
+        episode_details: list[dict[str, Any]] = []
+        for ep in source_episodes:
+            episode_details.append(
+                {
+                    "id": ep.id,
+                    "content": ep.content,
+                    "role": ep.role,
+                    "timestamp": ep.timestamp.isoformat(),
+                }
+            )
+
+        # Generate explanation
+        explanation_parts: list[str] = []
+
+        # Describe extraction
+        if confidence.extraction_method == ExtractionMethod.EXTRACTED:
+            if category:
+                explanation_parts.append(f"Pattern-matched {category} from source episode(s).")
+            else:
+                explanation_parts.append("Pattern-matched from source episode(s).")
+        elif confidence.extraction_method == ExtractionMethod.INFERRED:
+            explanation_parts.append("LLM-inferred from source episode(s).")
+        else:  # VERBATIM
+            explanation_parts.append("Verbatim quote from source episode.")
+
+        # Source info
+        if source_episodes:
+            if len(source_episodes) == 1:
+                ep = source_episodes[0]
+                explanation_parts.append(
+                    f"Source: {ep.id} ({ep.timestamp.strftime('%Y-%m-%d %H:%M')})."
+                )
+            else:
+                explanation_parts.append(f"Sources: {len(source_episodes)} episodes.")
+
+        # Confidence explanation
+        explanation_parts.append(f"Confidence: {confidence.explain()}")
+
+        explanation = " ".join(explanation_parts)
+
+        return VerificationResult(
+            memory_id=memory_id,
+            memory_type=memory_type,
+            content=content,
+            verified=len(source_episodes) > 0,
+            source_episodes=episode_details,
+            extraction_method=confidence.extraction_method.value,
+            confidence=confidence.value,
+            explanation=explanation,
+        )

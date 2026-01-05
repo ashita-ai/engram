@@ -612,3 +612,118 @@ class TestConsolidationIntegration:
         assert result.episodes_processed == 0
         assert result.semantic_memories_created == 0
         assert result.links_created == 0
+
+
+class TestVerifyWorkflow:
+    """Tests for the verify() method workflow."""
+
+    @pytest.fixture
+    def mock_embedder(self):
+        """Create a mock embedder."""
+        embedder = AsyncMock()
+
+        async def embed_side_effect(text: str) -> list[float]:
+            hash_val = hash(text) % 1000 / 1000
+            return [hash_val, 1 - hash_val, 0.5]
+
+        async def embed_batch_side_effect(texts: list[str]) -> list[list[float]]:
+            return [await embed_side_effect(text) for text in texts]
+
+        embedder.embed = AsyncMock(side_effect=embed_side_effect)
+        embedder.embed_batch = AsyncMock(side_effect=embed_batch_side_effect)
+        return embedder
+
+    @pytest.fixture
+    def mock_storage(self):
+        """Create a mock storage for verify testing."""
+        storage = AsyncMock()
+        storage._episodes: dict[str, Episode] = {}
+        storage._facts: dict[str, Fact] = {}
+
+        async def store_episode(episode: Episode) -> str:
+            storage._episodes[episode.id] = episode
+            return episode.id
+
+        async def store_fact(fact: Fact) -> str:
+            storage._facts[fact.id] = fact
+            return fact.id
+
+        async def get_episode(episode_id: str, user_id: str) -> Episode | None:
+            ep = storage._episodes.get(episode_id)
+            if ep and ep.user_id == user_id:
+                return ep
+            return None
+
+        async def get_fact(fact_id: str, user_id: str) -> Fact | None:
+            fact = storage._facts.get(fact_id)
+            if fact and fact.user_id == user_id:
+                return fact
+            return None
+
+        storage.store_episode = AsyncMock(side_effect=store_episode)
+        storage.store_fact = AsyncMock(side_effect=store_fact)
+        storage.get_episode = AsyncMock(side_effect=get_episode)
+        storage.get_fact = AsyncMock(side_effect=get_fact)
+        storage.log_audit = AsyncMock()
+        storage.initialize = AsyncMock()
+        storage.close = AsyncMock()
+
+        return storage
+
+    @pytest.mark.asyncio
+    async def test_verify_fact_success(self, mock_storage, mock_embedder):
+        """Test verifying a fact traces back to its source episode."""
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        # Encode an email to get a fact
+        result = await service.encode(
+            content="My email is test@example.com",
+            role="user",
+            user_id="user_123",
+        )
+
+        assert len(result.facts) >= 1
+        email_fact = next((f for f in result.facts if f.category == "email"), None)
+        assert email_fact is not None
+
+        # Verify the fact
+        verification = await service.verify(email_fact.id, "user_123")
+
+        assert verification.memory_id == email_fact.id
+        assert verification.memory_type == "fact"
+        assert verification.verified is True
+        assert len(verification.source_episodes) == 1
+        assert verification.extraction_method == "extracted"
+        assert verification.confidence == 0.9
+        assert "Pattern-matched" in verification.explanation
+
+    @pytest.mark.asyncio
+    async def test_verify_fact_not_found(self, mock_storage, mock_embedder):
+        """Test verify raises KeyError for non-existent fact."""
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        with pytest.raises(KeyError, match="Fact not found"):
+            await service.verify("fact_nonexistent", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_verify_invalid_memory_id(self, mock_storage, mock_embedder):
+        """Test verify raises ValueError for invalid memory ID format."""
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        with pytest.raises(ValueError, match="Cannot determine memory type"):
+            await service.verify("invalid_id_format", "user_123")
