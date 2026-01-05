@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from engram.config import Settings
+from engram.workflows import DurableAgentFactory, init_workflows, shutdown_workflows
 from engram.workflows.consolidation import (
     ConsolidationResult,
     ExtractedFact,
@@ -261,3 +263,119 @@ class TestRunConsolidation:
         assert result.episodes_processed == 1
         assert result.semantic_memories_created == 1
         mock_durable_agent.run.assert_called_once()
+
+
+class TestDurableAgentFactory:
+    """Tests for DurableAgentFactory with DBOS backend."""
+
+    @pytest.fixture(autouse=True)
+    def cleanup_workflows(self) -> None:
+        """Ensure workflows are shut down after each test."""
+        yield
+        shutdown_workflows()
+
+    def test_factory_backend_property(self) -> None:
+        """Test factory returns configured backend."""
+        settings = Settings(openai_api_key="sk-test", durable_backend="dbos")
+        factory = DurableAgentFactory(settings)
+        assert factory.backend == "dbos"
+
+    def test_factory_temporal_backend(self) -> None:
+        """Test factory accepts temporal backend."""
+        settings = Settings(openai_api_key="sk-test", durable_backend="temporal")
+        factory = DurableAgentFactory(settings)
+        assert factory.backend == "temporal"
+
+    def test_factory_prefect_backend(self) -> None:
+        """Test factory accepts prefect backend."""
+        settings = Settings(openai_api_key="sk-test", durable_backend="prefect")
+        factory = DurableAgentFactory(settings)
+        assert factory.backend == "prefect"
+
+    def test_factory_not_initialized_raises(self) -> None:
+        """Test factory raises when not initialized."""
+        settings = Settings(openai_api_key="sk-test", durable_backend="dbos")
+        factory = DurableAgentFactory(settings)
+        with pytest.raises(RuntimeError, match="not initialized"):
+            factory.get_consolidation_agent()
+
+    def test_factory_dbos_initialization(self) -> None:
+        """Test DBOS factory initializes correctly with in-memory SQLite."""
+        settings = Settings(
+            openai_api_key="sk-test",
+            durable_backend="dbos",
+            database_url="sqlite:///:memory:",
+        )
+        factory = DurableAgentFactory(settings)
+
+        # Mock DBOS and DBOSAgent at the source modules
+        with patch("dbos.DBOS") as mock_dbos_class:
+            with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
+                factory.initialize()
+
+                # DBOS should be configured
+                mock_dbos_class.assert_called_once()
+                mock_dbos_class.launch.assert_called_once()
+
+        assert factory._initialized
+
+    def test_factory_returns_wrapped_agents(self) -> None:
+        """Test factory returns DBOS-wrapped agents after initialization."""
+        settings = Settings(
+            openai_api_key="sk-test",
+            durable_backend="dbos",
+            database_url="sqlite:///:memory:",
+        )
+        factory = DurableAgentFactory(settings)
+
+        with patch("dbos.DBOS"):
+            with patch("pydantic_ai.durable_exec.dbos.DBOSAgent") as mock_dbos_agent:
+                mock_dbos_agent.return_value = MagicMock()
+                factory.initialize()
+
+                consolidation = factory.get_consolidation_agent()
+                decay = factory.get_decay_agent()
+
+                assert consolidation is not None
+                assert decay is not None
+                # Both should be wrapped by DBOSAgent
+                assert mock_dbos_agent.call_count == 2
+
+    def test_init_workflows_global_function(self) -> None:
+        """Test init_workflows convenience function."""
+        settings = Settings(
+            openai_api_key="sk-test",
+            durable_backend="dbos",
+            database_url="sqlite:///:memory:",
+        )
+
+        with patch("dbos.DBOS"):
+            with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
+                factory = init_workflows(settings)
+
+                assert factory is not None
+                assert factory._initialized
+
+                # Second call returns same factory
+                factory2 = init_workflows(settings)
+                assert factory is factory2
+
+    def test_shutdown_workflows_clears_global(self) -> None:
+        """Test shutdown_workflows clears global factory."""
+        settings = Settings(
+            openai_api_key="sk-test",
+            durable_backend="dbos",
+            database_url="sqlite:///:memory:",
+        )
+
+        with patch("dbos.DBOS"):
+            with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
+                init_workflows(settings)
+
+        shutdown_workflows()
+
+        # Should be able to init again
+        with patch("dbos.DBOS"):
+            with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
+                factory = init_workflows(settings)
+                assert factory._initialized
