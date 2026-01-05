@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from engram.config import Settings
-from engram.models import Episode, Fact
+from engram.models import Episode, Fact, InhibitoryFact, ProceduralMemory, SemanticMemory
 from engram.service import EncodeResult, EngramService, RecallResult
 from engram.storage import ScoredResult
 
@@ -456,3 +456,181 @@ class TestWorkingMemory:
         working_results = [r for r in results if r.memory_type == "working"]
         assert len(working_results) == 1
         assert working_results[0].content == "User 1 content"
+
+
+class TestGetSources:
+    """Tests for EngramService.get_sources method."""
+
+    @pytest.fixture
+    def mock_service(self):
+        """Create a service with mocked dependencies."""
+        storage = AsyncMock()
+        embedder = AsyncMock()
+        pipeline = MagicMock()
+        settings = Settings(openai_api_key="sk-test-dummy-key")
+
+        return EngramService(
+            storage=storage,
+            embedder=embedder,
+            pipeline=pipeline,
+            settings=settings,
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_sources_for_fact(self, mock_service):
+        """Should return source episode for a fact."""
+        source_episode = Episode(
+            id="ep_source_123",
+            content="My email is user@example.com",
+            role="user",
+            user_id="user_123",
+        )
+        mock_fact = Fact(
+            id="fact_abc123",
+            content="user@example.com",
+            category="email",
+            source_episode_id="ep_source_123",
+            user_id="user_123",
+        )
+
+        mock_service.storage.get_fact.return_value = mock_fact
+        mock_service.storage.get_episode.return_value = source_episode
+
+        episodes = await mock_service.get_sources("fact_abc123", "user_123")
+
+        assert len(episodes) == 1
+        assert episodes[0].id == "ep_source_123"
+        assert episodes[0].content == "My email is user@example.com"
+        mock_service.storage.get_fact.assert_called_once_with("fact_abc123", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_get_sources_for_semantic(self, mock_service):
+        """Should return source episodes for a semantic memory."""
+        source_episodes = [
+            Episode(id="ep_1", content="First episode", role="user", user_id="user_123"),
+            Episode(id="ep_2", content="Second episode", role="user", user_id="user_123"),
+        ]
+        mock_semantic = SemanticMemory(
+            id="sem_xyz789",
+            content="User prefers email communication",
+            source_episode_ids=["ep_1", "ep_2"],
+            user_id="user_123",
+        )
+
+        mock_service.storage.get_semantic.return_value = mock_semantic
+        mock_service.storage.get_episode.side_effect = source_episodes
+
+        episodes = await mock_service.get_sources("sem_xyz789", "user_123")
+
+        assert len(episodes) == 2
+        mock_service.storage.get_semantic.assert_called_once_with("sem_xyz789", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_get_sources_for_procedural(self, mock_service):
+        """Should return source episodes for a procedural memory."""
+        source_episode = Episode(
+            id="ep_proc_1", content="Always greet politely", role="user", user_id="user_123"
+        )
+        mock_procedural = ProceduralMemory(
+            id="proc_abc",
+            content="When user arrives, say hello",
+            source_episode_ids=["ep_proc_1"],
+            user_id="user_123",
+        )
+
+        mock_service.storage.get_procedural.return_value = mock_procedural
+        mock_service.storage.get_episode.return_value = source_episode
+
+        episodes = await mock_service.get_sources("proc_abc", "user_123")
+
+        assert len(episodes) == 1
+        mock_service.storage.get_procedural.assert_called_once_with("proc_abc", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_get_sources_for_inhibitory(self, mock_service):
+        """Should return source episodes for an inhibitory fact."""
+        source_episode = Episode(
+            id="ep_inh_1", content="I don't like spam", role="user", user_id="user_123"
+        )
+        mock_inhibitory = InhibitoryFact(
+            id="inh_def",
+            content="User does not want promotional emails",
+            negates_pattern="promotional emails",
+            source_episode_ids=["ep_inh_1"],
+            user_id="user_123",
+        )
+
+        mock_service.storage.get_inhibitory.return_value = mock_inhibitory
+        mock_service.storage.get_episode.return_value = source_episode
+
+        episodes = await mock_service.get_sources("inh_def", "user_123")
+
+        assert len(episodes) == 1
+        mock_service.storage.get_inhibitory.assert_called_once_with("inh_def", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_get_sources_fact_not_found(self, mock_service):
+        """Should raise KeyError if fact not found."""
+        mock_service.storage.get_fact.return_value = None
+
+        with pytest.raises(KeyError, match="Fact not found"):
+            await mock_service.get_sources("fact_nonexistent", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_get_sources_semantic_not_found(self, mock_service):
+        """Should raise KeyError if semantic memory not found."""
+        mock_service.storage.get_semantic.return_value = None
+
+        with pytest.raises(KeyError, match="SemanticMemory not found"):
+            await mock_service.get_sources("sem_nonexistent", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_get_sources_invalid_prefix(self, mock_service):
+        """Should raise ValueError for invalid memory ID prefix."""
+        with pytest.raises(ValueError, match="Cannot determine memory type"):
+            await mock_service.get_sources("invalid_id", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_get_sources_episode_prefix(self, mock_service):
+        """Should raise ValueError for episode prefix (not a derived memory)."""
+        with pytest.raises(ValueError, match="Cannot determine memory type"):
+            await mock_service.get_sources("ep_123", "user_123")
+
+    @pytest.mark.asyncio
+    async def test_get_sources_returns_chronological_order(self, mock_service):
+        """Should return episodes sorted by timestamp."""
+        from datetime import datetime, timedelta
+
+        now = datetime.now()
+        older_episode = Episode(
+            id="ep_old",
+            content="First",
+            role="user",
+            user_id="user_123",
+            timestamp=now - timedelta(hours=1),
+        )
+        newer_episode = Episode(
+            id="ep_new",
+            content="Second",
+            role="user",
+            user_id="user_123",
+            timestamp=now,
+        )
+
+        mock_semantic = SemanticMemory(
+            id="sem_test",
+            content="Test semantic",
+            source_episode_ids=["ep_new", "ep_old"],  # Out of order
+            user_id="user_123",
+        )
+
+        mock_service.storage.get_semantic.return_value = mock_semantic
+        # Return episodes in wrong order
+        mock_service.storage.get_episode.side_effect = [newer_episode, older_episode]
+
+        episodes = await mock_service.get_sources("sem_test", "user_123")
+
+        # Should be sorted chronologically (older first)
+        assert len(episodes) == 2
+        assert episodes[0].id == "ep_old"
+        assert episodes[1].id == "ep_new"

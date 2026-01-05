@@ -20,6 +20,7 @@ from .schemas import (
     RecallRequest,
     RecallResponse,
     RecallResultResponse,
+    SourcesResponse,
     WorkingMemoryResponse,
 )
 
@@ -312,3 +313,80 @@ async def clear_working_memory(
     This is typically called at the end of a session.
     """
     service.clear_working_memory()
+
+
+@router.get("/memories/{memory_id}/sources", response_model=SourcesResponse, tags=["memory"])
+async def get_sources(
+    memory_id: str,
+    user_id: str,
+    service: ServiceDep,
+) -> SourcesResponse:
+    """Get source episodes for a derived memory.
+
+    Traces a derived memory (fact, semantic, procedural, or inhibitory)
+    back to the source episode(s) it was extracted from. This enables
+    provenance tracking and allows users to verify the origin of any
+    derived knowledge.
+
+    Args:
+        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or inh_).
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+
+    Returns:
+        Source episodes in chronological order.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if memory not found.
+    """
+    # Determine memory type from ID prefix
+    if memory_id.startswith("fact_"):
+        memory_type = "fact"
+    elif memory_id.startswith("sem_"):
+        memory_type = "semantic"
+    elif memory_id.startswith("proc_"):
+        memory_type = "procedural"
+    elif memory_id.startswith("inh_"):
+        memory_type = "inhibitory"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Expected prefix: fact_, sem_, proc_, or inh_",
+        )
+
+    try:
+        episodes = await service.get_sources(memory_id, user_id)
+
+        episode_responses = [
+            EpisodeResponse(
+                id=ep.id,
+                content=ep.content,
+                role=ep.role,
+                user_id=ep.user_id,
+                org_id=ep.org_id,
+                session_id=ep.session_id,
+                importance=ep.importance,
+                created_at=ep.timestamp.isoformat(),
+            )
+            for ep in episodes
+        ]
+
+        return SourcesResponse(
+            memory_id=memory_id,
+            memory_type=memory_type,
+            sources=episode_responses,
+            count=len(episode_responses),
+        )
+
+    except KeyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get sources: {e}",
+        ) from e
