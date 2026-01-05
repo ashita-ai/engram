@@ -21,12 +21,17 @@ _ureg: Any = UnitRegistry()
 
 # Pattern to find potential quantity expressions
 # Matches: "5 km", "72°F", "2.5 liters", "100 mph", etc.
+# Uses negative lookbehind to avoid matching time patterns like "3:30 PM"
 QUANTITY_PATTERN = re.compile(
+    r"(?<!:)"  # Negative lookbehind: not preceded by colon (avoids 3:30 PM)
     r"\b(\d+(?:\.\d+)?)\s*"  # Number (integer or decimal)
     r"([a-zA-Z°][a-zA-Z°/²³]*(?:\s*/\s*[a-zA-Z°][a-zA-Z°/²³]*)?)"  # Unit
     r"\b",
     re.IGNORECASE,
 )
+
+# Units that are ambiguous with time/date notation - skip these
+_AMBIGUOUS_UNITS = {"am", "pm", "st", "nd", "rd", "th"}
 
 
 class QuantityExtractor(Extractor):
@@ -63,6 +68,10 @@ class QuantityExtractor(Extractor):
         for match in QUANTITY_PATTERN.finditer(episode.content):
             magnitude_str = match.group(1)
             unit_str = match.group(2)
+
+            # Skip ambiguous units that conflict with time/date notation
+            if unit_str.lower() in _AMBIGUOUS_UNITS:
+                continue
 
             try:
                 # Try to parse as a Pint quantity
