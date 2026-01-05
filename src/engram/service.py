@@ -113,13 +113,17 @@ class EngramService:
         if settings is None:
             settings = Settings()
 
+        # Create embedder first to get dimensions
+        embedder = get_embedder(settings)
+
         return cls(
             storage=EngramStorage(
                 url=settings.qdrant_url,
                 api_key=settings.qdrant_api_key,
                 prefix=settings.collection_prefix,
+                embedding_dim=embedder.dimensions,
             ),
-            embedder=get_embedder(settings),
+            embedder=embedder,
             pipeline=default_pipeline(),
             settings=settings,
         )
