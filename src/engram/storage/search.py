@@ -6,6 +6,7 @@ Provides vector similarity search methods for all memory types.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from qdrant_client import models
@@ -54,6 +55,7 @@ class SearchMixin:
         org_id: str | None = None,
         limit: int = 10,
         min_importance: float | None = None,
+        timestamp_before: datetime | None = None,
     ) -> list[ScoredResult[Episode]]:
         """Search for similar episodes.
 
@@ -63,13 +65,14 @@ class SearchMixin:
             org_id: Optional org ID filter.
             limit: Maximum results to return.
             min_importance: Minimum importance threshold.
+            timestamp_before: Only include episodes from before this time.
 
         Returns:
             List of ScoredResult[Episode] sorted by similarity.
         """
         from engram.models import Episode
 
-        filters = self._build_filters(user_id, org_id)
+        filters = self._build_filters(user_id, org_id, timestamp_before=timestamp_before)
         if min_importance is not None:
             filters.append(
                 models.FieldCondition(
@@ -102,6 +105,7 @@ class SearchMixin:
         limit: int = 10,
         min_confidence: float | None = None,
         category: str | None = None,
+        derived_at_before: datetime | None = None,
     ) -> list[ScoredResult[Fact]]:
         """Search for similar facts.
 
@@ -112,13 +116,16 @@ class SearchMixin:
             limit: Maximum results to return.
             min_confidence: Minimum confidence threshold.
             category: Filter by fact category.
+            derived_at_before: Only include facts derived before this time.
 
         Returns:
             List of ScoredResult[Fact] sorted by similarity.
         """
         from engram.models import Fact
 
-        filters = self._build_filters(user_id, org_id, min_confidence)
+        filters = self._build_filters(
+            user_id, org_id, min_confidence, derived_at_before=derived_at_before
+        )
         if category is not None:
             filters.append(
                 models.FieldCondition(
@@ -150,6 +157,7 @@ class SearchMixin:
         org_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
+        derived_at_before: datetime | None = None,
     ) -> list[ScoredResult[SemanticMemory]]:
         """Search for similar semantic memories.
 
@@ -159,13 +167,16 @@ class SearchMixin:
             org_id: Optional org ID filter.
             limit: Maximum results to return.
             min_confidence: Minimum confidence threshold.
+            derived_at_before: Only include memories derived before this time.
 
         Returns:
             List of ScoredResult[SemanticMemory] sorted by similarity.
         """
         from engram.models import SemanticMemory
 
-        filters = self._build_filters(user_id, org_id, min_confidence)
+        filters = self._build_filters(
+            user_id, org_id, min_confidence, derived_at_before=derived_at_before
+        )
 
         results = await self._search(
             collection="semantic",
@@ -266,8 +277,18 @@ class SearchMixin:
         user_id: str,
         org_id: str | None = None,
         min_confidence: float | None = None,
+        derived_at_before: datetime | None = None,
+        timestamp_before: datetime | None = None,
     ) -> list[models.FieldCondition]:
-        """Build Qdrant filter conditions."""
+        """Build Qdrant filter conditions.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            min_confidence: Minimum confidence threshold.
+            derived_at_before: Filter for memories derived before this time (bi-temporal).
+            timestamp_before: Filter for episodes with timestamp before this time.
+        """
         filters: list[models.FieldCondition] = [
             models.FieldCondition(
                 key="user_id",
@@ -288,6 +309,24 @@ class SearchMixin:
                 models.FieldCondition(
                     key="confidence_value",
                     range=models.Range(gte=min_confidence),
+                )
+            )
+
+        if derived_at_before is not None:
+            # Filter for memories derived before this timestamp
+            filters.append(
+                models.FieldCondition(
+                    key="derived_at",
+                    range=models.DatetimeRange(lte=derived_at_before),
+                )
+            )
+
+        if timestamp_before is not None:
+            # Filter for episodes with timestamp before this
+            filters.append(
+                models.FieldCondition(
+                    key="timestamp",
+                    range=models.DatetimeRange(lte=timestamp_before),
                 )
             )
 

@@ -33,6 +33,7 @@ import hashlib
 import math
 import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -448,6 +449,127 @@ class EngramService:
         final_results = results[:limit]
 
         # Log audit entry (hash query to avoid PII in logs)
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
+        memory_types = list({r.memory_type for r in final_results})
+        audit_entry = AuditEntry.for_recall(
+            user_id=user_id,
+            query_hash=query_hash,
+            results_count=len(final_results),
+            memory_types=memory_types,
+            org_id=org_id,
+            duration_ms=duration_ms,
+        )
+        await self.storage.log_audit(audit_entry)
+
+        return final_results
+
+    async def recall_at(
+        self,
+        query: str,
+        as_of: datetime,
+        user_id: str,
+        org_id: str | None = None,
+        limit: int = 10,
+        min_confidence: float | None = None,
+        include_episodes: bool = True,
+        include_facts: bool = True,
+    ) -> list[RecallResult]:
+        """Recall memories as they existed at a specific point in time.
+
+        This is a bi-temporal query that only returns memories that were
+        derived before the `as_of` timestamp. Useful for debugging,
+        auditing, and understanding historical system state.
+
+        Args:
+            query: Natural language query.
+            as_of: Point in time to query (only memories derived before this).
+            user_id: User ID for multi-tenancy isolation.
+            org_id: Optional organization ID filter.
+            limit: Maximum results per memory type.
+            min_confidence: Minimum confidence for facts.
+            include_episodes: Whether to search episodes.
+            include_facts: Whether to search facts.
+
+        Returns:
+            List of RecallResult sorted by similarity score.
+
+        Example:
+            ```python
+            # What did we know about the user on June 1st?
+            memories = await engram.recall_at(
+                query="email address",
+                as_of=datetime(2024, 6, 1),
+                user_id="user_123",
+            )
+            ```
+        """
+        start_time = time.monotonic()
+
+        # Generate query embedding
+        query_vector = await self.embedder.embed(query)
+
+        results: list[RecallResult] = []
+
+        # Search episodes (filter by timestamp <= as_of)
+        if include_episodes:
+            scored_episodes = await self.storage.search_episodes(
+                query_vector=query_vector,
+                user_id=user_id,
+                org_id=org_id,
+                limit=limit,
+                timestamp_before=as_of,
+            )
+            for scored_ep in scored_episodes:
+                ep = scored_ep.memory
+                results.append(
+                    RecallResult(
+                        memory_type="episode",
+                        content=ep.content,
+                        score=scored_ep.score,
+                        memory_id=ep.id,
+                        metadata={
+                            "role": ep.role,
+                            "importance": ep.importance,
+                            "timestamp": ep.timestamp.isoformat(),
+                        },
+                    )
+                )
+
+        # Search facts (filter by derived_at <= as_of)
+        if include_facts:
+            scored_facts = await self.storage.search_facts(
+                query_vector=query_vector,
+                user_id=user_id,
+                org_id=org_id,
+                limit=limit,
+                min_confidence=min_confidence,
+                derived_at_before=as_of,
+            )
+            for scored_fact in scored_facts:
+                fact = scored_fact.memory
+                results.append(
+                    RecallResult(
+                        memory_type="fact",
+                        content=fact.content,
+                        score=scored_fact.score,
+                        confidence=fact.confidence.value,
+                        memory_id=fact.id,
+                        source_episode_id=fact.source_episode_id,
+                        metadata={
+                            "category": fact.category,
+                            "derived_at": fact.derived_at.isoformat(),
+                            "event_at": fact.event_at.isoformat(),
+                        },
+                    )
+                )
+
+        # Sort by score descending
+        results.sort(key=lambda r: r.score, reverse=True)
+
+        final_results = results[:limit]
+
+        # Log audit entry
         duration_ms = int((time.monotonic() - start_time) * 1000)
         query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
         memory_types = list({r.memory_type for r in final_results})

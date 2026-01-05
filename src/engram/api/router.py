@@ -178,16 +178,29 @@ async def recall(
         HTTPException: If recall fails.
     """
     try:
-        results = await service.recall(
-            query=request.query,
-            user_id=request.user_id,
-            org_id=request.org_id,
-            limit=request.limit,
-            min_confidence=request.min_confidence,
-            include_episodes=request.include_episodes,
-            include_facts=request.include_facts,
-            include_working=request.include_working,
-        )
+        # Use recall_at for bi-temporal queries, recall for standard queries
+        if request.as_of is not None:
+            results = await service.recall_at(
+                query=request.query,
+                as_of=request.as_of,
+                user_id=request.user_id,
+                org_id=request.org_id,
+                limit=request.limit,
+                min_confidence=request.min_confidence,
+                include_episodes=request.include_episodes,
+                include_facts=request.include_facts,
+            )
+        else:
+            results = await service.recall(
+                query=request.query,
+                user_id=request.user_id,
+                org_id=request.org_id,
+                limit=request.limit,
+                min_confidence=request.min_confidence,
+                include_episodes=request.include_episodes,
+                include_facts=request.include_facts,
+                include_working=request.include_working,
+            )
 
         result_responses = [
             RecallResultResponse(

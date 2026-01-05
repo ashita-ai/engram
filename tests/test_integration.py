@@ -466,6 +466,43 @@ class TestAPIIntegration:
         assert recall_data["count"] == 1
         assert recall_data["results"][0]["content"] == "test@example.com"
 
+    def test_recall_with_as_of_uses_recall_at(self, client, mock_service):
+        """Test that recall with as_of parameter calls recall_at."""
+        from datetime import datetime
+
+        from engram.service import RecallResult
+
+        # Setup mock recall_at response
+        mock_service.recall_at = AsyncMock()
+        mock_service.recall_at.return_value = [
+            RecallResult(
+                memory_type="episode",
+                content="Old memory content",
+                score=0.85,
+                confidence=None,
+                memory_id="ep_old",
+            )
+        ]
+
+        # Recall with as_of parameter
+        as_of_time = datetime(2024, 6, 1, 12, 0, 0)
+        recall_resp = client.post(
+            "/api/v1/recall",
+            json={
+                "query": "email address",
+                "user_id": "api_user",
+                "as_of": as_of_time.isoformat(),
+            },
+        )
+        assert recall_resp.status_code == 200
+        recall_data = recall_resp.json()
+        assert recall_data["count"] == 1
+        assert recall_data["results"][0]["content"] == "Old memory content"
+
+        # Verify recall_at was called, not recall
+        mock_service.recall_at.assert_called_once()
+        mock_service.recall.assert_not_called()
+
 
 # Check for LLM API keys
 HAS_OPENAI_KEY = bool(os.environ.get("ENGRAM_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY"))
@@ -612,6 +649,196 @@ class TestConsolidationIntegration:
         assert result.episodes_processed == 0
         assert result.semantic_memories_created == 0
         assert result.links_created == 0
+
+
+class TestBiTemporalRecall:
+    """Tests for bi-temporal recall_at functionality."""
+
+    @pytest.fixture
+    def mock_embedder(self):
+        """Create a mock embedder."""
+        embedder = AsyncMock()
+
+        async def embed_side_effect(text: str) -> list[float]:
+            hash_val = hash(text) % 1000 / 1000
+            return [hash_val, 1 - hash_val, 0.5]
+
+        async def embed_batch_side_effect(texts: list[str]) -> list[list[float]]:
+            return [await embed_side_effect(text) for text in texts]
+
+        embedder.embed = AsyncMock(side_effect=embed_side_effect)
+        embedder.embed_batch = AsyncMock(side_effect=embed_batch_side_effect)
+        return embedder
+
+    @pytest.fixture
+    def mock_storage(self):
+        """Create a mock storage with bi-temporal filtering support."""
+        from datetime import datetime, timedelta
+
+        storage = AsyncMock()
+        storage._episodes: dict[str, Episode] = {}
+        storage._facts: dict[str, Fact] = {}
+
+        # Create episodes with different timestamps
+        now = datetime.now()
+        old_episode = Episode(
+            content="Old email: old@example.com",
+            role="user",
+            user_id="test_user",
+            embedding=[0.1, 0.9, 0.5],
+        )
+        old_episode.timestamp = now - timedelta(days=30)
+
+        new_episode = Episode(
+            content="New email: new@example.com",
+            role="user",
+            user_id="test_user",
+            embedding=[0.2, 0.8, 0.5],
+        )
+        new_episode.timestamp = now
+
+        storage._episodes[old_episode.id] = old_episode
+        storage._episodes[new_episode.id] = new_episode
+
+        async def store_episode(episode: Episode) -> str:
+            storage._episodes[episode.id] = episode
+            return episode.id
+
+        async def store_fact(fact: Fact) -> str:
+            storage._facts[fact.id] = fact
+            return fact.id
+
+        async def search_episodes(
+            query_vector: list[float],
+            user_id: str,
+            org_id: str | None = None,
+            limit: int = 10,
+            timestamp_before: datetime | None = None,
+            **kwargs: object,
+        ):
+            from engram.storage import ScoredResult
+
+            episodes = []
+            for ep in storage._episodes.values():
+                if ep.user_id != user_id:
+                    continue
+                if org_id is not None and ep.org_id != org_id:
+                    continue
+                # Bi-temporal filter
+                if timestamp_before is not None and ep.timestamp > timestamp_before:
+                    continue
+                episodes.append(ep)
+            return [ScoredResult(memory=ep, score=0.85) for ep in episodes[:limit]]
+
+        async def search_facts(
+            query_vector: list[float],
+            user_id: str,
+            org_id: str | None = None,
+            limit: int = 10,
+            min_confidence: float | None = None,
+            derived_at_before: datetime | None = None,
+            **kwargs: object,
+        ):
+            from engram.storage import ScoredResult
+
+            results = []
+            for fact in storage._facts.values():
+                if fact.user_id != user_id:
+                    continue
+                if org_id is not None and fact.org_id != org_id:
+                    continue
+                if min_confidence and fact.confidence.value < min_confidence:
+                    continue
+                # Bi-temporal filter
+                if derived_at_before is not None and fact.derived_at > derived_at_before:
+                    continue
+                results.append(fact)
+            return [ScoredResult(memory=f, score=0.9) for f in results[:limit]]
+
+        storage.store_episode = AsyncMock(side_effect=store_episode)
+        storage.store_fact = AsyncMock(side_effect=store_fact)
+        storage.search_episodes = AsyncMock(side_effect=search_episodes)
+        storage.search_facts = AsyncMock(side_effect=search_facts)
+        storage.log_audit = AsyncMock()
+        storage.initialize = AsyncMock()
+        storage.close = AsyncMock()
+
+        return storage
+
+    @pytest.mark.asyncio
+    async def test_recall_at_filters_by_timestamp(self, mock_storage, mock_embedder):
+        """Test that recall_at filters memories by the as_of timestamp."""
+        from datetime import datetime, timedelta
+
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        now = datetime.now()
+
+        # Query as of 15 days ago (should only get old episode)
+        results = await service.recall_at(
+            query="email",
+            as_of=now - timedelta(days=15),
+            user_id="test_user",
+        )
+
+        # Should only get the old episode (created 30 days ago)
+        assert len(results) == 1
+        assert "old@example.com" in results[0].content
+
+    @pytest.mark.asyncio
+    async def test_recall_at_returns_all_when_future_timestamp(self, mock_storage, mock_embedder):
+        """Test that recall_at with future timestamp returns all memories."""
+        from datetime import datetime, timedelta
+
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        # Query as of tomorrow (should get both)
+        future = datetime.now() + timedelta(days=1)
+        results = await service.recall_at(
+            query="email",
+            as_of=future,
+            user_id="test_user",
+        )
+
+        # Should get both episodes
+        assert len(results) == 2
+        contents = [r.content for r in results]
+        assert any("old@example.com" in c for c in contents)
+        assert any("new@example.com" in c for c in contents)
+
+    @pytest.mark.asyncio
+    async def test_recall_at_excludes_working_memory(self, mock_storage, mock_embedder):
+        """Test that recall_at does NOT include working memory (by design)."""
+        from datetime import datetime
+
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        # recall_at should not have include_working parameter - it's bi-temporal
+        # Working memory is inherently "now" and shouldn't be in historical queries
+        results = await service.recall_at(
+            query="email",
+            as_of=datetime.now(),
+            user_id="test_user",
+        )
+
+        # Results should only come from storage, not working memory
+        memory_types = {r.memory_type for r in results}
+        assert "working" not in memory_types
 
 
 class TestVerifyWorkflow:

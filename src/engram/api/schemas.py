@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -107,6 +108,7 @@ class RecallRequest(BaseModel):
         include_episodes: Whether to search episodes.
         include_facts: Whether to search facts.
         include_working: Whether to include working memory.
+        as_of: Optional bi-temporal filter (only memories derived before this time).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -121,6 +123,10 @@ class RecallRequest(BaseModel):
     include_episodes: bool = Field(default=True, description="Search episodes")
     include_facts: bool = Field(default=True, description="Search facts")
     include_working: bool = Field(default=True, description="Include working memory")
+    as_of: datetime | None = Field(
+        default=None,
+        description="Bi-temporal query: only return memories derived before this time",
+    )
 
 
 class RecallResultResponse(BaseModel):
