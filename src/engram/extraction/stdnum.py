@@ -21,6 +21,7 @@ try:
         issn,
         luhn,  # For credit card validation
     )
+    from stdnum.exceptions import ValidationError as StdnumValidationError
     from stdnum.us import ssn as us_ssn
 except ImportError as e:
     raise ImportError("python-stdnum is required for IDExtractor") from e
@@ -109,7 +110,7 @@ class IDExtractor(Extractor):
                     # Mask SSN for privacy
                     masked = self._mask_ssn(formatted)
                     facts.append(self._create_fact(masked, episode, category="ssn"))
-            except Exception:
+            except StdnumValidationError:
                 continue
 
         # Extract ISBNs
@@ -120,7 +121,7 @@ class IDExtractor(Extractor):
                 if formatted not in seen:
                     seen.add(formatted)
                     facts.append(self._create_fact(formatted, episode, category="isbn"))
-            except Exception:
+            except StdnumValidationError:
                 continue
 
         # Extract IBANs
@@ -133,7 +134,7 @@ class IDExtractor(Extractor):
                     # Mask IBAN for privacy (show first 4, last 4)
                     masked = self._mask_iban(formatted)
                     facts.append(self._create_fact(masked, episode, category="iban"))
-            except Exception:
+            except StdnumValidationError:
                 continue
 
         # Extract ISSNs
@@ -144,7 +145,7 @@ class IDExtractor(Extractor):
                 if formatted not in seen:
                     seen.add(formatted)
                     facts.append(self._create_fact(formatted, episode, category="issn"))
-            except Exception:
+            except StdnumValidationError:
                 continue
 
         return facts
