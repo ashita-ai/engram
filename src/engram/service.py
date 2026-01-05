@@ -427,3 +427,79 @@ class EngramService:
         await self.storage.log_audit(audit_entry)
 
         return final_results
+
+    async def get_sources(
+        self,
+        memory_id: str,
+        user_id: str,
+    ) -> list[Episode]:
+        """Get source episodes for a derived memory.
+
+        Traces a derived memory (Fact, SemanticMemory, ProceduralMemory,
+        InhibitoryFact) back to its source Episode(s).
+
+        Args:
+            memory_id: ID of the derived memory.
+            user_id: User ID for multi-tenancy isolation.
+
+        Returns:
+            List of source Episodes in chronological order.
+
+        Raises:
+            ValueError: If memory type cannot be determined from ID prefix.
+            KeyError: If memory not found.
+
+        Example:
+            ```python
+            # Get a fact and trace it back to source
+            memories = await engram.recall("email", user_id="u1")
+            fact = next(m for m in memories if m.memory_type == "fact")
+            sources = await engram.get_sources(fact.memory_id, user_id="u1")
+            for ep in sources:
+                print(f"{ep.timestamp}: {ep.content}")
+            ```
+        """
+        # Determine memory type from ID prefix
+        source_episode_ids: list[str] = []
+
+        if memory_id.startswith("fact_"):
+            fact = await self.storage.get_fact(memory_id, user_id)
+            if fact is None:
+                raise KeyError(f"Fact not found: {memory_id}")
+            source_episode_ids = [fact.source_episode_id]
+
+        elif memory_id.startswith("sem_"):
+            semantic = await self.storage.get_semantic(memory_id, user_id)
+            if semantic is None:
+                raise KeyError(f"SemanticMemory not found: {memory_id}")
+            source_episode_ids = semantic.source_episode_ids
+
+        elif memory_id.startswith("proc_"):
+            procedural = await self.storage.get_procedural(memory_id, user_id)
+            if procedural is None:
+                raise KeyError(f"ProceduralMemory not found: {memory_id}")
+            source_episode_ids = procedural.source_episode_ids
+
+        elif memory_id.startswith("inh_"):
+            inhibitory = await self.storage.get_inhibitory(memory_id, user_id)
+            if inhibitory is None:
+                raise KeyError(f"InhibitoryFact not found: {memory_id}")
+            source_episode_ids = inhibitory.source_episode_ids
+
+        else:
+            raise ValueError(
+                f"Cannot determine memory type from ID: {memory_id}. "
+                "Expected prefix: fact_, sem_, proc_, or inh_"
+            )
+
+        # Fetch source episodes
+        episodes: list[Episode] = []
+        for ep_id in source_episode_ids:
+            ep = await self.storage.get_episode(ep_id, user_id)
+            if ep is not None:
+                episodes.append(ep)
+
+        # Sort by timestamp (chronological order)
+        episodes.sort(key=lambda e: e.timestamp)
+
+        return episodes

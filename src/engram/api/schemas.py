@@ -255,3 +255,24 @@ class WorkingMemoryResponse(BaseModel):
 
     episodes: list[EpisodeResponse]
     count: int = Field(ge=0, description="Number of episodes in working memory")
+
+
+class SourcesResponse(BaseModel):
+    """Response for get_sources endpoint.
+
+    Returns the source episodes that a derived memory (fact, semantic,
+    procedural, inhibitory) was extracted from.
+
+    Attributes:
+        memory_id: The ID of the derived memory.
+        memory_type: Type of memory (fact, semantic, procedural, inhibitory).
+        sources: Source episodes in chronological order.
+        count: Number of source episodes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str
+    memory_type: str
+    sources: list[EpisodeResponse]
+    count: int = Field(ge=0, description="Number of source episodes")
