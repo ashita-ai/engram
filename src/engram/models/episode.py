@@ -39,6 +39,10 @@ class Episode(MemoryBase):
         le=1.0,
         description="Importance score for prioritization",
     )
+    consolidated: bool = Field(
+        default=False,
+        description="Whether this episode has been processed by consolidation",
+    )
 
     def __str__(self) -> str:
         """String representation showing role and truncated content."""

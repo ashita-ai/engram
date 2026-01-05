@@ -11,7 +11,54 @@ The workflow is durable - it survives crashes and can be retried on failure.
 
 from __future__ import annotations
 
+import logging
+from typing import TYPE_CHECKING
+
 from pydantic import BaseModel, ConfigDict, Field
+
+if TYPE_CHECKING:
+    from engram.embeddings import Embedder
+    from engram.storage import EngramStorage
+
+logger = logging.getLogger(__name__)
+
+
+class ExtractedFact(BaseModel):
+    """A semantic fact extracted by the LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(description="The semantic knowledge extracted")
+    confidence: float = Field(
+        ge=0.0, le=1.0, default=0.6, description="Confidence in this extraction"
+    )
+    source_context: str = Field(default="", description="Original context this was extracted from")
+
+
+class IdentifiedLink(BaseModel):
+    """A relationship between memories identified by the LLM."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_content: str = Field(description="Content of source memory")
+    target_content: str = Field(description="Content of related memory")
+    relationship: str = Field(description="Nature of the relationship")
+
+
+class LLMExtractionResult(BaseModel):
+    """Structured output from the consolidation LLM agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    semantic_facts: list[ExtractedFact] = Field(
+        default_factory=list, description="Extracted semantic knowledge"
+    )
+    links: list[IdentifiedLink] = Field(
+        default_factory=list, description="Relationships between facts"
+    )
+    contradictions: list[str] = Field(
+        default_factory=list, description="Contradictions with existing knowledge"
+    )
 
 
 class ConsolidationResult(BaseModel):
@@ -32,8 +79,148 @@ class ConsolidationResult(BaseModel):
     contradictions_found: list[str] = Field(default_factory=list)
 
 
-# Workflow implementation will be added in issue #20
-# The workflow will use:
-# - @DBOS.workflow() decorator for durability
-# - Pydantic AI agent for LLM extraction
-# - EngramStorage for persisting results
+def format_episodes_for_llm(episodes: list[dict[str, str]]) -> str:
+    """Format episodes for LLM processing.
+
+    Args:
+        episodes: List of dicts with 'id', 'role', 'content' keys.
+
+    Returns:
+        Formatted text for LLM input.
+    """
+    lines = ["# Conversation Episodes to Analyze\n"]
+    for ep in episodes:
+        lines.append(f"[{ep['role'].upper()}] ({ep['id']})")
+        lines.append(ep["content"])
+        lines.append("")
+    return "\n".join(lines)
+
+
+async def run_consolidation(
+    storage: EngramStorage,
+    embedder: Embedder,
+    user_id: str,
+    org_id: str | None = None,
+    batch_size: int = 20,
+) -> ConsolidationResult:
+    """Run the consolidation workflow.
+
+    This is the main entry point for consolidation. It:
+    1. Fetches unconsolidated episodes
+    2. Runs LLM extraction via the durable agent
+    3. Stores semantic memories
+    4. Builds links between memories
+    5. Marks episodes as consolidated
+
+    Args:
+        storage: EngramStorage instance.
+        embedder: Embedder for generating vectors.
+        user_id: User ID for multi-tenancy.
+        org_id: Optional organization ID.
+        batch_size: Number of episodes to process at once.
+
+    Returns:
+        ConsolidationResult with processing statistics.
+    """
+    from engram.models import SemanticMemory
+
+    # 1. Fetch unconsolidated episodes
+    episodes = await storage.get_unconsolidated_episodes(
+        user_id=user_id,
+        org_id=org_id,
+        limit=batch_size,
+    )
+
+    if not episodes:
+        logger.info("No unconsolidated episodes found")
+        return ConsolidationResult(
+            episodes_processed=0,
+            semantic_memories_created=0,
+            links_created=0,
+        )
+
+    logger.info(f"Processing {len(episodes)} unconsolidated episodes")
+
+    # 2. Format episodes for LLM
+    episode_data = [{"id": ep.id, "role": ep.role, "content": ep.content} for ep in episodes]
+    formatted_text = format_episodes_for_llm(episode_data)
+
+    # 3. Run LLM extraction using the durable agent
+    from engram.workflows import get_consolidation_agent
+
+    try:
+        agent = get_consolidation_agent()
+        result = await agent.run(formatted_text)
+        extraction: LLMExtractionResult = result.output
+    except RuntimeError:
+        # Workflows not initialized, run without durability
+        from pydantic_ai import Agent
+
+        logger.warning("Durable workflows not initialized, running non-durable extraction")
+        temp_agent: Agent[None, LLMExtractionResult] = Agent(
+            "openai:gpt-4o-mini",
+            output_type=LLMExtractionResult,
+            instructions="""You are analyzing conversation episodes to extract lasting knowledge.
+
+Extract facts that are:
+- Personally identifying (names, emails, preferences)
+- Temporally stable (unlikely to change soon)
+- Explicitly stated (not inferred)
+
+Identify relationships between concepts.
+Flag any contradictions with previously known facts.
+
+Be conservative. When uncertain, don't extract.""",
+        )
+        result = await temp_agent.run(formatted_text)
+        extraction = result.output
+
+    # 4. Store semantic memories
+    episode_ids = [ep.id for ep in episodes]
+    memories_created = 0
+    links_created = 0
+
+    for fact in extraction.semantic_facts:
+        # Generate embedding for the fact
+        embedding = await embedder.embed(fact.content)
+
+        memory = SemanticMemory(
+            content=fact.content,
+            source_episode_ids=episode_ids,
+            user_id=user_id,
+            org_id=org_id,
+            embedding=embedding,
+        )
+        memory.confidence.value = fact.confidence
+
+        await storage.store_semantic(memory)
+        memories_created += 1
+        logger.debug(f"Created semantic memory: {memory.id}")
+
+    # 5. Build links (for now, just log them - linking requires memory IDs)
+    for link in extraction.links:
+        logger.info(
+            f"Identified link: {link.source_content[:30]}... "
+            f"--[{link.relationship}]--> {link.target_content[:30]}..."
+        )
+        links_created += 1
+
+    # 6. Mark episodes as consolidated
+    await storage.mark_episodes_consolidated(episode_ids, user_id)
+
+    return ConsolidationResult(
+        episodes_processed=len(episodes),
+        semantic_memories_created=memories_created,
+        links_created=links_created,
+        contradictions_found=extraction.contradictions,
+    )
+
+
+__all__ = [
+    "ConsolidationResult",
+    "ExtractedFact",
+    "IdentifiedLink",
+    "LLMExtractionResult",
+    "format_episodes_for_llm",
+    "run_consolidation",
+]

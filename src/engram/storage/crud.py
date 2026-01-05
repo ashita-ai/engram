@@ -193,3 +193,109 @@ class CRUDMixin:
 
         deleted: bool = result.status == models.UpdateStatus.COMPLETED
         return deleted
+
+    async def get_unconsolidated_episodes(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        limit: int = 100,
+    ) -> list[Episode]:
+        """Get episodes that haven't been processed by consolidation.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            limit: Maximum episodes to return.
+
+        Returns:
+            List of unconsolidated Episodes.
+        """
+        from engram.models import Episode
+
+        collection = self._collection_name("episode")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+            models.FieldCondition(
+                key="consolidated",
+                match=models.MatchValue(value=False),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        episodes: list[Episode] = []
+        for point in results:
+            if point.payload is not None:
+                ep = self._payload_to_memory(point.payload, Episode)
+                # Restore the embedding from the vector
+                if isinstance(point.vector, list):
+                    ep.embedding = point.vector
+                episodes.append(ep)
+
+        return episodes
+
+    async def mark_episodes_consolidated(
+        self,
+        episode_ids: list[str],
+        user_id: str,
+    ) -> int:
+        """Mark episodes as consolidated.
+
+        Args:
+            episode_ids: IDs of episodes to mark.
+            user_id: User ID for ownership verification.
+
+        Returns:
+            Number of episodes updated.
+        """
+        collection = self._collection_name("episode")
+        updated = 0
+
+        for episode_id in episode_ids:
+            # Find and update each episode
+            results, _ = await self.client.scroll(
+                collection_name=collection,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="id",
+                            match=models.MatchValue(value=episode_id),
+                        ),
+                        models.FieldCondition(
+                            key="user_id",
+                            match=models.MatchValue(value=user_id),
+                        ),
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+            )
+
+            if results:
+                point = results[0]
+                await self.client.set_payload(
+                    collection_name=collection,
+                    payload={"consolidated": True},
+                    points=[point.id],
+                )
+                updated += 1
+
+        return updated
