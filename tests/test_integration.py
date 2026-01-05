@@ -4,6 +4,9 @@ These tests verify the complete flow from encode to recall,
 including storage, extraction, and embeddings working together.
 """
 
+from __future__ import annotations
+
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -454,3 +457,150 @@ class TestAPIIntegration:
         recall_data = recall_resp.json()
         assert recall_data["count"] == 1
         assert recall_data["results"][0]["content"] == "test@example.com"
+
+
+# Check for LLM API keys
+HAS_OPENAI_KEY = bool(os.environ.get("ENGRAM_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY"))
+
+
+class TestConsolidationIntegration:
+    """Integration tests for consolidation workflow with real LLM."""
+
+    @pytest.fixture
+    def mock_storage(self):
+        """Create mock storage that tracks stored memories."""
+        from engram.models import Episode
+
+        storage = AsyncMock()
+        storage._episodes: list[Episode] = []
+        storage._semantic_memories: list = []
+        storage._consolidated_ids: list[str] = []
+
+        # Create test episodes
+        ep1 = Episode(
+            content="My name is Alice and I work at TechCorp as a senior engineer.",
+            role="user",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        ep2 = Episode(
+            content="I prefer Python over JavaScript for backend work.",
+            role="user",
+            user_id="test_user",
+            embedding=[0.2] * 384,
+        )
+        ep3 = Episode(
+            content="My email is alice@techcorp.com",
+            role="user",
+            user_id="test_user",
+            embedding=[0.3] * 384,
+        )
+        storage._episodes = [ep1, ep2, ep3]
+
+        async def get_unconsolidated_episodes(
+            user_id: str,
+            org_id: str | None = None,
+            limit: int = 20,
+        ) -> list[Episode]:
+            return [ep for ep in storage._episodes if ep.id not in storage._consolidated_ids][
+                :limit
+            ]
+
+        async def store_semantic(memory) -> str:
+            storage._semantic_memories.append(memory)
+            return memory.id
+
+        async def mark_episodes_consolidated(episode_ids: list[str], user_id: str) -> int:
+            storage._consolidated_ids.extend(episode_ids)
+            return len(episode_ids)
+
+        storage.get_unconsolidated_episodes = AsyncMock(side_effect=get_unconsolidated_episodes)
+        storage.store_semantic = AsyncMock(side_effect=store_semantic)
+        storage.mark_episodes_consolidated = AsyncMock(side_effect=mark_episodes_consolidated)
+
+        return storage
+
+    @pytest.fixture
+    def real_embedder(self):
+        """Create real fastembed embedder."""
+        from engram.embeddings import FastEmbedEmbedder
+
+        return FastEmbedEmbedder(model="BAAI/bge-small-en-v1.5")
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not HAS_OPENAI_KEY, reason="No OpenAI API key configured")
+    async def test_consolidation_with_real_llm(self, mock_storage, real_embedder):
+        """Test full consolidation workflow with real LLM extraction.
+
+        This test:
+        1. Creates episodes with factual content
+        2. Runs consolidation (hits real OpenAI API via fallback path)
+        3. Verifies semantic memories are extracted and stored
+        """
+        from engram.workflows.consolidation import run_consolidation
+
+        result = await run_consolidation(
+            storage=mock_storage,
+            embedder=real_embedder,
+            user_id="test_user",
+        )
+
+        # Should process all 3 episodes
+        assert result.episodes_processed == 3
+
+        # LLM should extract at least some semantic facts
+        # (name, workplace, language preference, email)
+        assert result.semantic_memories_created >= 1
+
+        # Verify memories were actually stored
+        assert len(mock_storage._semantic_memories) == result.semantic_memories_created
+
+        # Verify each memory has content and embedding
+        for memory in mock_storage._semantic_memories:
+            assert memory.content, "Memory should have content"
+            assert memory.embedding, "Memory should have embedding"
+            assert len(memory.embedding) == 384, "Embedding should be 384-dim"
+
+        # Episodes should be marked as consolidated
+        mock_storage.mark_episodes_consolidated.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not HAS_OPENAI_KEY, reason="No OpenAI API key configured")
+    async def test_consolidation_extracts_correct_facts(self, mock_storage, real_embedder):
+        """Verify LLM extracts semantically correct facts."""
+        from engram.workflows.consolidation import run_consolidation
+
+        await run_consolidation(
+            storage=mock_storage,
+            embedder=real_embedder,
+            user_id="test_user",
+        )
+
+        # Get all extracted content
+        all_content = " ".join(m.content.lower() for m in mock_storage._semantic_memories)
+
+        # LLM should extract key facts from the episodes
+        # At least one of these should appear
+        key_facts = ["alice", "techcorp", "python", "engineer", "email"]
+        found_facts = [f for f in key_facts if f in all_content]
+
+        assert len(found_facts) >= 2, f"Expected at least 2 key facts, found: {found_facts}"
+
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(not HAS_OPENAI_KEY, reason="No OpenAI API key configured")
+    async def test_consolidation_empty_episodes(self, real_embedder):
+        """Test consolidation with no episodes returns zero counts."""
+        from engram.workflows.consolidation import run_consolidation
+
+        empty_storage = AsyncMock()
+        empty_storage.get_unconsolidated_episodes = AsyncMock(return_value=[])
+
+        result = await run_consolidation(
+            storage=empty_storage,
+            embedder=real_embedder,
+            user_id="test_user",
+        )
+
+        assert result.episodes_processed == 0
+        assert result.semantic_memories_created == 0
+        assert result.links_created == 0
