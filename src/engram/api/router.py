@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,9 +21,14 @@ from .schemas import (
     RecallRequest,
     RecallResponse,
     RecallResultResponse,
+    SourceEpisodeDetail,
+    SourceEpisodeSummary,
     SourcesResponse,
+    VerificationResponse,
     WorkingMemoryResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -144,9 +150,10 @@ async def encode(
             detail=str(e),
         ) from e
     except Exception as e:
+        logger.exception("Failed to encode memory")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to encode: {e}",
+            detail="An internal error occurred while encoding the memory",
         ) from e
 
 
@@ -172,16 +179,35 @@ async def recall(
         HTTPException: If recall fails.
     """
     try:
-        results = await service.recall(
-            query=request.query,
-            user_id=request.user_id,
-            org_id=request.org_id,
-            limit=request.limit,
-            min_confidence=request.min_confidence,
-            include_episodes=request.include_episodes,
-            include_facts=request.include_facts,
-            include_working=request.include_working,
-        )
+        # Use recall_at for bi-temporal queries, recall for standard queries
+        if request.as_of is not None:
+            results = await service.recall_at(
+                query=request.query,
+                as_of=request.as_of,
+                user_id=request.user_id,
+                org_id=request.org_id,
+                limit=request.limit,
+                min_confidence=request.min_confidence,
+                include_episodes=request.include_episodes,
+                include_facts=request.include_facts,
+            )
+        else:
+            results = await service.recall(
+                query=request.query,
+                user_id=request.user_id,
+                org_id=request.org_id,
+                limit=request.limit,
+                min_confidence=request.min_confidence,
+                min_selectivity=request.min_selectivity,
+                include_episodes=request.include_episodes,
+                include_facts=request.include_facts,
+                include_semantic=request.include_semantic,
+                include_working=request.include_working,
+                include_sources=request.include_sources,
+                follow_links=request.follow_links,
+                max_hops=request.max_hops,
+                freshness=request.freshness,
+            )
 
         result_responses = [
             RecallResultResponse(
@@ -191,6 +217,19 @@ async def recall(
                 confidence=r.confidence,
                 memory_id=r.memory_id,
                 source_episode_id=r.source_episode_id,
+                source_episodes=[
+                    SourceEpisodeSummary(
+                        id=s.id,
+                        content=s.content,
+                        role=s.role,
+                        timestamp=s.timestamp,
+                    )
+                    for s in r.source_episodes
+                ],
+                related_ids=r.related_ids,
+                hop_distance=r.hop_distance,
+                staleness=r.staleness,
+                consolidated_at=r.consolidated_at,
                 metadata=r.metadata,
             )
             for r in results
@@ -208,9 +247,10 @@ async def recall(
             detail=str(e),
         ) from e
     except Exception as e:
+        logger.exception("Failed to recall memories")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to recall: {e}",
+            detail="An internal error occurred while recalling memories",
         ) from e
 
 
@@ -259,9 +299,10 @@ async def get_memory_stats(
         )
 
     except Exception as e:
+        logger.exception("Failed to get memory stats")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get stats: {e}",
+            detail="An internal error occurred while retrieving memory statistics",
         ) from e
 
 
@@ -386,7 +427,102 @@ async def get_sources(
             detail=str(e),
         ) from e
     except Exception as e:
+        logger.exception("Failed to get sources for memory %s", memory_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get sources: {e}",
+            detail="An internal error occurred while retrieving memory sources",
+        ) from e
+
+
+@router.get("/memories/{memory_id}/verify", response_model=VerificationResponse, tags=["memory"])
+async def verify_memory(
+    memory_id: str,
+    user_id: str,
+    service: ServiceDep,
+) -> VerificationResponse:
+    """Verify a memory against its source episodes.
+
+    Traces a derived memory (fact, semantic, procedural, or inhibitory)
+    back to its source episode(s) and provides a human-readable explanation
+    of how it was derived. This is core to Engram's "memory you can trust"
+    value proposition.
+
+    Args:
+        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or inh_).
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+
+    Returns:
+        Verification result with source traceability and explanation.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if memory not found.
+
+    Example:
+        GET /memories/fact_abc123/verify?user_id=u1
+
+        Response:
+        {
+            "memory_id": "fact_abc123",
+            "memory_type": "fact",
+            "content": "email=john@example.com",
+            "verified": true,
+            "source_episodes": [
+                {"id": "ep_xyz", "content": "My email is john@example.com", ...}
+            ],
+            "extraction_method": "extracted",
+            "confidence": 0.9,
+            "explanation": "Pattern-matched email from source episode(s). ..."
+        }
+    """
+    # Validate memory ID format
+    valid_prefixes = ("fact_", "sem_", "proc_", "inh_")
+    if not memory_id.startswith(valid_prefixes):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Expected prefix: fact_, sem_, proc_, or inh_",
+        )
+
+    try:
+        result = await service.verify(memory_id, user_id)
+
+        # Convert source episodes to response format
+        source_episode_responses = [
+            SourceEpisodeDetail(
+                id=ep["id"],
+                content=ep["content"],
+                role=ep["role"],
+                timestamp=ep["timestamp"],
+            )
+            for ep in result.source_episodes
+        ]
+
+        return VerificationResponse(
+            memory_id=result.memory_id,
+            memory_type=result.memory_type,
+            content=result.content,
+            verified=result.verified,
+            source_episodes=source_episode_responses,
+            extraction_method=result.extraction_method,
+            confidence=result.confidence,
+            explanation=result.explanation,
+        )
+
+    except KeyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception("Failed to verify memory %s", memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while verifying the memory",
         ) from e

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from engram.models import Staleness
 
 
 class EncodeRequest(BaseModel):
@@ -104,9 +107,15 @@ class RecallRequest(BaseModel):
         org_id: Optional organization ID filter.
         limit: Maximum results to return.
         min_confidence: Minimum confidence for facts.
+        min_selectivity: Minimum selectivity for semantic memories (0.0-1.0).
         include_episodes: Whether to search episodes.
         include_facts: Whether to search facts.
+        include_semantic: Whether to search semantic memories.
         include_working: Whether to include working memory.
+        include_sources: Whether to include source episodes in results.
+        follow_links: Enable multi-hop reasoning via related_ids.
+        max_hops: Maximum link traversal depth when follow_links=True.
+        as_of: Optional bi-temporal filter (only memories derived before this time).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -118,9 +127,44 @@ class RecallRequest(BaseModel):
     min_confidence: float | None = Field(
         default=None, ge=0.0, le=1.0, description="Minimum confidence threshold"
     )
+    min_selectivity: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Minimum selectivity for semantic memories"
+    )
     include_episodes: bool = Field(default=True, description="Search episodes")
     include_facts: bool = Field(default=True, description="Search facts")
+    include_semantic: bool = Field(default=True, description="Search semantic memories")
     include_working: bool = Field(default=True, description="Include working memory")
+    include_sources: bool = Field(default=False, description="Include source episodes in results")
+    follow_links: bool = Field(default=False, description="Enable multi-hop reasoning")
+    max_hops: int = Field(default=2, ge=1, le=5, description="Maximum link traversal depth")
+    freshness: Literal["best_effort", "fresh_only"] = Field(
+        default="best_effort",
+        description="Freshness mode: best_effort returns all, fresh_only only consolidated",
+    )
+    as_of: datetime | None = Field(
+        default=None,
+        description="Bi-temporal query: only return memories derived before this time",
+    )
+
+
+class SourceEpisodeSummary(BaseModel):
+    """Lightweight summary of a source episode.
+
+    Used when include_sources=True in recall requests.
+
+    Attributes:
+        id: Episode ID.
+        content: Episode content.
+        role: Role of the speaker.
+        timestamp: ISO timestamp.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    content: str
+    role: str
+    timestamp: str
 
 
 class RecallResultResponse(BaseModel):
@@ -132,7 +176,12 @@ class RecallResultResponse(BaseModel):
         score: Similarity score (0.0-1.0).
         confidence: Confidence score for facts/semantic memories.
         memory_id: Unique memory ID.
-        source_episode_id: Source episode ID for facts.
+        source_episode_id: Source episode ID for facts (single source).
+        source_episodes: Source episode details (when include_sources=True).
+        related_ids: IDs of related memories (for multi-hop).
+        hop_distance: Distance from original query result (0=direct, 1=1-hop, etc.).
+        staleness: Freshness state (fresh, consolidating, stale).
+        consolidated_at: When this memory was last consolidated.
         metadata: Additional memory-specific metadata.
     """
 
@@ -144,6 +193,11 @@ class RecallResultResponse(BaseModel):
     confidence: float | None = None
     memory_id: str
     source_episode_id: str | None = None
+    source_episodes: list[SourceEpisodeSummary] = Field(default_factory=list)
+    related_ids: list[str] = Field(default_factory=list)
+    hop_distance: int = Field(default=0, ge=0, description="Distance from original query result")
+    staleness: Staleness = Field(default=Staleness.FRESH, description="Freshness state")
+    consolidated_at: str | None = Field(default=None, description="When last consolidated")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -276,3 +330,52 @@ class SourcesResponse(BaseModel):
     memory_type: str
     sources: list[EpisodeResponse]
     count: int = Field(ge=0, description="Number of source episodes")
+
+
+class SourceEpisodeDetail(BaseModel):
+    """Detail about a source episode in verification result.
+
+    Attributes:
+        id: Episode ID.
+        content: Episode content.
+        role: Role of the speaker.
+        timestamp: ISO timestamp.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    content: str
+    role: str
+    timestamp: str
+
+
+class VerificationResponse(BaseModel):
+    """Response for verify endpoint.
+
+    Provides full traceability from a derived memory back to
+    its source episodes with an explanation of derivation.
+
+    Attributes:
+        memory_id: ID of the verified memory.
+        memory_type: Type of memory (fact, semantic, etc.).
+        content: The memory content.
+        verified: True if sources found and traceable.
+        source_episodes: Source episode details.
+        extraction_method: How memory was extracted.
+        confidence: Current confidence score.
+        explanation: Human-readable derivation trace.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(description="ID of the verified memory")
+    memory_type: str = Field(description="Type: fact, semantic, procedural, inhibitory")
+    content: str = Field(description="The memory content")
+    verified: bool = Field(description="True if sources found and traceable")
+    source_episodes: list[SourceEpisodeDetail] = Field(
+        default_factory=list, description="Source episode details"
+    )
+    extraction_method: str = Field(description="How memory was extracted")
+    confidence: float = Field(ge=0.0, le=1.0, description="Current confidence score")
+    explanation: str = Field(description="Human-readable derivation trace")

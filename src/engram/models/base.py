@@ -22,6 +22,17 @@ class ExtractionMethod(str, Enum):
     INFERRED = "inferred"  # LLM-derived, uncertain (confidence: 0.6)
 
 
+class Staleness(str, Enum):
+    """Freshness state of a memory.
+
+    Indicates whether a memory is fully consolidated or needs processing.
+    """
+
+    FRESH = "fresh"  # Fully consolidated, up-to-date
+    CONSOLIDATING = "consolidating"  # Background consolidation in progress
+    STALE = "stale"  # Needs re-consolidation or hasn't been processed
+
+
 class ConfidenceScore(BaseModel):
     """Composite confidence score with full auditability.
 

@@ -15,6 +15,7 @@ Example:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,6 +25,8 @@ from .base import COLLECTION_NAMES, DEFAULT_EMBEDDING_DIM, StorageBase
 from .crud import CRUDMixin
 from .search import SearchMixin
 from .store import StoreMixin
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryStats(BaseModel):
@@ -140,6 +143,7 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
                 )
                 return int(result.count)
             except Exception:
+                logger.warning("Failed to count collection %s_%s", prefix, name, exc_info=True)
                 return 0
 
         # Count all memory types
@@ -166,6 +170,7 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
             )
             pending_count = pending_result.count
         except Exception:
+            logger.warning("Failed to count pending consolidation", exc_info=True)
             pending_count = 0
 
         # Get confidence stats for facts
@@ -174,28 +179,19 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
         facts_max = None
         if facts_count > 0:
             try:
-                # Scroll through facts to compute confidence stats
                 facts_result = await self.client.scroll(
                     collection_name=f"{prefix}_factual",
                     scroll_filter=query_filter,
-                    limit=1000,  # Reasonable limit
+                    limit=1000,
                     with_payload=["confidence"],
                 )
-                confidences = []
-                for point in facts_result[0]:
-                    if point.payload and "confidence" in point.payload:
-                        conf = point.payload["confidence"]
-                        if isinstance(conf, dict) and "value" in conf:
-                            confidences.append(conf["value"])
-                        elif isinstance(conf, int | float):
-                            confidences.append(conf)
-
+                confidences = self._extract_confidences_from_points(facts_result[0])
                 if confidences:
                     facts_avg = sum(confidences) / len(confidences)
                     facts_min = min(confidences)
                     facts_max = max(confidences)
             except Exception:
-                pass
+                logger.warning("Failed to compute facts confidence stats", exc_info=True)
 
         # Get confidence stats for semantic memories
         semantic_avg = None
@@ -207,19 +203,11 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
                     limit=1000,
                     with_payload=["confidence"],
                 )
-                confidences = []
-                for point in semantic_result[0]:
-                    if point.payload and "confidence" in point.payload:
-                        conf = point.payload["confidence"]
-                        if isinstance(conf, dict) and "value" in conf:
-                            confidences.append(conf["value"])
-                        elif isinstance(conf, int | float):
-                            confidences.append(conf)
-
+                confidences = self._extract_confidences_from_points(semantic_result[0])
                 if confidences:
                     semantic_avg = sum(confidences) / len(confidences)
             except Exception:
-                pass
+                logger.warning("Failed to compute semantic confidence stats", exc_info=True)
 
         return MemoryStats(
             episodes=episodes_count,
@@ -233,6 +221,28 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
             facts_max_confidence=facts_max,
             semantic_avg_confidence=semantic_avg,
         )
+
+    @staticmethod
+    def _extract_confidences_from_points(points: list[Any]) -> list[float]:
+        """Extract confidence values from Qdrant scroll result points.
+
+        Handles both dict-style ({"value": 0.9}) and scalar confidence values.
+
+        Args:
+            points: List of Qdrant point results with payloads.
+
+        Returns:
+            List of confidence float values.
+        """
+        confidences: list[float] = []
+        for point in points:
+            if point.payload and "confidence" in point.payload:
+                conf = point.payload["confidence"]
+                if isinstance(conf, dict) and "value" in conf:
+                    confidences.append(conf["value"])
+                elif isinstance(conf, int | float):
+                    confidences.append(conf)
+        return confidences
 
     def _get_collection_prefix(self) -> str:
         """Get the collection name prefix from settings."""
