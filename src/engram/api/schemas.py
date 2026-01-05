@@ -175,3 +175,64 @@ class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded", "unhealthy"]
     version: str
     storage_connected: bool
+
+
+class MemoryCounts(BaseModel):
+    """Counts of memories by type.
+
+    Attributes:
+        episodes: Number of episode memories.
+        facts: Number of extracted facts.
+        semantic: Number of semantic memories (from consolidation).
+        procedural: Number of procedural memories.
+        inhibitory: Number of inhibitory facts.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    episodes: int = Field(ge=0)
+    facts: int = Field(ge=0)
+    semantic: int = Field(ge=0)
+    procedural: int = Field(ge=0)
+    inhibitory: int = Field(ge=0)
+
+
+class ConfidenceStats(BaseModel):
+    """Confidence statistics for memories.
+
+    Attributes:
+        facts_avg: Average confidence of facts.
+        facts_min: Minimum confidence of facts.
+        facts_max: Maximum confidence of facts.
+        semantic_avg: Average confidence of semantic memories.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    facts_avg: float | None = Field(default=None, description="Average fact confidence")
+    facts_min: float | None = Field(default=None, description="Minimum fact confidence")
+    facts_max: float | None = Field(default=None, description="Maximum fact confidence")
+    semantic_avg: float | None = Field(default=None, description="Average semantic confidence")
+
+
+class MemoryStatsResponse(BaseModel):
+    """Response for memory statistics endpoint.
+
+    Provides visibility into what memories are stored, their types,
+    and confidence levels.
+
+    Attributes:
+        user_id: User ID for the stats.
+        org_id: Optional org ID filter.
+        counts: Memory counts by type.
+        confidence: Confidence statistics.
+        pending_consolidation: Number of episodes awaiting consolidation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str
+    org_id: str | None = None
+    counts: MemoryCounts
+    confidence: ConfidenceStats
+    pending_consolidation: int = Field(ge=0, description="Episodes awaiting LLM consolidation")
