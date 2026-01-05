@@ -211,12 +211,15 @@ class EngramService:
         facts: list[Fact] = []
         if run_extraction:
             extracted_facts = self.pipeline.run(episode)
-            for fact in extracted_facts:
-                # Generate embedding for fact content
-                fact_embedding = await self.embedder.embed(fact.content)
-                fact.embedding = fact_embedding
-                await self.storage.store_fact(fact)
-                facts.append(fact)
+            if extracted_facts:
+                # Batch embed all fact contents at once for efficiency
+                fact_contents = [fact.content for fact in extracted_facts]
+                fact_embeddings = await self.embedder.embed_batch(fact_contents)
+
+                for fact, fact_embedding in zip(extracted_facts, fact_embeddings, strict=True):
+                    fact.embedding = fact_embedding
+                    await self.storage.store_fact(fact)
+                    facts.append(fact)
 
         # Log audit entry
         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -279,20 +282,19 @@ class EngramService:
 
         # Search episodes
         if include_episodes:
-            episodes = await self.storage.search_episodes(
+            scored_episodes = await self.storage.search_episodes(
                 query_vector=query_vector,
                 user_id=user_id,
                 org_id=org_id,
                 limit=limit,
             )
-            for ep in episodes:
-                # Calculate similarity score from the search
-                # For now, use a placeholder - in production this comes from Qdrant
+            for scored_ep in scored_episodes:
+                ep = scored_ep.memory
                 results.append(
                     RecallResult(
                         memory_type="episode",
                         content=ep.content,
-                        score=0.9,  # TODO: Get actual score from search
+                        score=scored_ep.score,
                         memory_id=ep.id,
                         metadata={
                             "role": ep.role,
@@ -304,19 +306,20 @@ class EngramService:
 
         # Search facts
         if include_facts:
-            facts = await self.storage.search_facts(
+            scored_facts = await self.storage.search_facts(
                 query_vector=query_vector,
                 user_id=user_id,
                 org_id=org_id,
                 limit=limit,
                 min_confidence=min_confidence,
             )
-            for fact in facts:
+            for scored_fact in scored_facts:
+                fact = scored_fact.memory
                 results.append(
                     RecallResult(
                         memory_type="fact",
                         content=fact.content,
-                        score=0.9,  # TODO: Get actual score from search
+                        score=scored_fact.score,
                         confidence=fact.confidence.value,
                         memory_id=fact.id,
                         source_episode_id=fact.source_episode_id,

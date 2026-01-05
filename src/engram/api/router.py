@@ -9,11 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from engram.service import EngramService
 
 from .schemas import (
+    ConfidenceStats,
     EncodeRequest,
     EncodeResponse,
     EpisodeResponse,
     FactResponse,
     HealthResponse,
+    MemoryCounts,
+    MemoryStatsResponse,
     RecallRequest,
     RecallResponse,
     RecallResultResponse,
@@ -205,4 +208,55 @@ async def recall(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to recall: {e}",
+        ) from e
+
+
+@router.get("/memories/stats", response_model=MemoryStatsResponse, tags=["memory"])
+async def get_memory_stats(
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+) -> MemoryStatsResponse:
+    """Get statistics about stored memories.
+
+    Returns counts of memories by type, confidence statistics,
+    and the number of episodes pending consolidation.
+
+    Args:
+        user_id: User ID to get stats for.
+        service: Injected EngramService.
+        org_id: Optional organization ID filter.
+
+    Returns:
+        Memory statistics including counts and confidence.
+    """
+    try:
+        stats = await service.storage.get_memory_stats(
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+        return MemoryStatsResponse(
+            user_id=user_id,
+            org_id=org_id,
+            counts=MemoryCounts(
+                episodes=stats.episodes,
+                facts=stats.facts,
+                semantic=stats.semantic,
+                procedural=stats.procedural,
+                inhibitory=stats.inhibitory,
+            ),
+            confidence=ConfidenceStats(
+                facts_avg=stats.facts_avg_confidence,
+                facts_min=stats.facts_min_confidence,
+                facts_max=stats.facts_max_confidence,
+                semantic_avg=stats.semantic_avg_confidence,
+            ),
+            pending_consolidation=stats.pending_consolidation,
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get stats: {e}",
         ) from e

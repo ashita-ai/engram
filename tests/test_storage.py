@@ -153,7 +153,9 @@ class TestEpisodeStorage:
 
         assert len(results) == 2
         # First result should be most similar to query
-        assert results[0].content == "Message 0"
+        assert results[0].memory.content == "Message 0"
+        # Verify we get actual similarity scores
+        assert results[0].score > 0
 
     async def test_delete_episode(self, storage: EngramStorage):
         """Should delete an episode."""
@@ -223,7 +225,8 @@ class TestFactStorage:
         )
 
         assert len(results) == 1
-        assert results[0].category == "email"
+        assert results[0].memory.category == "email"
+        assert results[0].score > 0
 
 
 class TestSemanticMemoryStorage:
@@ -280,7 +283,8 @@ class TestSemanticMemoryStorage:
         )
 
         assert len(results) == 1
-        assert results[0].content == "High confidence"
+        assert results[0].memory.content == "High confidence"
+        assert results[0].score > 0
 
 
 class TestProceduralMemoryStorage:
@@ -395,7 +399,7 @@ class TestMultiTenancy:
             user_id="user_1",
         )
         assert len(user1_results) == 1
-        assert user1_results[0].content == "User 1 message"
+        assert user1_results[0].memory.content == "User 1 message"
 
         # User 2 only sees their episode
         user2_results = await storage.search_episodes(
@@ -403,7 +407,7 @@ class TestMultiTenancy:
             user_id="user_2",
         )
         assert len(user2_results) == 1
-        assert user2_results[0].content == "User 2 message"
+        assert user2_results[0].memory.content == "User 2 message"
 
     async def test_org_filtering(self, storage: EngramStorage):
         """Should filter by organization when specified."""
@@ -432,4 +436,4 @@ class TestMultiTenancy:
         )
 
         assert len(org_results) == 1
-        assert org_results[0].org_id == "org_456"
+        assert org_results[0].memory.org_id == "org_456"

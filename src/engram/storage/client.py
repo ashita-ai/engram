@@ -17,11 +17,40 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from .audit import AuditMixin
 from .base import COLLECTION_NAMES, DEFAULT_EMBEDDING_DIM, StorageBase
 from .crud import CRUDMixin
 from .search import SearchMixin
 from .store import StoreMixin
+
+
+class MemoryStats(BaseModel):
+    """Statistics about stored memories."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    episodes: int = Field(default=0, ge=0, description="Number of episode memories")
+    facts: int = Field(default=0, ge=0, description="Number of extracted facts")
+    semantic: int = Field(default=0, ge=0, description="Number of semantic memories")
+    procedural: int = Field(default=0, ge=0, description="Number of procedural memories")
+    inhibitory: int = Field(default=0, ge=0, description="Number of inhibitory facts")
+    pending_consolidation: int = Field(
+        default=0, ge=0, description="Episodes awaiting consolidation"
+    )
+    facts_avg_confidence: float | None = Field(
+        default=None, description="Average confidence of facts"
+    )
+    facts_min_confidence: float | None = Field(
+        default=None, description="Minimum confidence of facts"
+    )
+    facts_max_confidence: float | None = Field(
+        default=None, description="Maximum confidence of facts"
+    )
+    semantic_avg_confidence: float | None = Field(
+        default=None, description="Average confidence of semantic memories"
+    )
 
 
 class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase):
@@ -66,9 +95,155 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
         """Async context manager exit."""
         await self.close()
 
+    async def get_memory_stats(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+    ) -> MemoryStats:
+        """Get statistics about stored memories.
+
+        Args:
+            user_id: User ID to get stats for.
+            org_id: Optional org ID filter.
+
+        Returns:
+            MemoryStats with counts and confidence stats.
+        """
+        from qdrant_client import models
+
+        # Build filter for user/org
+        filter_conditions = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            )
+        ]
+        if org_id:
+            filter_conditions.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        query_filter = models.Filter(must=filter_conditions)
+
+        # Count memories in each collection
+        prefix = self._get_collection_prefix()
+
+        async def count_collection(name: str) -> int:
+            """Count points in a collection with filter."""
+            try:
+                result = await self.client.count(
+                    collection_name=f"{prefix}_{name}",
+                    count_filter=query_filter,
+                )
+                return int(result.count)
+            except Exception:
+                return 0
+
+        # Count all memory types
+        episodes_count = await count_collection("episodic")
+        facts_count = await count_collection("factual")
+        semantic_count = await count_collection("semantic")
+        procedural_count = await count_collection("procedural")
+        inhibitory_count = await count_collection("inhibitory")
+
+        # Count pending consolidation (unconsolidated episodes)
+        unconsolidated_filter = models.Filter(
+            must=[
+                *filter_conditions,
+                models.FieldCondition(
+                    key="consolidated",
+                    match=models.MatchValue(value=False),
+                ),
+            ]
+        )
+        try:
+            pending_result = await self.client.count(
+                collection_name=f"{prefix}_episodic",
+                count_filter=unconsolidated_filter,
+            )
+            pending_count = pending_result.count
+        except Exception:
+            pending_count = 0
+
+        # Get confidence stats for facts
+        facts_avg = None
+        facts_min = None
+        facts_max = None
+        if facts_count > 0:
+            try:
+                # Scroll through facts to compute confidence stats
+                facts_result = await self.client.scroll(
+                    collection_name=f"{prefix}_factual",
+                    scroll_filter=query_filter,
+                    limit=1000,  # Reasonable limit
+                    with_payload=["confidence"],
+                )
+                confidences = []
+                for point in facts_result[0]:
+                    if point.payload and "confidence" in point.payload:
+                        conf = point.payload["confidence"]
+                        if isinstance(conf, dict) and "value" in conf:
+                            confidences.append(conf["value"])
+                        elif isinstance(conf, int | float):
+                            confidences.append(conf)
+
+                if confidences:
+                    facts_avg = sum(confidences) / len(confidences)
+                    facts_min = min(confidences)
+                    facts_max = max(confidences)
+            except Exception:
+                pass
+
+        # Get confidence stats for semantic memories
+        semantic_avg = None
+        if semantic_count > 0:
+            try:
+                semantic_result = await self.client.scroll(
+                    collection_name=f"{prefix}_semantic",
+                    scroll_filter=query_filter,
+                    limit=1000,
+                    with_payload=["confidence"],
+                )
+                confidences = []
+                for point in semantic_result[0]:
+                    if point.payload and "confidence" in point.payload:
+                        conf = point.payload["confidence"]
+                        if isinstance(conf, dict) and "value" in conf:
+                            confidences.append(conf["value"])
+                        elif isinstance(conf, int | float):
+                            confidences.append(conf)
+
+                if confidences:
+                    semantic_avg = sum(confidences) / len(confidences)
+            except Exception:
+                pass
+
+        return MemoryStats(
+            episodes=episodes_count,
+            facts=facts_count,
+            semantic=semantic_count,
+            procedural=procedural_count,
+            inhibitory=inhibitory_count,
+            pending_consolidation=pending_count,
+            facts_avg_confidence=facts_avg,
+            facts_min_confidence=facts_min,
+            facts_max_confidence=facts_max,
+            semantic_avg_confidence=semantic_avg,
+        )
+
+    def _get_collection_prefix(self) -> str:
+        """Get the collection name prefix from settings."""
+        from engram.config import settings
+
+        return settings.collection_prefix
+
 
 __all__ = [
     "EngramStorage",
+    "MemoryStats",
     "COLLECTION_NAMES",
     "DEFAULT_EMBEDDING_DIM",
 ]

@@ -346,15 +346,15 @@ class TestDateExtractor:
         dates = {f.content for f in facts}
         assert "2024-01-15" in dates
 
-    def test_extract_natural_language(self):
-        """Should extract natural language dates."""
+    def test_skip_relative_dates(self):
+        """Should skip relative dates (left for LLM consolidation)."""
         extractor = DateExtractor()
-        # dateparser supports relative dates
+        # Relative dates are skipped - they need context to resolve
         episode = make_episode("Let's meet tomorrow")
         facts = extractor.extract(episode)
 
-        # Should extract something (relative to today)
-        assert len(facts) >= 1
+        # Should NOT extract - "tomorrow" is relative/ambiguous
+        assert len(facts) == 0
 
     def test_deduplicate_dates(self):
         """Should deduplicate same dates."""
@@ -365,6 +365,19 @@ class TestDateExtractor:
         # Should deduplicate
         assert len(facts) == 1
         assert facts[0].content == "2024-01-15"
+
+    def test_extract_datetime_with_time(self):
+        """Should include time when explicitly specified with a year."""
+        extractor = DateExtractor()
+        # Need explicit year for high-confidence extraction
+        episode = make_episode("event on Jan 15, 2025 at 3:30 PM")
+        facts = extractor.extract(episode)
+
+        # Should extract datetime with time component
+        assert len(facts) >= 1
+        # The result should include time (HH:MM) since time was specified
+        has_time = any(":" in f.content and len(f.content) > 10 for f in facts)
+        assert has_time, f"Expected datetime with time, got: {[f.content for f in facts]}"
 
 
 class TestExtractionPipeline:

@@ -64,7 +64,7 @@ class FastEmbedEmbedder(Embedder):
             Embedding vector (dimensions depend on model).
         """
         # FastEmbed is sync, run in executor for async compatibility
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         model = self._get_model()
 
         def _embed() -> list[float]:
@@ -87,7 +87,7 @@ class FastEmbedEmbedder(Embedder):
         if not texts:
             return []
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         model = self._get_model()
 
         def _embed_batch() -> list[list[float]]:

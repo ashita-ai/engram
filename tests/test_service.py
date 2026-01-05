@@ -7,6 +7,7 @@ import pytest
 from engram.config import Settings
 from engram.models import Episode, Fact
 from engram.service import EncodeResult, EngramService, RecallResult
+from engram.storage import ScoredResult
 
 
 class TestEngramServiceCreate:
@@ -43,6 +44,7 @@ class TestEngramServiceEncode:
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+        embedder.embed_batch = AsyncMock(side_effect=lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
 
         pipeline = MagicMock()
 
@@ -160,7 +162,9 @@ class TestEngramServiceRecall:
             user_id="user_123",
             embedding=[0.1, 0.2, 0.3],
         )
-        mock_service.storage.search_episodes.return_value = [mock_episode]
+        mock_service.storage.search_episodes.return_value = [
+            ScoredResult(memory=mock_episode, score=0.85)
+        ]
         mock_service.storage.search_facts.return_value = []
 
         results = await mock_service.recall(
@@ -172,6 +176,7 @@ class TestEngramServiceRecall:
         episode_results = [r for r in results if r.memory_type == "episode"]
         assert len(episode_results) == 1
         assert episode_results[0].content == "Hello world"
+        assert episode_results[0].score == 0.85  # Actual score from Qdrant
 
     @pytest.mark.asyncio
     async def test_recall_searches_facts(self, mock_service):
@@ -184,7 +189,9 @@ class TestEngramServiceRecall:
             embedding=[0.1, 0.2, 0.3],
         )
         mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = [mock_fact]
+        mock_service.storage.search_facts.return_value = [
+            ScoredResult(memory=mock_fact, score=0.92)
+        ]
 
         results = await mock_service.recall(
             query="email",
@@ -195,6 +202,7 @@ class TestEngramServiceRecall:
         assert len(fact_results) == 1
         assert fact_results[0].content == "user@example.com"
         assert fact_results[0].source_episode_id == "ep_123"
+        assert fact_results[0].score == 0.92  # Actual score from Qdrant
 
     @pytest.mark.asyncio
     async def test_recall_excludes_episodes_when_disabled(self, mock_service):
