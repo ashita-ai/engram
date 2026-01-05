@@ -22,6 +22,7 @@ from .schemas import (
     RecallResponse,
     RecallResultResponse,
     SourceEpisodeDetail,
+    SourceEpisodeSummary,
     SourcesResponse,
     VerificationResponse,
     WorkingMemoryResponse,
@@ -197,9 +198,14 @@ async def recall(
                 org_id=request.org_id,
                 limit=request.limit,
                 min_confidence=request.min_confidence,
+                min_selectivity=request.min_selectivity,
                 include_episodes=request.include_episodes,
                 include_facts=request.include_facts,
+                include_semantic=request.include_semantic,
                 include_working=request.include_working,
+                include_sources=request.include_sources,
+                follow_links=request.follow_links,
+                max_hops=request.max_hops,
             )
 
         result_responses = [
@@ -210,6 +216,17 @@ async def recall(
                 confidence=r.confidence,
                 memory_id=r.memory_id,
                 source_episode_id=r.source_episode_id,
+                source_episodes=[
+                    SourceEpisodeSummary(
+                        id=s.id,
+                        content=s.content,
+                        role=s.role,
+                        timestamp=s.timestamp,
+                    )
+                    for s in r.source_episodes
+                ],
+                related_ids=r.related_ids,
+                hop_distance=r.hop_distance,
                 metadata=r.metadata,
             )
             for r in results

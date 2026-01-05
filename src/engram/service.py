@@ -73,6 +73,17 @@ class EncodeResult(BaseModel):
     facts: list[Fact] = Field(default_factory=list)
 
 
+class SourceEpisodeSummary(BaseModel):
+    """Lightweight summary of a source episode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    content: str
+    role: str
+    timestamp: str
+
+
 class RecallResult(BaseModel):
     """A single recalled memory with similarity score.
 
@@ -81,6 +92,10 @@ class RecallResult(BaseModel):
         content: The memory content.
         score: Similarity score (0.0-1.0).
         confidence: Confidence score for facts/semantic memories.
+        source_episode_id: Source episode ID for facts (single source).
+        source_episodes: Source episode details (when include_sources=True).
+        related_ids: IDs of related memories (for multi-hop).
+        hop_distance: Distance from original query result (0=direct, 1=1-hop, etc.).
         metadata: Additional memory-specific metadata.
     """
 
@@ -92,6 +107,9 @@ class RecallResult(BaseModel):
     confidence: float | None = None
     memory_id: str
     source_episode_id: str | None = None
+    source_episodes: list[SourceEpisodeSummary] = Field(default_factory=list)
+    related_ids: list[str] = Field(default_factory=list)
+    hop_distance: int = Field(default=0, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -326,9 +344,14 @@ class EngramService:
         org_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
+        min_selectivity: float = 0.0,
         include_episodes: bool = True,
         include_facts: bool = True,
+        include_semantic: bool = True,
         include_working: bool = True,
+        include_sources: bool = False,
+        follow_links: bool = False,
+        max_hops: int = 2,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
@@ -341,9 +364,14 @@ class EngramService:
             org_id: Optional organization ID filter.
             limit: Maximum results per memory type.
             min_confidence: Minimum confidence for facts.
+            min_selectivity: Minimum selectivity for semantic memories (0.0-1.0).
             include_episodes: Whether to search episodes.
             include_facts: Whether to search facts.
+            include_semantic: Whether to search semantic memories.
             include_working: Whether to include working memory (current session).
+            include_sources: Whether to include source episodes in results.
+            follow_links: Enable multi-hop reasoning via related_ids.
+            max_hops: Maximum link traversal depth when follow_links=True.
 
         Returns:
             List of RecallResult sorted by similarity score.
@@ -354,9 +382,13 @@ class EngramService:
                 query="phone numbers",
                 user_id="user_123",
                 limit=5,
+                include_sources=True,
+                follow_links=True,
             )
             for m in memories:
                 print(f"{m.content} (score: {m.score:.2f})")
+                for source in m.source_episodes:
+                    print(f"  Source: {source.content}")
             ```
         """
         start_time = time.monotonic()
@@ -416,6 +448,36 @@ class EngramService:
                     )
                 )
 
+        # Search semantic memories
+        if include_semantic:
+            scored_semantics = await self.storage.search_semantic(
+                query_vector=query_vector,
+                user_id=user_id,
+                org_id=org_id,
+                limit=limit,
+                min_confidence=min_confidence,
+            )
+            for scored_sem in scored_semantics:
+                sem = scored_sem.memory
+                # Filter by selectivity
+                if sem.selectivity_score < min_selectivity:
+                    continue
+                results.append(
+                    RecallResult(
+                        memory_type="semantic",
+                        content=sem.content,
+                        score=scored_sem.score,
+                        confidence=sem.confidence.value,
+                        memory_id=sem.id,
+                        related_ids=sem.related_ids,
+                        metadata={
+                            "selectivity": sem.selectivity_score,
+                            "derived_at": sem.derived_at.isoformat(),
+                            "consolidation_passes": sem.consolidation_passes,
+                        },
+                    )
+                )
+
         # Search working memory (in-memory, no DB round-trip)
         if include_working and self._working_memory:
             # Filter by user_id (and org_id if specified)
@@ -447,6 +509,19 @@ class EngramService:
         results.sort(key=lambda r: r.score, reverse=True)
 
         final_results = results[:limit]
+
+        # Multi-hop reasoning: follow links to related memories
+        if follow_links and max_hops > 0:
+            final_results = await self._follow_links(
+                results=final_results,
+                user_id=user_id,
+                max_hops=max_hops,
+                limit=limit,
+            )
+
+        # Include source episodes if requested
+        if include_sources:
+            final_results = await self._enrich_with_sources(final_results, user_id)
 
         # Log audit entry (hash query to avoid PII in logs)
         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -796,3 +871,192 @@ class EngramService:
             confidence=confidence.value,
             explanation=explanation,
         )
+
+    async def _enrich_with_sources(
+        self,
+        results: list[RecallResult],
+        user_id: str,
+    ) -> list[RecallResult]:
+        """Enrich recall results with source episode details.
+
+        Args:
+            results: List of recall results to enrich.
+            user_id: User ID for isolation.
+
+        Returns:
+            List of RecallResult with source_episodes populated.
+        """
+        enriched: list[RecallResult] = []
+
+        for result in results:
+            source_episodes: list[SourceEpisodeSummary] = []
+
+            # Facts have a single source episode
+            if result.memory_type == "fact" and result.source_episode_id:
+                ep = await self.storage.get_episode(result.source_episode_id, user_id)
+                if ep:
+                    source_episodes.append(
+                        SourceEpisodeSummary(
+                            id=ep.id,
+                            content=ep.content,
+                            role=ep.role,
+                            timestamp=ep.timestamp.isoformat(),
+                        )
+                    )
+
+            # Semantic memories have multiple source episodes
+            elif result.memory_type == "semantic":
+                sem = await self.storage.get_semantic(result.memory_id, user_id)
+                if sem:
+                    for ep_id in sem.source_episode_ids:
+                        ep = await self.storage.get_episode(ep_id, user_id)
+                        if ep:
+                            source_episodes.append(
+                                SourceEpisodeSummary(
+                                    id=ep.id,
+                                    content=ep.content,
+                                    role=ep.role,
+                                    timestamp=ep.timestamp.isoformat(),
+                                )
+                            )
+
+            # Create enriched result with sources
+            enriched.append(
+                RecallResult(
+                    memory_type=result.memory_type,
+                    content=result.content,
+                    score=result.score,
+                    confidence=result.confidence,
+                    memory_id=result.memory_id,
+                    source_episode_id=result.source_episode_id,
+                    source_episodes=source_episodes,
+                    related_ids=result.related_ids,
+                    hop_distance=result.hop_distance,
+                    metadata=result.metadata,
+                )
+            )
+
+        return enriched
+
+    async def _follow_links(
+        self,
+        results: list[RecallResult],
+        user_id: str,
+        max_hops: int,
+        limit: int,
+    ) -> list[RecallResult]:
+        """Follow related_ids links to discover connected memories.
+
+        Implements multi-hop reasoning by traversing related_ids from
+        semantic and procedural memories.
+
+        Args:
+            results: Initial recall results.
+            user_id: User ID for isolation.
+            max_hops: Maximum link traversal depth.
+            limit: Maximum total results.
+
+        Returns:
+            Extended list of RecallResult including linked memories.
+        """
+        all_results = list(results)
+        seen_ids: set[str] = {r.memory_id for r in results}
+        current_frontier = results
+
+        for hop in range(1, max_hops + 1):
+            # Collect all related_ids from current frontier
+            related_ids_to_fetch: set[str] = set()
+            for r in current_frontier:
+                for related_id in r.related_ids:
+                    if related_id not in seen_ids:
+                        related_ids_to_fetch.add(related_id)
+
+            if not related_ids_to_fetch:
+                break  # No more links to follow
+
+            # Fetch related memories
+            next_frontier: list[RecallResult] = []
+            for related_id in related_ids_to_fetch:
+                if len(all_results) >= limit:
+                    break
+
+                memory_result = await self._fetch_memory_by_id(related_id, user_id, hop)
+                if memory_result:
+                    next_frontier.append(memory_result)
+                    all_results.append(memory_result)
+                    seen_ids.add(related_id)
+
+            current_frontier = next_frontier
+
+        return all_results[:limit]
+
+    async def _fetch_memory_by_id(
+        self,
+        memory_id: str,
+        user_id: str,
+        hop_distance: int,
+    ) -> RecallResult | None:
+        """Fetch a memory by ID and convert to RecallResult.
+
+        Args:
+            memory_id: ID of the memory to fetch.
+            user_id: User ID for isolation.
+            hop_distance: How many hops from original query.
+
+        Returns:
+            RecallResult or None if not found.
+        """
+        # Determine memory type from ID prefix
+        if memory_id.startswith("sem_"):
+            sem = await self.storage.get_semantic(memory_id, user_id)
+            if sem:
+                return RecallResult(
+                    memory_type="semantic",
+                    content=sem.content,
+                    score=0.0,  # No similarity score for linked memories
+                    confidence=sem.confidence.value,
+                    memory_id=sem.id,
+                    related_ids=sem.related_ids,
+                    hop_distance=hop_distance,
+                    metadata={
+                        "selectivity": sem.selectivity_score,
+                        "derived_at": sem.derived_at.isoformat(),
+                        "linked": True,
+                    },
+                )
+
+        elif memory_id.startswith("proc_"):
+            proc = await self.storage.get_procedural(memory_id, user_id)
+            if proc:
+                return RecallResult(
+                    memory_type="procedural",
+                    content=proc.content,
+                    score=0.0,
+                    confidence=proc.confidence.value,
+                    memory_id=proc.id,
+                    related_ids=proc.related_ids,
+                    hop_distance=hop_distance,
+                    metadata={
+                        "trigger_context": proc.trigger_context,
+                        "linked": True,
+                    },
+                )
+
+        elif memory_id.startswith("fact_"):
+            fact = await self.storage.get_fact(memory_id, user_id)
+            if fact:
+                return RecallResult(
+                    memory_type="fact",
+                    content=fact.content,
+                    score=0.0,
+                    confidence=fact.confidence.value,
+                    memory_id=fact.id,
+                    source_episode_id=fact.source_episode_id,
+                    hop_distance=hop_distance,
+                    metadata={
+                        "category": fact.category,
+                        "linked": True,
+                    },
+                )
+
+        return None
