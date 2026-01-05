@@ -106,6 +106,7 @@ class RecallRequest(BaseModel):
         min_confidence: Minimum confidence for facts.
         include_episodes: Whether to search episodes.
         include_facts: Whether to search facts.
+        include_working: Whether to include working memory.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -119,6 +120,7 @@ class RecallRequest(BaseModel):
     )
     include_episodes: bool = Field(default=True, description="Search episodes")
     include_facts: bool = Field(default=True, description="Search facts")
+    include_working: bool = Field(default=True, description="Include working memory")
 
 
 class RecallResultResponse(BaseModel):
@@ -236,3 +238,20 @@ class MemoryStatsResponse(BaseModel):
     counts: MemoryCounts
     confidence: ConfidenceStats
     pending_consolidation: int = Field(ge=0, description="Episodes awaiting LLM consolidation")
+
+
+class WorkingMemoryResponse(BaseModel):
+    """Response for working memory endpoint.
+
+    Working memory contains episodes from the current session.
+    It's volatile (in-memory only) and cleared when the session ends.
+
+    Attributes:
+        episodes: List of episodes in working memory.
+        count: Number of episodes in working memory.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    episodes: list[EpisodeResponse]
+    count: int = Field(ge=0, description="Number of episodes in working memory")

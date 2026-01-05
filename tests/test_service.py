@@ -320,3 +320,139 @@ class TestEncodeResult:
         result = EncodeResult(episode=episode, facts=[fact])
         assert len(result.facts) == 1
         assert result.facts[0].content == "user@example.com"
+
+
+class TestWorkingMemory:
+    """Tests for working memory functionality."""
+
+    @pytest.fixture
+    def mock_service(self):
+        """Create a service with mocked dependencies."""
+        storage = AsyncMock()
+        storage.store_episode = AsyncMock(return_value="ep_123")
+        storage.store_fact = AsyncMock(return_value="fact_123")
+        storage.log_audit = AsyncMock()
+
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+        embedder.embed_batch = AsyncMock(side_effect=lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
+
+        pipeline = MagicMock()
+        pipeline.run.return_value = []
+
+        settings = Settings(openai_api_key="sk-test-dummy-key")
+
+        return EngramService(
+            storage=storage,
+            embedder=embedder,
+            pipeline=pipeline,
+            settings=settings,
+        )
+
+    def test_working_memory_starts_empty(self, mock_service):
+        """Working memory should start empty."""
+        assert mock_service.get_working_memory() == []
+
+    @pytest.mark.asyncio
+    async def test_encode_adds_to_working_memory(self, mock_service):
+        """Encode should add episode to working memory."""
+        await mock_service.encode(
+            content="Hello world",
+            role="user",
+            user_id="user_123",
+        )
+
+        working = mock_service.get_working_memory()
+        assert len(working) == 1
+        assert working[0].content == "Hello world"
+        assert working[0].user_id == "user_123"
+
+    @pytest.mark.asyncio
+    async def test_working_memory_accumulates(self, mock_service):
+        """Multiple encodes should accumulate in working memory."""
+        await mock_service.encode(content="First", role="user", user_id="user_123")
+        await mock_service.encode(content="Second", role="user", user_id="user_123")
+        await mock_service.encode(content="Third", role="assistant", user_id="user_123")
+
+        working = mock_service.get_working_memory()
+        assert len(working) == 3
+        assert [ep.content for ep in working] == ["First", "Second", "Third"]
+
+    def test_clear_working_memory(self, mock_service):
+        """Clear should remove all episodes from working memory."""
+        # Manually add an episode (simulate encode without async)
+        episode = Episode(content="Test", role="user", user_id="u1", embedding=[0.1, 0.2])
+        mock_service._working_memory.append(episode)
+
+        assert len(mock_service.get_working_memory()) == 1
+        mock_service.clear_working_memory()
+        assert len(mock_service.get_working_memory()) == 0
+
+    def test_get_working_memory_returns_copy(self, mock_service):
+        """get_working_memory should return a copy, not the original list."""
+        episode = Episode(content="Test", role="user", user_id="u1", embedding=[0.1, 0.2])
+        mock_service._working_memory.append(episode)
+
+        working = mock_service.get_working_memory()
+        working.clear()  # Modify the returned list
+
+        # Original should be unaffected
+        assert len(mock_service.get_working_memory()) == 1
+
+    @pytest.mark.asyncio
+    async def test_close_clears_working_memory(self, mock_service):
+        """Close should clear working memory."""
+        await mock_service.encode(content="Hello", role="user", user_id="user_123")
+        assert len(mock_service.get_working_memory()) == 1
+
+        await mock_service.close()
+        assert len(mock_service.get_working_memory()) == 0
+
+    @pytest.mark.asyncio
+    async def test_recall_includes_working_memory(self, mock_service):
+        """Recall should include working memory results by default."""
+        # Add episode to working memory
+        await mock_service.encode(content="Test content", role="user", user_id="user_123")
+
+        # Mock storage to return empty results
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+
+        results = await mock_service.recall(query="test", user_id="user_123")
+
+        # Should have working memory result
+        working_results = [r for r in results if r.memory_type == "working"]
+        assert len(working_results) == 1
+        assert working_results[0].content == "Test content"
+
+    @pytest.mark.asyncio
+    async def test_recall_excludes_working_when_disabled(self, mock_service):
+        """Recall should exclude working memory when include_working=False."""
+        await mock_service.encode(content="Test content", role="user", user_id="user_123")
+
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+
+        results = await mock_service.recall(
+            query="test",
+            user_id="user_123",
+            include_working=False,
+        )
+
+        working_results = [r for r in results if r.memory_type == "working"]
+        assert len(working_results) == 0
+
+    @pytest.mark.asyncio
+    async def test_recall_filters_working_by_user(self, mock_service):
+        """Recall should only return working memory for the specified user."""
+        await mock_service.encode(content="User 1 content", role="user", user_id="user_1")
+        await mock_service.encode(content="User 2 content", role="user", user_id="user_2")
+
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+
+        results = await mock_service.recall(query="content", user_id="user_1")
+
+        working_results = [r for r in results if r.memory_type == "working"]
+        assert len(working_results) == 1
+        assert working_results[0].content == "User 1 content"
