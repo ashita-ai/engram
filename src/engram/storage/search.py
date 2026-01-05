@@ -5,7 +5,8 @@ Provides vector similarity search methods for all memory types.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from qdrant_client import models
 
@@ -13,6 +14,21 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from engram.models import Episode, Fact, InhibitoryFact, ProceduralMemory, SemanticMemory
+
+MemoryT = TypeVar("MemoryT")
+
+
+@dataclass
+class ScoredResult(Generic[MemoryT]):
+    """A search result with similarity score.
+
+    Attributes:
+        memory: The matched memory object.
+        score: Similarity score from vector search (0.0-1.0).
+    """
+
+    memory: MemoryT
+    score: float
 
 
 class SearchMixin:
@@ -38,7 +54,7 @@ class SearchMixin:
         org_id: str | None = None,
         limit: int = 10,
         min_importance: float | None = None,
-    ) -> list[Episode]:
+    ) -> list[ScoredResult[Episode]]:
         """Search for similar episodes.
 
         Args:
@@ -49,7 +65,7 @@ class SearchMixin:
             min_importance: Minimum importance threshold.
 
         Returns:
-            List of matching Episodes sorted by similarity.
+            List of ScoredResult[Episode] sorted by similarity.
         """
         from engram.models import Episode
 
@@ -70,7 +86,12 @@ class SearchMixin:
         )
 
         return [
-            self._payload_to_memory(r.payload, Episode) for r in results if r.payload is not None
+            ScoredResult(
+                memory=self._payload_to_memory(r.payload, Episode),
+                score=r.score,
+            )
+            for r in results
+            if r.payload is not None
         ]
 
     async def search_facts(
@@ -81,7 +102,7 @@ class SearchMixin:
         limit: int = 10,
         min_confidence: float | None = None,
         category: str | None = None,
-    ) -> list[Fact]:
+    ) -> list[ScoredResult[Fact]]:
         """Search for similar facts.
 
         Args:
@@ -93,7 +114,7 @@ class SearchMixin:
             category: Filter by fact category.
 
         Returns:
-            List of matching Facts sorted by similarity.
+            List of ScoredResult[Fact] sorted by similarity.
         """
         from engram.models import Fact
 
@@ -113,7 +134,14 @@ class SearchMixin:
             limit=limit,
         )
 
-        return [self._payload_to_memory(r.payload, Fact) for r in results if r.payload is not None]
+        return [
+            ScoredResult(
+                memory=self._payload_to_memory(r.payload, Fact),
+                score=r.score,
+            )
+            for r in results
+            if r.payload is not None
+        ]
 
     async def search_semantic(
         self,
@@ -122,7 +150,7 @@ class SearchMixin:
         org_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
-    ) -> list[SemanticMemory]:
+    ) -> list[ScoredResult[SemanticMemory]]:
         """Search for similar semantic memories.
 
         Args:
@@ -133,7 +161,7 @@ class SearchMixin:
             min_confidence: Minimum confidence threshold.
 
         Returns:
-            List of matching SemanticMemory sorted by similarity.
+            List of ScoredResult[SemanticMemory] sorted by similarity.
         """
         from engram.models import SemanticMemory
 
@@ -147,7 +175,10 @@ class SearchMixin:
         )
 
         return [
-            self._payload_to_memory(r.payload, SemanticMemory)
+            ScoredResult(
+                memory=self._payload_to_memory(r.payload, SemanticMemory),
+                score=r.score,
+            )
             for r in results
             if r.payload is not None
         ]
@@ -159,7 +190,7 @@ class SearchMixin:
         org_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
-    ) -> list[ProceduralMemory]:
+    ) -> list[ScoredResult[ProceduralMemory]]:
         """Search for similar procedural memories.
 
         Args:
@@ -170,7 +201,7 @@ class SearchMixin:
             min_confidence: Minimum confidence threshold.
 
         Returns:
-            List of matching ProceduralMemory sorted by similarity.
+            List of ScoredResult[ProceduralMemory] sorted by similarity.
         """
         from engram.models import ProceduralMemory
 
@@ -184,7 +215,10 @@ class SearchMixin:
         )
 
         return [
-            self._payload_to_memory(r.payload, ProceduralMemory)
+            ScoredResult(
+                memory=self._payload_to_memory(r.payload, ProceduralMemory),
+                score=r.score,
+            )
             for r in results
             if r.payload is not None
         ]
@@ -195,7 +229,7 @@ class SearchMixin:
         user_id: str,
         org_id: str | None = None,
         limit: int = 10,
-    ) -> list[InhibitoryFact]:
+    ) -> list[ScoredResult[InhibitoryFact]]:
         """Search for similar inhibitory facts.
 
         Args:
@@ -205,7 +239,7 @@ class SearchMixin:
             limit: Maximum results to return.
 
         Returns:
-            List of matching InhibitoryFact sorted by similarity.
+            List of ScoredResult[InhibitoryFact] sorted by similarity.
         """
         from engram.models import InhibitoryFact
 
@@ -219,7 +253,10 @@ class SearchMixin:
         )
 
         return [
-            self._payload_to_memory(r.payload, InhibitoryFact)
+            ScoredResult(
+                memory=self._payload_to_memory(r.payload, InhibitoryFact),
+                score=r.score,
+            )
             for r in results
             if r.payload is not None
         ]

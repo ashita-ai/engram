@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from .audit import AuditMixin
 from .base import COLLECTION_NAMES, DEFAULT_EMBEDDING_DIM, StorageBase
 from .crud import CRUDMixin
@@ -24,32 +26,31 @@ from .search import SearchMixin
 from .store import StoreMixin
 
 
-class MemoryStats:
+class MemoryStats(BaseModel):
     """Statistics about stored memories."""
 
-    def __init__(
-        self,
-        episodes: int = 0,
-        facts: int = 0,
-        semantic: int = 0,
-        procedural: int = 0,
-        inhibitory: int = 0,
-        pending_consolidation: int = 0,
-        facts_avg_confidence: float | None = None,
-        facts_min_confidence: float | None = None,
-        facts_max_confidence: float | None = None,
-        semantic_avg_confidence: float | None = None,
-    ):
-        self.episodes = episodes
-        self.facts = facts
-        self.semantic = semantic
-        self.procedural = procedural
-        self.inhibitory = inhibitory
-        self.pending_consolidation = pending_consolidation
-        self.facts_avg_confidence = facts_avg_confidence
-        self.facts_min_confidence = facts_min_confidence
-        self.facts_max_confidence = facts_max_confidence
-        self.semantic_avg_confidence = semantic_avg_confidence
+    model_config = ConfigDict(extra="forbid")
+
+    episodes: int = Field(default=0, ge=0, description="Number of episode memories")
+    facts: int = Field(default=0, ge=0, description="Number of extracted facts")
+    semantic: int = Field(default=0, ge=0, description="Number of semantic memories")
+    procedural: int = Field(default=0, ge=0, description="Number of procedural memories")
+    inhibitory: int = Field(default=0, ge=0, description="Number of inhibitory facts")
+    pending_consolidation: int = Field(
+        default=0, ge=0, description="Episodes awaiting consolidation"
+    )
+    facts_avg_confidence: float | None = Field(
+        default=None, description="Average confidence of facts"
+    )
+    facts_min_confidence: float | None = Field(
+        default=None, description="Minimum confidence of facts"
+    )
+    facts_max_confidence: float | None = Field(
+        default=None, description="Maximum confidence of facts"
+    )
+    semantic_avg_confidence: float | None = Field(
+        default=None, description="Average confidence of semantic memories"
+    )
 
 
 class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase):

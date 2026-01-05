@@ -15,6 +15,7 @@ from engram.config import Settings
 from engram.extraction import default_pipeline
 from engram.models import Episode, Fact
 from engram.service import EngramService
+from engram.storage import ScoredResult
 
 
 class TestEncodeRecallWorkflow:
@@ -31,7 +32,12 @@ class TestEncodeRecallWorkflow:
             hash_val = hash(text) % 1000 / 1000
             return [hash_val, 1 - hash_val, 0.5]
 
+        async def embed_batch_side_effect(texts: list[str]) -> list[list[float]]:
+            # Return batch of embeddings
+            return [await embed_side_effect(text) for text in texts]
+
         embedder.embed = AsyncMock(side_effect=embed_side_effect)
+        embedder.embed_batch = AsyncMock(side_effect=embed_batch_side_effect)
         return embedder
 
     @pytest.fixture
@@ -55,13 +61,14 @@ class TestEncodeRecallWorkflow:
             org_id: str | None = None,
             limit: int = 10,
             **kwargs: object,
-        ) -> list[Episode]:
-            # Return all episodes for the user
-            return [
+        ) -> list[ScoredResult[Episode]]:
+            # Return all episodes for the user wrapped in ScoredResult
+            episodes = [
                 ep
                 for ep in storage._episodes.values()
                 if ep.user_id == user_id and (org_id is None or ep.org_id == org_id)
             ][:limit]
+            return [ScoredResult(memory=ep, score=0.85) for ep in episodes]
 
         async def search_facts(
             query_vector: list[float],
@@ -70,7 +77,7 @@ class TestEncodeRecallWorkflow:
             limit: int = 10,
             min_confidence: float | None = None,
             **kwargs: object,
-        ) -> list[Fact]:
+        ) -> list[ScoredResult[Fact]]:
             results = []
             for fact in storage._facts.values():
                 if fact.user_id != user_id:
@@ -80,7 +87,7 @@ class TestEncodeRecallWorkflow:
                 if min_confidence and fact.confidence.value < min_confidence:
                     continue
                 results.append(fact)
-            return results[:limit]
+            return [ScoredResult(memory=f, score=0.9) for f in results[:limit]]
 
         storage.store_episode = AsyncMock(side_effect=store_episode)
         storage.store_fact = AsyncMock(side_effect=store_fact)
@@ -242,6 +249,7 @@ class TestExtractionIntegration:
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+        embedder.embed_batch = AsyncMock(side_effect=lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
 
         settings = Settings(openai_api_key="sk-test-dummy")
         return EngramService(
