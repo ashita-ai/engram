@@ -41,7 +41,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from engram.config import Settings
 from engram.embeddings import Embedder, get_embedder
 from engram.extraction import ExtractionPipeline, default_pipeline
-from engram.models import AuditEntry, Episode, Fact
+from engram.models import AuditEntry, Episode, Fact, Staleness
 from engram.storage import EngramStorage
 
 
@@ -96,6 +96,8 @@ class RecallResult(BaseModel):
         source_episodes: Source episode details (when include_sources=True).
         related_ids: IDs of related memories (for multi-hop).
         hop_distance: Distance from original query result (0=direct, 1=1-hop, etc.).
+        staleness: Freshness state (fresh, consolidating, stale).
+        consolidated_at: When this memory was last consolidated.
         metadata: Additional memory-specific metadata.
     """
 
@@ -110,6 +112,8 @@ class RecallResult(BaseModel):
     source_episodes: list[SourceEpisodeSummary] = Field(default_factory=list)
     related_ids: list[str] = Field(default_factory=list)
     hop_distance: int = Field(default=0, ge=0)
+    staleness: Staleness = Field(default=Staleness.FRESH)
+    consolidated_at: str | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -352,6 +356,7 @@ class EngramService:
         include_sources: bool = False,
         follow_links: bool = False,
         max_hops: int = 2,
+        freshness: str = "best_effort",
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
@@ -372,9 +377,11 @@ class EngramService:
             include_sources: Whether to include source episodes in results.
             follow_links: Enable multi-hop reasoning via related_ids.
             max_hops: Maximum link traversal depth when follow_links=True.
+            freshness: Freshness mode - "best_effort" returns all, "fresh_only" only
+                returns fully consolidated memories.
 
         Returns:
-            List of RecallResult sorted by similarity score.
+            List of RecallResult sorted by similarity score, with staleness metadata.
 
         Example:
             ```python
@@ -382,13 +389,10 @@ class EngramService:
                 query="phone numbers",
                 user_id="user_123",
                 limit=5,
-                include_sources=True,
-                follow_links=True,
+                freshness="fresh_only",  # Only consolidated memories
             )
             for m in memories:
-                print(f"{m.content} (score: {m.score:.2f})")
-                for source in m.source_episodes:
-                    print(f"  Source: {source.content}")
+                print(f"{m.content} (staleness: {m.staleness})")
             ```
         """
         start_time = time.monotonic()
@@ -408,16 +412,20 @@ class EngramService:
             )
             for scored_ep in scored_episodes:
                 ep = scored_ep.memory
+                # Episode staleness: FRESH if consolidated, STALE otherwise
+                ep_staleness = Staleness.FRESH if ep.consolidated else Staleness.STALE
                 results.append(
                     RecallResult(
                         memory_type="episode",
                         content=ep.content,
                         score=scored_ep.score,
                         memory_id=ep.id,
+                        staleness=ep_staleness,
                         metadata={
                             "role": ep.role,
                             "importance": ep.importance,
                             "timestamp": ep.timestamp.isoformat(),
+                            "consolidated": ep.consolidated,
                         },
                     )
                 )
@@ -433,6 +441,7 @@ class EngramService:
             )
             for scored_fact in scored_facts:
                 fact = scored_fact.memory
+                # Facts are extracted immediately, so they're always fresh
                 results.append(
                     RecallResult(
                         memory_type="fact",
@@ -441,6 +450,8 @@ class EngramService:
                         confidence=fact.confidence.value,
                         memory_id=fact.id,
                         source_episode_id=fact.source_episode_id,
+                        staleness=Staleness.FRESH,
+                        consolidated_at=fact.derived_at.isoformat(),
                         metadata={
                             "category": fact.category,
                             "derived_at": fact.derived_at.isoformat(),
@@ -462,6 +473,7 @@ class EngramService:
                 # Filter by selectivity
                 if sem.selectivity_score < min_selectivity:
                     continue
+                # Semantic memories are created by consolidation, so they're fresh
                 results.append(
                     RecallResult(
                         memory_type="semantic",
@@ -470,6 +482,8 @@ class EngramService:
                         confidence=sem.confidence.value,
                         memory_id=sem.id,
                         related_ids=sem.related_ids,
+                        staleness=Staleness.FRESH,
+                        consolidated_at=sem.derived_at.isoformat(),
                         metadata={
                             "selectivity": sem.selectivity_score,
                             "derived_at": sem.derived_at.isoformat(),
@@ -491,12 +505,14 @@ class EngramService:
 
                 # Compute similarity score
                 score = _cosine_similarity(query_vector, ep.embedding)
+                # Working memory is always stale (not yet consolidated)
                 results.append(
                     RecallResult(
                         memory_type="working",
                         content=ep.content,
                         score=score,
                         memory_id=ep.id,
+                        staleness=Staleness.STALE,
                         metadata={
                             "role": ep.role,
                             "importance": ep.importance,
@@ -507,6 +523,10 @@ class EngramService:
 
         # Sort by score descending
         results.sort(key=lambda r: r.score, reverse=True)
+
+        # Apply freshness filtering
+        if freshness == "fresh_only":
+            results = [r for r in results if r.staleness == Staleness.FRESH]
 
         final_results = results[:limit]
 
@@ -932,6 +952,8 @@ class EngramService:
                     source_episodes=source_episodes,
                     related_ids=result.related_ids,
                     hop_distance=result.hop_distance,
+                    staleness=result.staleness,
+                    consolidated_at=result.consolidated_at,
                     metadata=result.metadata,
                 )
             )
@@ -1018,6 +1040,8 @@ class EngramService:
                     memory_id=sem.id,
                     related_ids=sem.related_ids,
                     hop_distance=hop_distance,
+                    staleness=Staleness.FRESH,
+                    consolidated_at=sem.derived_at.isoformat(),
                     metadata={
                         "selectivity": sem.selectivity_score,
                         "derived_at": sem.derived_at.isoformat(),
@@ -1036,6 +1060,8 @@ class EngramService:
                     memory_id=proc.id,
                     related_ids=proc.related_ids,
                     hop_distance=hop_distance,
+                    staleness=Staleness.FRESH,
+                    consolidated_at=proc.derived_at.isoformat(),
                     metadata={
                         "trigger_context": proc.trigger_context,
                         "linked": True,
@@ -1053,6 +1079,8 @@ class EngramService:
                     memory_id=fact.id,
                     source_episode_id=fact.source_episode_id,
                     hop_distance=hop_distance,
+                    staleness=Staleness.FRESH,
+                    consolidated_at=fact.derived_at.isoformat(),
                     metadata={
                         "category": fact.category,
                         "linked": True,

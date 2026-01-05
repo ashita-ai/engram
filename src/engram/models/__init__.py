@@ -16,7 +16,7 @@ Supporting Types:
 """
 
 from .audit import AuditEntry
-from .base import ConfidenceScore, ExtractionMethod, MemoryBase, generate_id
+from .base import ConfidenceScore, ExtractionMethod, MemoryBase, Staleness, generate_id
 from .episode import Episode
 from .fact import Fact
 from .inhibitory import InhibitoryFact
@@ -28,6 +28,7 @@ __all__ = [
     "ConfidenceScore",
     "ExtractionMethod",
     "MemoryBase",
+    "Staleness",
     "generate_id",
     # Memory types
     "Episode",

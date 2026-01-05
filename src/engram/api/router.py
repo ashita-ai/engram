@@ -206,6 +206,7 @@ async def recall(
                 include_sources=request.include_sources,
                 follow_links=request.follow_links,
                 max_hops=request.max_hops,
+                freshness=request.freshness,
             )
 
         result_responses = [
@@ -227,6 +228,8 @@ async def recall(
                 ],
                 related_ids=r.related_ids,
                 hop_distance=r.hop_distance,
+                staleness=r.staleness,
+                consolidated_at=r.consolidated_at,
                 metadata=r.metadata,
             )
             for r in results

@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from engram.models import Staleness
+
 
 class EncodeRequest(BaseModel):
     """Request body for encoding a memory.
@@ -135,6 +137,10 @@ class RecallRequest(BaseModel):
     include_sources: bool = Field(default=False, description="Include source episodes in results")
     follow_links: bool = Field(default=False, description="Enable multi-hop reasoning")
     max_hops: int = Field(default=2, ge=1, le=5, description="Maximum link traversal depth")
+    freshness: Literal["best_effort", "fresh_only"] = Field(
+        default="best_effort",
+        description="Freshness mode: best_effort returns all, fresh_only only consolidated",
+    )
     as_of: datetime | None = Field(
         default=None,
         description="Bi-temporal query: only return memories derived before this time",
@@ -174,6 +180,8 @@ class RecallResultResponse(BaseModel):
         source_episodes: Source episode details (when include_sources=True).
         related_ids: IDs of related memories (for multi-hop).
         hop_distance: Distance from original query result (0=direct, 1=1-hop, etc.).
+        staleness: Freshness state (fresh, consolidating, stale).
+        consolidated_at: When this memory was last consolidated.
         metadata: Additional memory-specific metadata.
     """
 
@@ -188,6 +196,8 @@ class RecallResultResponse(BaseModel):
     source_episodes: list[SourceEpisodeSummary] = Field(default_factory=list)
     related_ids: list[str] = Field(default_factory=list)
     hop_distance: int = Field(default=0, ge=0, description="Distance from original query result")
+    staleness: Staleness = Field(default=Staleness.FRESH, description="Freshness state")
+    consolidated_at: str | None = Field(default=None, description="When last consolidated")
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -954,3 +954,208 @@ class TestVerifyWorkflow:
 
         with pytest.raises(ValueError, match="Cannot determine memory type"):
             await service.verify("invalid_id_format", "user_123")
+
+
+class TestFreshnessHints:
+    """Tests for freshness hints in recall."""
+
+    @pytest.fixture
+    def mock_embedder(self):
+        """Create a mock embedder."""
+        embedder = AsyncMock()
+
+        async def embed_side_effect(text: str) -> list[float]:
+            hash_val = hash(text) % 1000 / 1000
+            return [hash_val, 1 - hash_val, 0.5]
+
+        async def embed_batch_side_effect(texts: list[str]) -> list[list[float]]:
+            return [await embed_side_effect(text) for text in texts]
+
+        embedder.embed = AsyncMock(side_effect=embed_side_effect)
+        embedder.embed_batch = AsyncMock(side_effect=embed_batch_side_effect)
+        return embedder
+
+    @pytest.fixture
+    def mock_storage(self):
+        """Create a mock storage with episodes."""
+        storage = AsyncMock()
+        storage._episodes: dict[str, Episode] = {}
+        storage._facts: dict[str, Fact] = {}
+
+        async def store_episode(episode: Episode) -> str:
+            storage._episodes[episode.id] = episode
+            return episode.id
+
+        async def store_fact(fact: Fact) -> str:
+            storage._facts[fact.id] = fact
+            return fact.id
+
+        async def search_episodes(
+            query_vector, user_id, org_id=None, limit=10, **kwargs
+        ) -> list[ScoredResult[Episode]]:
+            results = []
+            for ep in storage._episodes.values():
+                if ep.user_id == user_id:
+                    results.append(ScoredResult(memory=ep, score=0.8))
+            return results[:limit]
+
+        async def search_facts(
+            query_vector, user_id, org_id=None, limit=10, **kwargs
+        ) -> list[ScoredResult[Fact]]:
+            results = []
+            for fact in storage._facts.values():
+                if fact.user_id == user_id:
+                    results.append(ScoredResult(memory=fact, score=0.85))
+            return results[:limit]
+
+        async def search_semantic(query_vector, user_id, org_id=None, limit=10, **kwargs):
+            return []
+
+        storage.store_episode = AsyncMock(side_effect=store_episode)
+        storage.store_fact = AsyncMock(side_effect=store_fact)
+        storage.search_episodes = AsyncMock(side_effect=search_episodes)
+        storage.search_facts = AsyncMock(side_effect=search_facts)
+        storage.search_semantic = AsyncMock(side_effect=search_semantic)
+        storage.log_audit = AsyncMock()
+        return storage
+
+    @pytest.mark.asyncio
+    async def test_recall_returns_staleness_for_episodes(self, mock_storage, mock_embedder):
+        """Test that recall returns staleness for episodes."""
+        from engram.models import Staleness
+
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        # Encode a message (episode will be unconsolidated -> STALE)
+        await service.encode(
+            content="My phone number is 555-123-4567",
+            role="user",
+            user_id="user_123",
+        )
+
+        # Recall should show staleness
+        results = await service.recall(
+            query="phone number",
+            user_id="user_123",
+        )
+
+        # Find episode result
+        episode_results = [r for r in results if r.memory_type == "episode"]
+        assert len(episode_results) > 0
+        # Episode is unconsolidated so should be STALE
+        assert episode_results[0].staleness == Staleness.STALE
+
+        # Find fact result
+        fact_results = [r for r in results if r.memory_type == "fact"]
+        assert len(fact_results) > 0
+        # Facts are always FRESH
+        assert fact_results[0].staleness == Staleness.FRESH
+        assert fact_results[0].consolidated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_recall_fresh_only_filters_stale(self, mock_storage, mock_embedder):
+        """Test that fresh_only mode filters out stale memories."""
+
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        # Encode a message (episode will be unconsolidated -> STALE)
+        await service.encode(
+            content="My phone number is 555-123-4567",
+            role="user",
+            user_id="user_123",
+        )
+
+        # Recall with best_effort should return everything
+        all_results = await service.recall(
+            query="phone number",
+            user_id="user_123",
+            freshness="best_effort",
+        )
+        episode_count = len([r for r in all_results if r.memory_type == "episode"])
+        assert episode_count > 0
+
+        # Recall with fresh_only should filter out stale episodes
+        fresh_results = await service.recall(
+            query="phone number",
+            user_id="user_123",
+            freshness="fresh_only",
+        )
+
+        # Episodes are STALE, so they should be filtered out
+        fresh_episode_count = len([r for r in fresh_results if r.memory_type == "episode"])
+        assert fresh_episode_count == 0
+
+        # Facts are FRESH, so they should still be included
+        fresh_fact_count = len([r for r in fresh_results if r.memory_type == "fact"])
+        assert fresh_fact_count > 0
+
+    @pytest.mark.asyncio
+    async def test_working_memory_is_stale(self, mock_storage, mock_embedder):
+        """Test that working memory is always marked as STALE."""
+        from engram.models import Staleness
+
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        # Encode a message
+        await service.encode(
+            content="My email is test@example.com",
+            role="user",
+            user_id="user_123",
+        )
+
+        # Recall including working memory
+        results = await service.recall(
+            query="email",
+            user_id="user_123",
+            include_working=True,
+        )
+
+        # Find working memory result
+        working_results = [r for r in results if r.memory_type == "working"]
+        assert len(working_results) > 0
+        # Working memory is always STALE
+        assert working_results[0].staleness == Staleness.STALE
+
+    @pytest.mark.asyncio
+    async def test_fresh_only_excludes_working_memory(self, mock_storage, mock_embedder):
+        """Test that fresh_only mode excludes working memory."""
+        service = EngramService(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            pipeline=default_pipeline(),
+            settings=Settings(_env_file=None),
+        )
+
+        # Encode a message
+        await service.encode(
+            content="My email is test@example.com",
+            role="user",
+            user_id="user_123",
+        )
+
+        # Recall with fresh_only
+        results = await service.recall(
+            query="email",
+            user_id="user_123",
+            include_working=True,
+            freshness="fresh_only",
+        )
+
+        # Working memory should be excluded (it's STALE)
+        working_results = [r for r in results if r.memory_type == "working"]
+        assert len(working_results) == 0
