@@ -20,6 +20,7 @@ from .schemas import (
     RecallRequest,
     RecallResponse,
     RecallResultResponse,
+    WorkingMemoryResponse,
 )
 
 router = APIRouter()
@@ -178,6 +179,7 @@ async def recall(
             min_confidence=request.min_confidence,
             include_episodes=request.include_episodes,
             include_facts=request.include_facts,
+            include_working=request.include_working,
         )
 
         result_responses = [
@@ -260,3 +262,53 @@ async def get_memory_stats(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get stats: {e}",
         ) from e
+
+
+@router.get("/memories/working", response_model=WorkingMemoryResponse, tags=["memory"])
+async def get_working_memory(
+    service: ServiceDep,
+) -> WorkingMemoryResponse:
+    """Get current session's working memory.
+
+    Working memory contains episodes from the current session.
+    It's volatile (in-memory only) and cleared when the session ends.
+
+    Returns:
+        List of episodes in working memory.
+    """
+    episodes = service.get_working_memory()
+
+    episode_responses = [
+        EpisodeResponse(
+            id=ep.id,
+            content=ep.content,
+            role=ep.role,
+            user_id=ep.user_id,
+            org_id=ep.org_id,
+            session_id=ep.session_id,
+            importance=ep.importance,
+            created_at=ep.timestamp.isoformat(),
+        )
+        for ep in episodes
+    ]
+
+    return WorkingMemoryResponse(
+        episodes=episode_responses,
+        count=len(episode_responses),
+    )
+
+
+@router.delete(
+    "/memories/working",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["memory"],
+)
+async def clear_working_memory(
+    service: ServiceDep,
+) -> None:
+    """Clear working memory.
+
+    Removes all episodes from the current session's working memory.
+    This is typically called at the end of a session.
+    """
+    service.clear_working_memory()

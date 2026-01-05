@@ -30,8 +30,9 @@ Example:
 from __future__ import annotations
 
 import hashlib
+import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -41,6 +42,16 @@ from engram.embeddings import Embedder, get_embedder
 from engram.extraction import ExtractionPipeline, default_pipeline
 from engram.models import AuditEntry, Episode, Fact
 from engram.storage import EngramStorage
+
+
+def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=True))
+    norm1 = math.sqrt(sum(a * a for a in vec1))
+    norm2 = math.sqrt(sum(b * b for b in vec2))
+    if norm1 == 0 or norm2 == 0:
+        return 0.0
+    return dot_product / (norm1 * norm2)
 
 
 class EncodeResult(BaseModel):
@@ -86,6 +97,8 @@ class EngramService:
     This service provides a simple interface for:
     - encode(): Store text as an episode and extract facts
     - recall(): Search memories by semantic similarity
+    - get_working_memory(): Get current session's episodes
+    - clear_working_memory(): Clear session context
 
     Uses dependency injection for storage, embeddings, and extraction,
     making it easy to test and configure.
@@ -101,6 +114,9 @@ class EngramService:
     embedder: Embedder
     pipeline: ExtractionPipeline
     settings: Settings
+
+    # Working memory: in-memory episodes for current session (not persisted separately)
+    _working_memory: list[Episode] = field(default_factory=list, init=False, repr=False)
 
     @classmethod
     def create(cls, settings: Settings | None = None) -> EngramService:
@@ -135,7 +151,8 @@ class EngramService:
         await self.storage.initialize()
 
     async def close(self) -> None:
-        """Clean up resources."""
+        """Clean up resources and clear working memory."""
+        self.clear_working_memory()
         await self.storage.close()
 
     async def __aenter__(self) -> EngramService:
@@ -146,6 +163,34 @@ class EngramService:
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Async context manager exit."""
         await self.close()
+
+    def get_working_memory(self) -> list[Episode]:
+        """Get current session's working memory.
+
+        Working memory contains episodes from the current session.
+        It's volatile (in-memory only) and cleared when the session ends.
+
+        Returns:
+            Copy of the working memory episodes list.
+
+        Example:
+            ```python
+            async with EngramService.create() as engram:
+                await engram.encode("Hello", role="user", user_id="u1")
+                working = engram.get_working_memory()
+                print(f"Session has {len(working)} episodes")
+            # Working memory cleared on exit
+            ```
+        """
+        return self._working_memory.copy()
+
+    def clear_working_memory(self) -> None:
+        """Clear working memory (typically at end of session).
+
+        This removes all episodes from working memory without
+        affecting persisted storage.
+        """
+        self._working_memory.clear()
 
     async def encode(
         self,
@@ -207,6 +252,9 @@ class EngramService:
         # Store episode
         await self.storage.store_episode(episode)
 
+        # Add to working memory for current session
+        self._working_memory.append(episode)
+
         # Extract and store facts
         facts: list[Fact] = []
         if run_extraction:
@@ -244,6 +292,7 @@ class EngramService:
         min_confidence: float | None = None,
         include_episodes: bool = True,
         include_facts: bool = True,
+        include_working: bool = True,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
@@ -258,6 +307,7 @@ class EngramService:
             min_confidence: Minimum confidence for facts.
             include_episodes: Whether to search episodes.
             include_facts: Whether to search facts.
+            include_working: Whether to include working memory (current session).
 
         Returns:
             List of RecallResult sorted by similarity score.
@@ -326,6 +376,33 @@ class EngramService:
                         metadata={
                             "category": fact.category,
                             "derived_at": fact.derived_at.isoformat(),
+                        },
+                    )
+                )
+
+        # Search working memory (in-memory, no DB round-trip)
+        if include_working and self._working_memory:
+            # Filter by user_id (and org_id if specified)
+            for ep in self._working_memory:
+                if ep.user_id != user_id:
+                    continue
+                if org_id is not None and ep.org_id != org_id:
+                    continue
+                if ep.embedding is None:
+                    continue
+
+                # Compute similarity score
+                score = _cosine_similarity(query_vector, ep.embedding)
+                results.append(
+                    RecallResult(
+                        memory_type="working",
+                        content=ep.content,
+                        score=score,
+                        memory_id=ep.id,
+                        metadata={
+                            "role": ep.role,
+                            "importance": ep.importance,
+                            "timestamp": ep.timestamp.isoformat(),
                         },
                     )
                 )
