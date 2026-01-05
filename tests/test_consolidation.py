@@ -308,10 +308,10 @@ class TestDurableAgentFactory:
         )
         factory = DurableAgentFactory(settings)
 
-        # Mock DBOS, DBOSAgent, and pydantic_ai.Agent to avoid OpenAI client creation
+        # Mock at the import locations to avoid OpenAI client creation
         with patch("dbos.DBOS") as mock_dbos_class:
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
-                with patch("pydantic_ai.Agent"):
+                with patch("engram.workflows.Agent"):
                     factory.initialize()
 
                     # DBOS should be configured
@@ -331,7 +331,7 @@ class TestDurableAgentFactory:
 
         with patch("dbos.DBOS"):
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent") as mock_dbos_agent:
-                with patch("pydantic_ai.Agent"):
+                with patch("engram.workflows.Agent"):
                     mock_dbos_agent.return_value = MagicMock()
                     factory.initialize()
 
@@ -353,7 +353,7 @@ class TestDurableAgentFactory:
 
         with patch("dbos.DBOS"):
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
-                with patch("pydantic_ai.Agent"):
+                with patch("engram.workflows.Agent"):
                     factory = init_workflows(settings)
 
                     assert factory is not None
@@ -373,7 +373,7 @@ class TestDurableAgentFactory:
 
         with patch("dbos.DBOS"):
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
-                with patch("pydantic_ai.Agent"):
+                with patch("engram.workflows.Agent"):
                     init_workflows(settings)
 
         shutdown_workflows()
@@ -381,6 +381,6 @@ class TestDurableAgentFactory:
         # Should be able to init again
         with patch("dbos.DBOS"):
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
-                with patch("pydantic_ai.Agent"):
+                with patch("engram.workflows.Agent"):
                     factory = init_workflows(settings)
                     assert factory._initialized
