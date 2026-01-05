@@ -29,6 +29,8 @@ Example:
 
 from __future__ import annotations
 
+import hashlib
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,7 +39,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from engram.config import Settings
 from engram.embeddings import Embedder, get_embedder
 from engram.extraction import ExtractionPipeline, default_pipeline
-from engram.models import Episode, Fact
+from engram.models import AuditEntry, Episode, Fact
 from engram.storage import EngramStorage
 
 
@@ -186,6 +188,8 @@ class EngramService:
             # result.facts contains the extracted phone number
             ```
         """
+        start_time = time.monotonic()
+
         # Generate embedding
         embedding = await self.embedder.embed(content)
 
@@ -213,6 +217,18 @@ class EngramService:
                 fact.embedding = fact_embedding
                 await self.storage.store_fact(fact)
                 facts.append(fact)
+
+        # Log audit entry
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        audit_entry = AuditEntry.for_encode(
+            user_id=user_id,
+            episode_id=episode.id,
+            facts_count=len(facts),
+            org_id=org_id,
+            session_id=session_id,
+            duration_ms=duration_ms,
+        )
+        await self.storage.log_audit(audit_entry)
 
         return EncodeResult(episode=episode, facts=facts)
 
@@ -254,6 +270,8 @@ class EngramService:
                 print(f"{m.content} (score: {m.score:.2f})")
             ```
         """
+        start_time = time.monotonic()
+
         # Generate query embedding
         query_vector = await self.embedder.embed(query)
 
@@ -312,4 +330,20 @@ class EngramService:
         # Sort by score descending
         results.sort(key=lambda r: r.score, reverse=True)
 
-        return results[:limit]
+        final_results = results[:limit]
+
+        # Log audit entry (hash query to avoid PII in logs)
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
+        memory_types = list({r.memory_type for r in final_results})
+        audit_entry = AuditEntry.for_recall(
+            user_id=user_id,
+            query_hash=query_hash,
+            results_count=len(final_results),
+            memory_types=memory_types,
+            org_id=org_id,
+            duration_ms=duration_ms,
+        )
+        await self.storage.log_audit(audit_entry)
+
+        return final_results
