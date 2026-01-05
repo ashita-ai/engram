@@ -308,14 +308,15 @@ class TestDurableAgentFactory:
         )
         factory = DurableAgentFactory(settings)
 
-        # Mock DBOS and DBOSAgent at the source modules
+        # Mock DBOS, DBOSAgent, and pydantic_ai.Agent to avoid OpenAI client creation
         with patch("dbos.DBOS") as mock_dbos_class:
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
-                factory.initialize()
+                with patch("pydantic_ai.Agent"):
+                    factory.initialize()
 
-                # DBOS should be configured
-                mock_dbos_class.assert_called_once()
-                mock_dbos_class.launch.assert_called_once()
+                    # DBOS should be configured
+                    mock_dbos_class.assert_called_once()
+                    mock_dbos_class.launch.assert_called_once()
 
         assert factory._initialized
 
@@ -330,16 +331,17 @@ class TestDurableAgentFactory:
 
         with patch("dbos.DBOS"):
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent") as mock_dbos_agent:
-                mock_dbos_agent.return_value = MagicMock()
-                factory.initialize()
+                with patch("pydantic_ai.Agent"):
+                    mock_dbos_agent.return_value = MagicMock()
+                    factory.initialize()
 
-                consolidation = factory.get_consolidation_agent()
-                decay = factory.get_decay_agent()
+                    consolidation = factory.get_consolidation_agent()
+                    decay = factory.get_decay_agent()
 
-                assert consolidation is not None
-                assert decay is not None
-                # Both should be wrapped by DBOSAgent
-                assert mock_dbos_agent.call_count == 2
+                    assert consolidation is not None
+                    assert decay is not None
+                    # Both should be wrapped by DBOSAgent
+                    assert mock_dbos_agent.call_count == 2
 
     def test_init_workflows_global_function(self) -> None:
         """Test init_workflows convenience function."""
@@ -351,14 +353,15 @@ class TestDurableAgentFactory:
 
         with patch("dbos.DBOS"):
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
-                factory = init_workflows(settings)
+                with patch("pydantic_ai.Agent"):
+                    factory = init_workflows(settings)
 
-                assert factory is not None
-                assert factory._initialized
+                    assert factory is not None
+                    assert factory._initialized
 
-                # Second call returns same factory
-                factory2 = init_workflows(settings)
-                assert factory is factory2
+                    # Second call returns same factory
+                    factory2 = init_workflows(settings)
+                    assert factory is factory2
 
     def test_shutdown_workflows_clears_global(self) -> None:
         """Test shutdown_workflows clears global factory."""
@@ -370,12 +373,14 @@ class TestDurableAgentFactory:
 
         with patch("dbos.DBOS"):
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
-                init_workflows(settings)
+                with patch("pydantic_ai.Agent"):
+                    init_workflows(settings)
 
         shutdown_workflows()
 
         # Should be able to init again
         with patch("dbos.DBOS"):
             with patch("pydantic_ai.durable_exec.dbos.DBOSAgent"):
-                factory = init_workflows(settings)
-                assert factory._initialized
+                with patch("pydantic_ai.Agent"):
+                    factory = init_workflows(settings)
+                    assert factory._initialized
