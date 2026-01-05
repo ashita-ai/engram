@@ -42,6 +42,7 @@ class CRUDMixin:
     # These will be provided by the base class
     _collection_name: Any
     _payload_to_memory: Any
+    _memory_to_payload: Any
     client: Any
 
     async def get_episode(self, episode_id: str, user_id: str) -> Episode | None:
@@ -299,3 +300,113 @@ class CRUDMixin:
                 updated += 1
 
         return updated
+
+    async def list_semantic_memories(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        include_archived: bool = False,
+        limit: int = 1000,
+    ) -> list[SemanticMemory]:
+        """List all semantic memories for a user.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            include_archived: Whether to include archived memories.
+            limit: Maximum memories to return.
+
+        Returns:
+            List of SemanticMemory objects.
+        """
+        from engram.models import SemanticMemory
+
+        collection = self._collection_name("semantic")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        if not include_archived:
+            filters.append(
+                models.FieldCondition(
+                    key="archived",
+                    match=models.MatchValue(value=False),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        memories: list[SemanticMemory] = []
+        for point in results:
+            if point.payload is not None:
+                memory = self._payload_to_memory(point.payload, SemanticMemory)
+                if isinstance(point.vector, list):
+                    memory.embedding = point.vector
+                memories.append(memory)
+
+        return memories
+
+    async def update_semantic_memory(
+        self,
+        memory: SemanticMemory,
+    ) -> bool:
+        """Update a semantic memory.
+
+        Args:
+            memory: SemanticMemory with updated fields.
+
+        Returns:
+            True if updated, False if not found.
+        """
+        collection = self._collection_name("semantic")
+
+        # Find the point
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchValue(value=memory.id),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=memory.user_id),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+        )
+
+        if not results:
+            return False
+
+        point = results[0]
+        payload = self._memory_to_payload(memory)
+
+        await self.client.set_payload(
+            collection_name=collection,
+            payload=payload,
+            points=[point.id],
+        )
+
+        return True

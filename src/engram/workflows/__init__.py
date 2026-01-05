@@ -47,7 +47,7 @@ from .consolidation import (
     LLMExtractionResult,
     run_consolidation,
 )
-from .decay import DecayResult
+from .decay import DecayResult, run_decay
 
 if TYPE_CHECKING:
     pass
@@ -289,4 +289,5 @@ __all__ = [
     "IdentifiedLink",
     "LLMExtractionResult",
     "run_consolidation",
+    "run_decay",
 ]

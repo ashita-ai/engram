@@ -62,6 +62,10 @@ class SemanticMemory(MemoryBase):
         ge=1,
         description="Number of consolidation passes",
     )
+    archived: bool = Field(
+        default=False,
+        description="Whether this memory is archived (low confidence)",
+    )
 
     def add_link(self, memory_id: str) -> None:
         """Add a link to a related memory."""
