@@ -156,9 +156,11 @@ async def run_consolidation(
         # Workflows not initialized, run without durability
         from pydantic_ai import Agent
 
+        from engram.config import settings
+
         logger.warning("Durable workflows not initialized, running non-durable extraction")
         temp_agent: Agent[None, LLMExtractionResult] = Agent(
-            "openai:gpt-4o-mini",
+            settings.consolidation_model,
             output_type=LLMExtractionResult,
             instructions="""You are analyzing conversation episodes to extract lasting knowledge.
 

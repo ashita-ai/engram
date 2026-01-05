@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -23,6 +24,8 @@ from .schemas import (
     SourcesResponse,
     WorkingMemoryResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -144,9 +147,10 @@ async def encode(
             detail=str(e),
         ) from e
     except Exception as e:
+        logger.exception("Failed to encode memory")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to encode: {e}",
+            detail="An internal error occurred while encoding the memory",
         ) from e
 
 
@@ -208,9 +212,10 @@ async def recall(
             detail=str(e),
         ) from e
     except Exception as e:
+        logger.exception("Failed to recall memories")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to recall: {e}",
+            detail="An internal error occurred while recalling memories",
         ) from e
 
 
@@ -259,9 +264,10 @@ async def get_memory_stats(
         )
 
     except Exception as e:
+        logger.exception("Failed to get memory stats")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get stats: {e}",
+            detail="An internal error occurred while retrieving memory statistics",
         ) from e
 
 
@@ -386,7 +392,8 @@ async def get_sources(
             detail=str(e),
         ) from e
     except Exception as e:
+        logger.exception("Failed to get sources for memory %s", memory_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get sources: {e}",
+            detail="An internal error occurred while retrieving memory sources",
         ) from e
