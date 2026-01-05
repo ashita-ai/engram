@@ -287,7 +287,7 @@ async def get_memory_stats(
                 facts=stats.facts,
                 semantic=stats.semantic,
                 procedural=stats.procedural,
-                inhibitory=stats.inhibitory,
+                negation=stats.negation,
             ),
             confidence=ConfidenceStats(
                 facts_avg=stats.facts_avg_confidence,
@@ -364,13 +364,13 @@ async def get_sources(
 ) -> SourcesResponse:
     """Get source episodes for a derived memory.
 
-    Traces a derived memory (fact, semantic, procedural, or inhibitory)
+    Traces a derived memory (fact, semantic, procedural, or negation)
     back to the source episode(s) it was extracted from. This enables
     provenance tracking and allows users to verify the origin of any
     derived knowledge.
 
     Args:
-        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or inh_).
+        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or neg_).
         user_id: User ID for multi-tenancy isolation.
         service: Injected EngramService.
 
@@ -388,13 +388,13 @@ async def get_sources(
         memory_type = "semantic"
     elif memory_id.startswith("proc_"):
         memory_type = "procedural"
-    elif memory_id.startswith("inh_"):
-        memory_type = "inhibitory"
+    elif memory_id.startswith("neg_"):
+        memory_type = "negation"
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid memory ID format: {memory_id}. "
-            "Expected prefix: fact_, sem_, proc_, or inh_",
+            "Expected prefix: fact_, sem_, proc_, or neg_",
         )
 
     try:
@@ -442,13 +442,13 @@ async def verify_memory(
 ) -> VerificationResponse:
     """Verify a memory against its source episodes.
 
-    Traces a derived memory (fact, semantic, procedural, or inhibitory)
+    Traces a derived memory (fact, semantic, procedural, or negation)
     back to its source episode(s) and provides a human-readable explanation
     of how it was derived. This is core to Engram's "memory you can trust"
     value proposition.
 
     Args:
-        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or inh_).
+        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or neg_).
         user_id: User ID for multi-tenancy isolation.
         service: Injected EngramService.
 
@@ -482,7 +482,7 @@ async def verify_memory(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid memory ID format: {memory_id}. "
-            "Expected prefix: fact_, sem_, proc_, or inh_",
+            "Expected prefix: fact_, sem_, proc_, or neg_",
         )
 
     try:

@@ -16,7 +16,7 @@ from engram.models import (
     AuditEntry,
     Episode,
     Fact,
-    InhibitoryFact,
+    NegationFact,
     ProceduralMemory,
     SemanticMemory,
 )
@@ -31,7 +31,7 @@ MemoryT = TypeVar(
     Fact,
     SemanticMemory,
     ProceduralMemory,
-    InhibitoryFact,
+    NegationFact,
     AuditEntry,
 )
 
@@ -41,7 +41,7 @@ COLLECTION_NAMES = {
     "fact": "factual",
     "semantic": "semantic",
     "procedural": "procedural",
-    "inhibitory": "inhibitory",
+    "negation": "negation",
     "audit": "audit",
 }
 

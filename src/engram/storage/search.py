@@ -14,7 +14,7 @@ from qdrant_client import models
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from engram.models import Episode, Fact, InhibitoryFact, ProceduralMemory, SemanticMemory
+    from engram.models import Episode, Fact, NegationFact, ProceduralMemory, SemanticMemory
 
 MemoryT = TypeVar("MemoryT")
 
@@ -234,14 +234,14 @@ class SearchMixin:
             if r.payload is not None
         ]
 
-    async def search_inhibitory(
+    async def search_negation(
         self,
         query_vector: Sequence[float],
         user_id: str,
         org_id: str | None = None,
         limit: int = 10,
-    ) -> list[ScoredResult[InhibitoryFact]]:
-        """Search for similar inhibitory facts.
+    ) -> list[ScoredResult[NegationFact]]:
+        """Search for similar negation facts.
 
         Args:
             query_vector: Query embedding vector.
@@ -250,14 +250,14 @@ class SearchMixin:
             limit: Maximum results to return.
 
         Returns:
-            List of ScoredResult[InhibitoryFact] sorted by similarity.
+            List of ScoredResult[NegationFact] sorted by similarity.
         """
-        from engram.models import InhibitoryFact
+        from engram.models import NegationFact
 
         filters = self._build_filters(user_id, org_id)
 
         results = await self._search(
-            collection="inhibitory",
+            collection="negation",
             query_vector=query_vector,
             filters=filters,
             limit=limit,
@@ -265,7 +265,7 @@ class SearchMixin:
 
         return [
             ScoredResult(
-                memory=self._payload_to_memory(r.payload, InhibitoryFact),
+                memory=self._payload_to_memory(r.payload, NegationFact),
                 score=r.score,
             )
             for r in results

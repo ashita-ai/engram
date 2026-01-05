@@ -38,7 +38,7 @@ class MemoryStats(BaseModel):
     facts: int = Field(default=0, ge=0, description="Number of extracted facts")
     semantic: int = Field(default=0, ge=0, description="Number of semantic memories")
     procedural: int = Field(default=0, ge=0, description="Number of procedural memories")
-    inhibitory: int = Field(default=0, ge=0, description="Number of inhibitory facts")
+    negation: int = Field(default=0, ge=0, description="Number of negation facts")
     pending_consolidation: int = Field(
         default=0, ge=0, description="Episodes awaiting consolidation"
     )
@@ -151,7 +151,7 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
         facts_count = await count_collection("factual")
         semantic_count = await count_collection("semantic")
         procedural_count = await count_collection("procedural")
-        inhibitory_count = await count_collection("inhibitory")
+        negation_count = await count_collection("negation")
 
         # Count pending consolidation (unconsolidated episodes)
         unconsolidated_filter = models.Filter(
@@ -214,7 +214,7 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
             facts=facts_count,
             semantic=semantic_count,
             procedural=procedural_count,
-            inhibitory=inhibitory_count,
+            negation=negation_count,
             pending_consolidation=pending_count,
             facts_avg_confidence=facts_avg,
             facts_min_confidence=facts_min,

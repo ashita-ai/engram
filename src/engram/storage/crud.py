@@ -14,7 +14,7 @@ if TYPE_CHECKING:
         AuditEntry,
         Episode,
         Fact,
-        InhibitoryFact,
+        NegationFact,
         ProceduralMemory,
         SemanticMemory,
     )
@@ -25,7 +25,7 @@ MemoryT = TypeVar(
     "Fact",
     "SemanticMemory",
     "ProceduralMemory",
-    "InhibitoryFact",
+    "NegationFact",
     "AuditEntry",
 )
 
@@ -77,11 +77,11 @@ class CRUDMixin:
 
         return await self._get_by_id(memory_id, user_id, "procedural", ProceduralMemory)
 
-    async def get_inhibitory(self, fact_id: str, user_id: str) -> InhibitoryFact | None:
-        """Get an inhibitory fact by ID."""
-        from engram.models import InhibitoryFact
+    async def get_negation(self, fact_id: str, user_id: str) -> NegationFact | None:
+        """Get a negation fact by ID."""
+        from engram.models import NegationFact
 
-        return await self._get_by_id(fact_id, user_id, "inhibitory", InhibitoryFact)
+        return await self._get_by_id(fact_id, user_id, "negation", NegationFact)
 
     async def _get_by_id(
         self,
@@ -152,9 +152,9 @@ class CRUDMixin:
         """Delete a procedural memory."""
         return await self._delete_by_id(memory_id, user_id, "procedural")
 
-    async def delete_inhibitory(self, fact_id: str, user_id: str) -> bool:
-        """Delete an inhibitory fact."""
-        return await self._delete_by_id(fact_id, user_id, "inhibitory")
+    async def delete_negation(self, fact_id: str, user_id: str) -> bool:
+        """Delete a negation fact."""
+        return await self._delete_by_id(fact_id, user_id, "negation")
 
     async def _delete_by_id(
         self,

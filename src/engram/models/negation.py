@@ -1,4 +1,4 @@
-"""InhibitoryFact model - tracking what is NOT true."""
+"""NegationFact model - tracking what is NOT true."""
 
 from datetime import UTC, datetime
 
@@ -7,15 +7,15 @@ from pydantic import Field
 from .base import ConfidenceScore, MemoryBase, generate_id
 
 
-class InhibitoryFact(MemoryBase):
-    """Inhibitory memory - tracking what is explicitly NOT true.
+class NegationFact(MemoryBase):
+    """Negation memory - tracking what is explicitly NOT true.
 
-    Inhibitory facts prevent false matches by recording negations.
+    NegationFacts prevent false matches by recording explicit negations.
     When a user corrects a misunderstanding or explicitly negates
     something, we store that negation to filter future retrievals.
 
-    Inspired by the role of CCK+ interneurons in memory selectivity
-    (Tomé et al., Nature Neuroscience 2024).
+    This is an engineering construct for storing semantic negations,
+    not an implementation of neural inhibition mechanisms.
 
     Examples:
     - "User does NOT use MongoDB"
@@ -24,15 +24,15 @@ class InhibitoryFact(MemoryBase):
 
     Attributes:
         content: The negation statement.
-        negates_pattern: Pattern/keyword this inhibits in retrieval.
+        negates_pattern: Pattern/keyword this negates in retrieval.
         source_episode_ids: Episodes where negation was stated.
         derived_at: When we identified this negation.
         confidence: Composite confidence score.
     """
 
-    id: str = Field(default_factory=lambda: generate_id("inh"))
+    id: str = Field(default_factory=lambda: generate_id("neg"))
     content: str = Field(description="The negation statement")
-    negates_pattern: str = Field(description="Pattern or keyword this inhibits in retrieval")
+    negates_pattern: str = Field(description="Pattern or keyword this negates in retrieval")
     source_episode_ids: list[str] = Field(
         default_factory=list,
         description="Episodes where this negation was stated",
@@ -48,4 +48,4 @@ class InhibitoryFact(MemoryBase):
 
     def __str__(self) -> str:
         """String representation showing negation content."""
-        return f"InhibitoryFact({self.content})"
+        return f"NegationFact({self.content})"

@@ -241,7 +241,7 @@ class MemoryCounts(BaseModel):
         facts: Number of extracted facts.
         semantic: Number of semantic memories (from consolidation).
         procedural: Number of procedural memories.
-        inhibitory: Number of inhibitory facts.
+        negation: Number of negation facts.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -250,7 +250,7 @@ class MemoryCounts(BaseModel):
     facts: int = Field(ge=0)
     semantic: int = Field(ge=0)
     procedural: int = Field(ge=0)
-    inhibitory: int = Field(ge=0)
+    negation: int = Field(ge=0)
 
 
 class ConfidenceStats(BaseModel):
@@ -315,11 +315,11 @@ class SourcesResponse(BaseModel):
     """Response for get_sources endpoint.
 
     Returns the source episodes that a derived memory (fact, semantic,
-    procedural, inhibitory) was extracted from.
+    procedural, negation) was extracted from.
 
     Attributes:
         memory_id: The ID of the derived memory.
-        memory_type: Type of memory (fact, semantic, procedural, inhibitory).
+        memory_type: Type of memory (fact, semantic, procedural, negation).
         sources: Source episodes in chronological order.
         count: Number of source episodes.
     """
@@ -370,7 +370,7 @@ class VerificationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     memory_id: str = Field(description="ID of the verified memory")
-    memory_type: str = Field(description="Type: fact, semantic, procedural, inhibitory")
+    memory_type: str = Field(description="Type: fact, semantic, procedural, negation")
     content: str = Field(description="The memory content")
     verified: bool = Field(description="True if sources found and traceable")
     source_episodes: list[SourceEpisodeDetail] = Field(

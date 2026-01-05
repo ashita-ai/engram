@@ -137,7 +137,7 @@ class VerificationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     memory_id: str = Field(description="ID of the verified memory")
-    memory_type: str = Field(description="Type: fact, semantic, procedural, inhibitory")
+    memory_type: str = Field(description="Type: fact, semantic, procedural, negation")
     content: str = Field(description="The memory content")
     verified: bool = Field(description="True if sources found and traceable")
     source_episodes: list[dict[str, Any]] = Field(
@@ -688,7 +688,7 @@ class EngramService:
         """Get source episodes for a derived memory.
 
         Traces a derived memory (Fact, SemanticMemory, ProceduralMemory,
-        InhibitoryFact) back to its source Episode(s).
+        NegationFact) back to its source Episode(s).
 
         Args:
             memory_id: ID of the derived memory.
@@ -732,16 +732,16 @@ class EngramService:
                 raise KeyError(f"ProceduralMemory not found: {memory_id}")
             source_episode_ids = procedural.source_episode_ids
 
-        elif memory_id.startswith("inh_"):
-            inhibitory = await self.storage.get_inhibitory(memory_id, user_id)
-            if inhibitory is None:
-                raise KeyError(f"InhibitoryFact not found: {memory_id}")
-            source_episode_ids = inhibitory.source_episode_ids
+        elif memory_id.startswith("neg_"):
+            negation = await self.storage.get_negation(memory_id, user_id)
+            if negation is None:
+                raise KeyError(f"NegationFact not found: {memory_id}")
+            source_episode_ids = negation.source_episode_ids
 
         else:
             raise ValueError(
                 f"Cannot determine memory type from ID: {memory_id}. "
-                "Expected prefix: fact_, sem_, proc_, or inh_"
+                "Expected prefix: fact_, sem_, proc_, or neg_"
             )
 
         # Fetch source episodes
@@ -823,18 +823,18 @@ class EngramService:
             content = procedural.content
             confidence = procedural.confidence
 
-        elif memory_id.startswith("inh_"):
-            memory_type = "inhibitory"
-            inhibitory = await self.storage.get_inhibitory(memory_id, user_id)
-            if inhibitory is None:
-                raise KeyError(f"InhibitoryFact not found: {memory_id}")
-            content = inhibitory.content
-            confidence = inhibitory.confidence
+        elif memory_id.startswith("neg_"):
+            memory_type = "negation"
+            negation = await self.storage.get_negation(memory_id, user_id)
+            if negation is None:
+                raise KeyError(f"NegationFact not found: {memory_id}")
+            content = negation.content
+            confidence = negation.confidence
 
         else:
             raise ValueError(
                 f"Cannot determine memory type from ID: {memory_id}. "
-                "Expected prefix: fact_, sem_, proc_, or inh_"
+                "Expected prefix: fact_, sem_, proc_, or neg_"
             )
 
         # Get source episodes
