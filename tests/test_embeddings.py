@@ -177,7 +177,8 @@ class TestGetEmbedder:
 
     def test_default_returns_openai(self):
         """Default settings should return OpenAI embedder."""
-        settings = Settings(openai_api_key="sk-test-dummy-key")
+        # Explicitly set provider to openai to override any .env settings
+        settings = Settings(openai_api_key="sk-test-dummy-key", embedding_provider="openai")
         embedder = get_embedder(settings)
         assert isinstance(embedder, OpenAIEmbedder)
 

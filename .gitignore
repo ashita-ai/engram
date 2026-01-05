@@ -52,3 +52,4 @@ htmlcov/
 
 # Qdrant data (local dev)
 qdrant_data/
+engram_dbos.sqlite

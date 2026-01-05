@@ -71,7 +71,8 @@ class TestSettings:
 
     def test_default_settings(self):
         """Default settings should be reasonable."""
-        settings = Settings()
+        # Use _env_file=None to prevent reading from .env file
+        settings = Settings(_env_file=None)
         assert settings.qdrant_url == "http://localhost:6333"
         assert settings.collection_prefix == "engram"
         assert settings.embedding_provider == "openai"
@@ -140,7 +141,8 @@ class TestSettings:
 
     def test_optional_api_keys(self):
         """API keys should be optional."""
-        settings = Settings()
+        # Use _env_file=None to prevent reading from .env file
+        settings = Settings(_env_file=None)
         assert settings.qdrant_api_key is None
         assert settings.openai_api_key is None
 
