@@ -6,7 +6,7 @@ This document explains *why* Engram makes its specific design choices, with cita
 
 ### 1. Multiple Memory Types
 
-**Design**: Engram maintains six distinct memory types (working, episodic, factual, semantic, procedural, inhibitory) rather than a single undifferentiated store.
+**Design**: Engram maintains six distinct memory types (working, episodic, factual, semantic, procedural, negation) rather than a single undifferentiated store.
 
 **Research basis**:
 
@@ -194,4 +194,4 @@ We use cognitive science as design inspiration, not strict implementation. These
 - [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) — Memory as compression under constraints
 - [Dual Pathways to LTM](https://www.news-medical.net/news/20241206/Researchers-discover-new-pathway-to-forming-long-term-memories-in-the-brain.aspx) — LTM can form independently of STM
 - [Molecular Memory Timers](https://www.sciencedaily.com/releases/2025/11/251130050712.htm) — Importance gating in memory persistence
-- [Dynamic and Selective Engrams](https://www.nature.com/articles/s41593-023-01551-w) — Tomé et al., Nature Neuroscience 2024: Memory engrams are dynamic (neurons drop in/out during consolidation) and become selective over time via inhibitory plasticity
+- [Dynamic and Selective Engrams](https://www.nature.com/articles/s41593-023-01551-w) — Tomé et al., Nature Neuroscience 2024: Memory engrams are dynamic (neurons drop in/out during consolidation) and become selective over time via inhibitory plasticity. Engram's `selectivity_score` is directly inspired by this finding.

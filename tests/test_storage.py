@@ -11,7 +11,7 @@ from engram.models import (
     AuditEntry,
     Episode,
     Fact,
-    InhibitoryFact,
+    NegationFact,
     ProceduralMemory,
     SemanticMemory,
 )
@@ -59,7 +59,7 @@ class TestEngramStorageInit:
         assert "test_factual" in names
         assert "test_semantic" in names
         assert "test_procedural" in names
-        assert "test_inhibitory" in names
+        assert "test_negation" in names
         assert "test_audit" in names
 
     async def test_context_manager(self, storage: EngramStorage):
@@ -305,20 +305,20 @@ class TestProceduralMemoryStorage:
         assert retrieved.content == "User likes verbose responses"
 
 
-class TestInhibitoryFactStorage:
-    """Tests for inhibitory fact storage."""
+class TestNegationFactStorage:
+    """Tests for negation fact storage."""
 
-    async def test_store_and_get_inhibitory(self, storage: EngramStorage):
-        """Should store and retrieve inhibitory fact."""
-        fact = InhibitoryFact(
+    async def test_store_and_get_negation(self, storage: EngramStorage):
+        """Should store and retrieve negation fact."""
+        fact = NegationFact(
             content="User does NOT use MongoDB",
             negates_pattern="mongodb",
             user_id="user_123",
             embedding=make_embedding(),
         )
 
-        await storage.store_inhibitory(fact)
-        retrieved = await storage.get_inhibitory(fact.id, "user_123")
+        await storage.store_negation(fact)
+        retrieved = await storage.get_negation(fact.id, "user_123")
 
         assert retrieved is not None
         assert retrieved.content == "User does NOT use MongoDB"

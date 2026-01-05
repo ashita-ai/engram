@@ -7,7 +7,7 @@ Memory Types:
     - Fact: Deterministically extracted facts
     - SemanticMemory: LLM-inferred knowledge
     - ProceduralMemory: Behavioral patterns
-    - InhibitoryFact: What is NOT true
+    - NegationFact: What is NOT true
 
 Supporting Types:
     - ConfidenceScore: Composite confidence with auditability
@@ -19,7 +19,7 @@ from .audit import AuditEntry
 from .base import ConfidenceScore, ExtractionMethod, MemoryBase, Staleness, generate_id
 from .episode import Episode
 from .fact import Fact
-from .inhibitory import InhibitoryFact
+from .negation import NegationFact
 from .procedural import ProceduralMemory
 from .semantic import SemanticMemory
 
@@ -35,7 +35,7 @@ __all__ = [
     "Fact",
     "SemanticMemory",
     "ProceduralMemory",
-    "InhibitoryFact",
+    "NegationFact",
     # Audit
     "AuditEntry",
 ]

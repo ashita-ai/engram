@@ -25,7 +25,7 @@ Memory Types:
     - Fact: Pattern-extracted facts (emails, phones, dates)
     - SemanticMemory: LLM-inferred knowledge
     - ProceduralMemory: Behavioral patterns
-    - InhibitoryFact: What is NOT true (negations)
+    - NegationFact: What is NOT true (negations)
     - Working: Current session context (in-memory)
 
 For more information, see: https://github.com/ashita-ai/engram
@@ -43,7 +43,7 @@ from .models import (
     Episode,
     ExtractionMethod,
     Fact,
-    InhibitoryFact,
+    NegationFact,
     ProceduralMemory,
     SemanticMemory,
 )
@@ -62,6 +62,6 @@ __all__ = [
     "Fact",
     "SemanticMemory",
     "ProceduralMemory",
-    "InhibitoryFact",
+    "NegationFact",
     "AuditEntry",
 ]

@@ -87,7 +87,7 @@ uv run pre-commit run --all-files
 | Fact | Pattern-extracted facts (emails, phones, dates) | 0.9 (extracted) |
 | SemanticMemory | LLM-inferred knowledge | 0.6 (inferred) |
 | ProceduralMemory | Behavioral patterns | 0.6 (inferred) |
-| InhibitoryFact | What is NOT true (negations) | 0.7 (inferred) |
+| NegationFact | What is NOT true (negations) | 0.7 (inferred) |
 
 ### Confidence Scoring
 
@@ -271,7 +271,9 @@ consolidation_agent = Agent(
 The six memory types are engineering constructs:
 - **Working, Episodic, Semantic, Procedural** — Inspired by cognitive science
 - **Factual** — Engineering subdivision (verbatim vs inferred) not from cognitive science
-- **Inhibitory** — Inspired by CCK+ interneurons in memory selectivity (Tomé et al.)
+- **Negation** — Engineering construct for storing semantic negations (what is NOT true)
+
+The `selectivity_score` on SemanticMemory is the genuine connection to Tomé et al. research on dynamic engrams and inhibitory plasticity.
 
 Be explicit about which are science-inspired and which are engineering additions.
 

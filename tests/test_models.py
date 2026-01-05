@@ -11,7 +11,7 @@ from engram.models import (
     Episode,
     ExtractionMethod,
     Fact,
-    InhibitoryFact,
+    NegationFact,
     ProceduralMemory,
     SemanticMemory,
     generate_id,
@@ -535,23 +535,23 @@ class TestProceduralMemory:
         assert mem.trigger_context == "when explaining code"
 
 
-class TestInhibitoryFact:
-    """Tests for InhibitoryFact model."""
+class TestNegationFact:
+    """Tests for NegationFact model."""
 
-    def test_create_inhibitory_fact(self):
-        """Basic inhibitory fact creation."""
-        fact = InhibitoryFact(
+    def test_create_negation_fact(self):
+        """Basic negation fact creation."""
+        fact = NegationFact(
             content="User does NOT use MongoDB",
             negates_pattern="mongodb",
             user_id="user_123",
         )
         assert fact.content == "User does NOT use MongoDB"
         assert fact.negates_pattern == "mongodb"
-        assert fact.id.startswith("inh_")
+        assert fact.id.startswith("neg_")
 
     def test_default_confidence(self):
         """Default confidence should be inferred at 0.7."""
-        fact = InhibitoryFact(
+        fact = NegationFact(
             content="Test negation",
             negates_pattern="test",
             user_id="user_123",
@@ -561,7 +561,7 @@ class TestInhibitoryFact:
 
     def test_str_representation(self):
         """String representation should show negation content."""
-        fact = InhibitoryFact(
+        fact = NegationFact(
             content="User does NOT like verbose output",
             negates_pattern="verbose",
             user_id="user_123",

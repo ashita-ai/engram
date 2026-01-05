@@ -115,13 +115,13 @@ Inspired by A-MEM research showing 2x improvement on multi-hop reasoning benchma
 
 Memories start broad and become selective through repeated consolidation passes. Initial extraction captures many associations; subsequent passes prune weak or contradicted ones.
 
-Inspired by dynamic engram research ([Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)): biological engrams transition from unselective → selective over ~12 hours.
+The `selectivity_score` on SemanticMemory is directly inspired by dynamic engram research ([Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)): biological engrams transition from unselective → selective over ~12 hours via inhibitory plasticity. Engram models this with a score that increases as memories survive consolidation passes.
 
-### 6. Inhibitory Knowledge
+### 6. Negation Tracking
 
-Track what is explicitly NOT true to prevent false matches. When a user corrects a misunderstanding or explicitly negates something, we store that negation.
+Track what is explicitly NOT true to prevent false matches. When a user corrects a misunderstanding or explicitly negates something, we store that negation as a `NegationFact`.
 
-Inspired by the role of inhibitory plasticity (CCK+ interneurons) in memory selectivity.
+This is an **engineering construct** for storing semantic negations (e.g., "User does NOT use MongoDB"), not an implementation of neural inhibition mechanisms.
 
 ### 7. Deferred Processing
 
@@ -156,7 +156,7 @@ Promotion triggers:
 | **Factual** | Immutable | Slow | High | Pattern-extracted facts (emails, dates) |
 | **Semantic** | Mutable | Slow | Variable | LLM-inferred knowledge |
 | **Procedural** | Mutable | Very slow | Variable | Behavioral patterns, preferences |
-| **Inhibitory** | Mutable | Slow | Variable | What is NOT true (negations) |
+| **Negation** | Mutable | Slow | Variable | What is NOT true (negations) |
 | **Working** | Volatile | N/A | N/A | Current context (in-memory) |
 
 ## Data Models
@@ -218,13 +218,13 @@ class ProceduralMemory(BaseModel):
     embedding: list[float]
 ```
 
-### InhibitoryFact (Negative Knowledge)
+### NegationFact (Negative Knowledge)
 
 ```python
-class InhibitoryFact(BaseModel):
+class NegationFact(BaseModel):
     id: str
     content: str                         # "User does NOT use MongoDB"
-    negates_pattern: str                 # Pattern this inhibits
+    negates_pattern: str                 # Pattern this negates
     source_episode_ids: list[str]
     derived_at: datetime
     confidence: ConfidenceScore          # Composite score with auditability
@@ -242,7 +242,7 @@ Interaction
 │   ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │   │ Store       │  │ Pattern     │  │ Detect              │ │
 │   │ Episode     │  │ Extract     │  │ Negations           │ │
-│   │ (verbatim)  │  │ Facts       │  │ (inhibitory)        │ │
+│   │ (verbatim)  │  │ Facts       │  │ (negations)         │ │
 │   └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘ │
 └──────────┼────────────────┼────────────────────┼────────────┘
            │                │                    │
@@ -275,13 +275,13 @@ engram_episodic     → vectors + payload (content, timestamp, session_id, impor
 engram_factual      → vectors + payload (content, category, source_episode_id, event_at, derived_at, confidence)
 engram_semantic     → vectors + payload (content, source_episode_ids, related_ids, confidence, selectivity_score)
 engram_procedural   → vectors + payload (content, trigger_context, access_count, confidence)
-engram_inhibitory   → vectors + payload (content, negates_pattern, source_episode_ids, confidence)
+engram_negation     → vectors + payload (content, negates_pattern, source_episode_ids, confidence)
 ```
 
 ### Indexing
 
 - **Episodic**: HNSW with time-decay weighting
-- **Factual/Semantic/Inhibitory**: Standard HNSW
+- **Factual/Semantic/Negation**: Standard HNSW
 - **Procedural**: HNSW with context filtering
 
 ## API
@@ -298,7 +298,7 @@ memory = MemoryStore(
 # Store (immediate, preserves ground truth)
 await memory.encode(interaction, extract_facts=True)
 
-# Retrieve (with confidence filtering, inhibitory filtering)
+# Retrieve (with confidence filtering, negation filtering)
 memories = await memory.recall(
     query="What databases does the user work with?",
     memory_types=["factual", "semantic"],
@@ -409,7 +409,7 @@ Decay constants by type:
 - Factual: Slow (months)
 - Semantic: Slow (months)
 - Procedural: Very slow (years)
-- Inhibitory: Slow (months)
+- Negation: Slow (months)
 
 ## Durable Execution
 
@@ -460,6 +460,5 @@ This architecture is informed by recent research (2024-2025):
 |---------|----------|-------------|
 | Dynamic linking | [A-MEM](https://arxiv.org/abs/2502.12110) | 2x improvement on multi-hop reasoning |
 | Buffer promotion | [Cognitive Workspace](https://arxiv.org/abs/2508.13171) | 58.6% memory reuse vs 0% for naive RAG |
-| Selectivity pruning | [Tomé et al.](https://www.nature.com/articles/s41593-023-01551-w) | Engrams transition unselective → selective |
-| Inhibitory facts | [Tomé et al.](https://www.nature.com/articles/s41593-023-01551-w) | CCK+ interneurons critical for selectivity |
+| Selectivity scoring | [Tomé et al.](https://www.nature.com/articles/s41593-023-01551-w) | Engrams transition unselective → selective via inhibitory plasticity |
 | Ground truth | [HaluMem](https://arxiv.org/html/2511.03506) | <56% accuracy without source preservation |

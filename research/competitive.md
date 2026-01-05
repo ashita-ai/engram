@@ -169,7 +169,9 @@ Novel approaches from recent literature:
 - Inhibitory plasticity (CCK+ interneurons) is critical for selectivity
 - Training stimulus reactivation during consolidation required for selectivity to emerge
 
-**Engram**: Implements `selectivity_score` (0.0-1.0) that increases during consolidation passes, and `InhibitoryFact` memory type that tracks what is explicitly NOT true (e.g., "User does NOT use MongoDB").
+**Engram**: The `selectivity_score` (0.0-1.0) on SemanticMemory is directly inspired by this research—it increases as memories survive consolidation passes, modeling how engrams become more selective over time.
+
+Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct, not an implementation of neural inhibition.
 
 ---
 

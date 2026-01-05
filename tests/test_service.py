@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from engram.config import Settings
-from engram.models import Episode, Fact, InhibitoryFact, ProceduralMemory, SemanticMemory
+from engram.models import Episode, Fact, NegationFact, ProceduralMemory, SemanticMemory
 from engram.service import EncodeResult, EngramService, RecallResult
 from engram.storage import ScoredResult
 
@@ -547,26 +547,26 @@ class TestGetSources:
         mock_service.storage.get_procedural.assert_called_once_with("proc_abc", "user_123")
 
     @pytest.mark.asyncio
-    async def test_get_sources_for_inhibitory(self, mock_service):
-        """Should return source episodes for an inhibitory fact."""
+    async def test_get_sources_for_negation(self, mock_service):
+        """Should return source episodes for a negation fact."""
         source_episode = Episode(
-            id="ep_inh_1", content="I don't like spam", role="user", user_id="user_123"
+            id="ep_neg_1", content="I don't like spam", role="user", user_id="user_123"
         )
-        mock_inhibitory = InhibitoryFact(
-            id="inh_def",
+        mock_negation = NegationFact(
+            id="neg_def",
             content="User does not want promotional emails",
             negates_pattern="promotional emails",
-            source_episode_ids=["ep_inh_1"],
+            source_episode_ids=["ep_neg_1"],
             user_id="user_123",
         )
 
-        mock_service.storage.get_inhibitory.return_value = mock_inhibitory
+        mock_service.storage.get_negation.return_value = mock_negation
         mock_service.storage.get_episode.return_value = source_episode
 
-        episodes = await mock_service.get_sources("inh_def", "user_123")
+        episodes = await mock_service.get_sources("neg_def", "user_123")
 
         assert len(episodes) == 1
-        mock_service.storage.get_inhibitory.assert_called_once_with("inh_def", "user_123")
+        mock_service.storage.get_negation.assert_called_once_with("neg_def", "user_123")
 
     @pytest.mark.asyncio
     async def test_get_sources_fact_not_found(self, mock_service):

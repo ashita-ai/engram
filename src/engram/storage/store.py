@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from qdrant_client import models
 
 if TYPE_CHECKING:
-    from engram.models import Episode, Fact, InhibitoryFact, ProceduralMemory, SemanticMemory
+    from engram.models import Episode, Fact, NegationFact, ProceduralMemory, SemanticMemory
 
 
 class StoreMixin:
@@ -78,20 +78,20 @@ class StoreMixin:
         """
         return await self._store_memory(memory, "procedural")
 
-    async def store_inhibitory(self, fact: InhibitoryFact) -> str:
-        """Store an inhibitory fact.
+    async def store_negation(self, fact: NegationFact) -> str:
+        """Store a negation fact.
 
         Args:
-            fact: InhibitoryFact to store.
+            fact: NegationFact to store.
 
         Returns:
             The fact ID.
         """
-        return await self._store_memory(fact, "inhibitory")
+        return await self._store_memory(fact, "negation")
 
     async def _store_memory(
         self,
-        memory: Episode | Fact | SemanticMemory | ProceduralMemory | InhibitoryFact,
+        memory: Episode | Fact | SemanticMemory | ProceduralMemory | NegationFact,
         memory_type: str,
     ) -> str:
         """Store a memory in the appropriate collection.
