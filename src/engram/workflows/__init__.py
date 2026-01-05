@@ -40,8 +40,14 @@ from pydantic_ai import Agent
 
 from engram.config import Settings
 
-from .consolidation import ConsolidationResult
-from .decay import DecayResult
+from .consolidation import (
+    ConsolidationResult,
+    ExtractedFact,
+    IdentifiedLink,
+    LLMExtractionResult,
+    run_consolidation,
+)
+from .decay import DecayResult, run_decay
 
 if TYPE_CHECKING:
     pass
@@ -81,11 +87,11 @@ class DurableAgentFactory:
             )
         return backend  # type: ignore[return-value]
 
-    def _create_base_consolidation_agent(self) -> Agent[None, ConsolidationResult]:
+    def _create_base_consolidation_agent(self) -> Agent[None, LLMExtractionResult]:
         """Create the base consolidation agent (without durable wrapper)."""
         return Agent(
             self.settings.consolidation_model,
-            output_type=ConsolidationResult,
+            output_type=LLMExtractionResult,
             name="engram_consolidation",
             instructions="""You are analyzing conversation episodes to extract lasting knowledge.
 
@@ -279,4 +285,9 @@ __all__ = [
     "get_decay_agent",
     "ConsolidationResult",
     "DecayResult",
+    "ExtractedFact",
+    "IdentifiedLink",
+    "LLMExtractionResult",
+    "run_consolidation",
+    "run_decay",
 ]
