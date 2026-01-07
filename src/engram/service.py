@@ -352,6 +352,7 @@ class EngramService:
         include_episodes: bool = True,
         include_facts: bool = True,
         include_semantic: bool = True,
+        include_procedural: bool = True,
         include_working: bool = True,
         include_sources: bool = False,
         follow_links: bool = False,
@@ -373,6 +374,7 @@ class EngramService:
             include_episodes: Whether to search episodes.
             include_facts: Whether to search facts.
             include_semantic: Whether to search semantic memories.
+            include_procedural: Whether to search procedural memories.
             include_working: Whether to include working memory (current session).
             include_sources: Whether to include source episodes in results.
             follow_links: Enable multi-hop reasoning via related_ids.
@@ -488,6 +490,36 @@ class EngramService:
                             "selectivity": sem.selectivity_score,
                             "derived_at": sem.derived_at.isoformat(),
                             "consolidation_passes": sem.consolidation_passes,
+                        },
+                    )
+                )
+
+        # Search procedural memories
+        if include_procedural:
+            scored_procedurals = await self.storage.search_procedural(
+                query_vector=query_vector,
+                user_id=user_id,
+                org_id=org_id,
+                limit=limit,
+                min_confidence=min_confidence,
+            )
+            for scored_proc in scored_procedurals:
+                proc = scored_proc.memory
+                # Procedural memories are created by consolidation, so they're fresh
+                results.append(
+                    RecallResult(
+                        memory_type="procedural",
+                        content=proc.content,
+                        score=scored_proc.score,
+                        confidence=proc.confidence.value,
+                        memory_id=proc.id,
+                        related_ids=proc.related_ids,
+                        staleness=Staleness.FRESH,
+                        consolidated_at=proc.derived_at.isoformat(),
+                        metadata={
+                            "trigger_context": proc.trigger_context,
+                            "access_count": proc.access_count,
+                            "derived_at": proc.derived_at.isoformat(),
                         },
                     )
                 )
