@@ -191,8 +191,8 @@ from qdrant_client.models import Distance, VectorParams, PointStruct
 
 class EngramStorage:
     COLLECTIONS = [
-        "episode",
-        "fact",
+        "episodic",
+        "factual",
         "semantic",
         "procedural",
         "negation",
