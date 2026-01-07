@@ -972,6 +972,22 @@ class EngramService:
                                 )
                             )
 
+            # Procedural memories have multiple source episodes
+            elif result.memory_type == "procedural":
+                proc = await self.storage.get_procedural(result.memory_id, user_id)
+                if proc:
+                    for ep_id in proc.source_episode_ids:
+                        ep = await self.storage.get_episode(ep_id, user_id)
+                        if ep:
+                            source_episodes.append(
+                                SourceEpisodeSummary(
+                                    id=ep.id,
+                                    content=ep.content,
+                                    role=ep.role,
+                                    timestamp=ep.timestamp.isoformat(),
+                                )
+                            )
+
             # Create enriched result with sources
             enriched.append(
                 RecallResult(
