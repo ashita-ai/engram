@@ -251,6 +251,77 @@ class TestEngramServiceRecall:
         assert call_kwargs["limit"] == 5
         assert call_kwargs["min_confidence"] == 0.8
 
+    @pytest.mark.asyncio
+    async def test_recall_searches_procedural(self, mock_service):
+        """Should search procedural memories and return results."""
+        mock_procedural = ProceduralMemory(
+            content="User prefers concise responses",
+            user_id="user_123",
+            trigger_context="general conversation",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+        mock_service.storage.search_procedural.return_value = [
+            ScoredResult(memory=mock_procedural, score=0.85)
+        ]
+
+        results = await mock_service.recall(
+            query="response preferences",
+            user_id="user_123",
+        )
+
+        proc_results = [r for r in results if r.memory_type == "procedural"]
+        assert len(proc_results) == 1
+        assert proc_results[0].content == "User prefers concise responses"
+        assert proc_results[0].score == 0.85
+        assert proc_results[0].metadata["trigger_context"] == "general conversation"
+
+    @pytest.mark.asyncio
+    async def test_recall_excludes_procedural_when_disabled(self, mock_service):
+        """Should skip procedural when include_procedural=False."""
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+
+        await mock_service.recall(
+            query="hello",
+            user_id="user_123",
+            include_procedural=False,
+        )
+
+        mock_service.storage.search_procedural.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_recall_includes_procedural_metadata(self, mock_service):
+        """Should include procedural-specific metadata in results."""
+        mock_procedural = ProceduralMemory(
+            content="User likes code examples",
+            user_id="user_123",
+            trigger_context="technical discussion",
+            access_count=5,
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+        mock_service.storage.search_procedural.return_value = [
+            ScoredResult(memory=mock_procedural, score=0.9)
+        ]
+
+        results = await mock_service.recall(
+            query="code preferences",
+            user_id="user_123",
+        )
+
+        proc_results = [r for r in results if r.memory_type == "procedural"]
+        assert len(proc_results) == 1
+        metadata = proc_results[0].metadata
+        assert metadata["trigger_context"] == "technical discussion"
+        assert metadata["access_count"] == 5
+        assert "derived_at" in metadata
+
 
 class TestRecallResult:
     """Tests for RecallResult model."""
