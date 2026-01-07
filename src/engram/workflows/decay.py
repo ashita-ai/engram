@@ -4,6 +4,7 @@ This workflow runs periodically to:
 1. Find memories that haven't been accessed recently
 2. Apply exponential decay to their confidence scores
 3. Archive or delete memories below threshold
+4. Run promotion to elevate behavioral patterns to procedural memory
 
 The workflow is durable - it survives crashes and can be retried on failure.
 """
@@ -11,15 +12,21 @@ The workflow is durable - it survives crashes and can be retried on failure.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from engram.config import Settings
+    from engram.embeddings import Embedder
     from engram.storage import EngramStorage
 
 logger = logging.getLogger(__name__)
+
+# Default thresholds for access-based archival
+LOW_ACCESS_THRESHOLD = 2  # Archive if accessed fewer than this many times
+LOW_ACCESS_AGE_DAYS = 90  # Only consider memories older than this
 
 
 class DecayResult(BaseModel):
@@ -29,6 +36,8 @@ class DecayResult(BaseModel):
         memories_updated: Number of memories with updated confidence.
         memories_archived: Number of memories moved to archive.
         memories_deleted: Number of memories permanently deleted.
+        low_access_archived: Number of memories archived due to low access.
+        procedural_promoted: Number of memories promoted to procedural.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -36,6 +45,8 @@ class DecayResult(BaseModel):
     memories_updated: int = Field(ge=0)
     memories_archived: int = Field(ge=0)
     memories_deleted: int = Field(ge=0)
+    low_access_archived: int = Field(ge=0, default=0)
+    procedural_promoted: int = Field(ge=0, default=0)
 
 
 async def run_decay(
@@ -43,20 +54,26 @@ async def run_decay(
     settings: Settings,
     user_id: str,
     org_id: str | None = None,
+    embedder: Embedder | None = None,
+    run_promotion: bool = True,
 ) -> DecayResult:
     """Run the decay workflow.
 
     This workflow:
     1. Fetches all semantic memories for the user
     2. Recomputes confidence using time-based decay
-    3. Archives memories below archive threshold
-    4. Deletes memories below delete threshold
+    3. Archives memories below archive threshold (confidence-based)
+    4. Archives memories with low access count (access-based)
+    5. Deletes memories below delete threshold
+    6. Runs promotion to elevate behavioral patterns to procedural memory
 
     Args:
         storage: EngramStorage instance.
         settings: Engram settings with decay configuration.
         user_id: User ID for multi-tenancy.
         org_id: Optional organization ID.
+        embedder: Optional embedder for promotion workflow. Required if run_promotion=True.
+        run_promotion: Whether to run promotion after decay. Defaults to True.
 
     Returns:
         DecayResult with processing statistics.
@@ -74,6 +91,8 @@ async def run_decay(
             memories_updated=0,
             memories_archived=0,
             memories_deleted=0,
+            low_access_archived=0,
+            procedural_promoted=0,
         )
 
     logger.info(f"Processing {len(memories)} memories for decay")
@@ -81,14 +100,34 @@ async def run_decay(
     updated = 0
     archived = 0
     deleted = 0
+    low_access_archived = 0
+
+    # Calculate cutoff date for low-access archival
+    low_access_cutoff = datetime.now(UTC) - timedelta(days=LOW_ACCESS_AGE_DAYS)
 
     for memory in memories:
-        # 2. Recompute confidence with decay
+        # 2. Check for low-access archival (A-MEM style)
+        # Archive old memories that are rarely accessed
+        if (
+            not memory.archived
+            and memory.derived_at < low_access_cutoff
+            and memory.retrieval_count < LOW_ACCESS_THRESHOLD
+        ):
+            memory.archived = True
+            await storage.update_semantic_memory(memory)
+            low_access_archived += 1
+            logger.debug(
+                f"Low-access archived {memory.id}: {memory.retrieval_count} accesses, "
+                f"age {(datetime.now(UTC) - memory.derived_at).days} days"
+            )
+            continue  # Skip further processing for this memory
+
+        # 3. Recompute confidence with decay
         old_confidence = memory.confidence.value
         memory.confidence.recompute_with_weights(settings.confidence_weights)
         new_confidence = memory.confidence.value
 
-        # 3. Check thresholds
+        # 4. Check thresholds
         if new_confidence < settings.decay_delete_threshold:
             # Delete memories below delete threshold
             await storage.delete_semantic(memory.id, user_id)
@@ -109,24 +148,44 @@ async def run_decay(
                 # Already archived, just update confidence
                 await storage.update_semantic_memory(memory)
                 updated += 1
-        else:
+        elif abs(old_confidence - new_confidence) > 0.001:
             # Update confidence if it changed significantly
-            if abs(old_confidence - new_confidence) > 0.001:
-                # Unarchive if confidence recovered
-                if memory.archived:
-                    memory.archived = False
-                    logger.debug(
-                        f"Unarchived memory {memory.id}: confidence recovered to {new_confidence:.3f}"
-                    )
-                await storage.update_semantic_memory(memory)
-                updated += 1
+            # Unarchive if confidence recovered
+            if memory.archived:
+                memory.archived = False
+                logger.debug(
+                    f"Unarchived memory {memory.id}: confidence recovered to {new_confidence:.3f}"
+                )
+            await storage.update_semantic_memory(memory)
+            updated += 1
 
-    logger.info(f"Decay complete: {updated} updated, {archived} archived, {deleted} deleted")
+    logger.info(
+        f"Decay complete: {updated} updated, {archived} archived, "
+        f"{low_access_archived} low-access archived, {deleted} deleted"
+    )
+
+    # 5. Run promotion workflow if requested
+    procedural_promoted = 0
+    if run_promotion and embedder is not None:
+        from engram.workflows.promotion import run_promotion as _run_promotion
+
+        promotion_result = await _run_promotion(
+            storage=storage,
+            embedder=embedder,
+            user_id=user_id,
+            org_id=org_id,
+        )
+        procedural_promoted = promotion_result.procedural_created
+        logger.info(f"Promotion complete: {procedural_promoted} procedural memories created")
+    elif run_promotion and embedder is None:
+        logger.warning("Skipping promotion: embedder not provided")
 
     return DecayResult(
         memories_updated=updated,
         memories_archived=archived,
         memories_deleted=deleted,
+        low_access_archived=low_access_archived,
+        procedural_promoted=procedural_promoted,
     )
 
 

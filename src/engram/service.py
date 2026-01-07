@@ -339,6 +339,10 @@ class EngramService:
         )
         await self.storage.log_audit(audit_entry)
 
+        # High-importance episodes trigger immediate consolidation (A-MEM style)
+        if importance >= self.settings.high_importance_threshold:
+            await self._trigger_consolidation(user_id=user_id, org_id=org_id)
+
         return EncodeResult(episode=episode, facts=facts)
 
     async def recall(
@@ -1178,3 +1182,41 @@ class EngramService:
                 )
 
         return None
+
+    async def _trigger_consolidation(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+    ) -> None:
+        """Trigger consolidation for high-importance episodes.
+
+        This runs consolidation to extract semantic memories from
+        recent unconsolidated episodes. Called automatically when
+        an episode with importance >= high_importance_threshold is stored.
+
+        Args:
+            user_id: User ID for multi-tenancy.
+            org_id: Optional organization ID.
+        """
+        import logging
+
+        from engram.workflows.consolidation import run_consolidation
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            result = await run_consolidation(
+                storage=self.storage,
+                embedder=self.embedder,
+                user_id=user_id,
+                org_id=org_id,
+                batch_size=5,  # Small batch for immediate processing
+            )
+            if result.semantic_memories_created > 0:
+                logger.info(
+                    f"High-importance consolidation: {result.semantic_memories_created} "
+                    f"semantic memories created, {result.links_created} links"
+                )
+        except Exception as e:
+            # Log but don't fail the encode operation
+            logger.warning(f"High-importance consolidation failed: {e}")

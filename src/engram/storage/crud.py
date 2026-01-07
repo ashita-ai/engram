@@ -364,6 +364,59 @@ class CRUDMixin:
 
         return memories
 
+    async def list_procedural_memories(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        limit: int = 1000,
+    ) -> list[ProceduralMemory]:
+        """List all procedural memories for a user.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            limit: Maximum memories to return.
+
+        Returns:
+            List of ProceduralMemory objects.
+        """
+        from engram.models import ProceduralMemory
+
+        collection = self._collection_name("procedural")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        memories: list[ProceduralMemory] = []
+        for point in results:
+            if point.payload is not None:
+                memory = self._payload_to_memory(point.payload, ProceduralMemory)
+                if isinstance(point.vector, list):
+                    memory.embedding = point.vector
+                memories.append(memory)
+
+        return memories
+
     async def update_semantic_memory(
         self,
         memory: SemanticMemory,

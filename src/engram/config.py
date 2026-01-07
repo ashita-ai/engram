@@ -172,6 +172,14 @@ class Settings(BaseSettings):
         description="Delete memories below this confidence",
     )
 
+    # Consolidation
+    high_importance_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Trigger immediate consolidation for episodes at or above this importance",
+    )
+
     # Logging
     log_level: str = Field(
         default="INFO",

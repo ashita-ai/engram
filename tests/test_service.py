@@ -130,6 +130,110 @@ class TestEngramServiceEncode:
         assert result.episode.session_id == "session_789"
         assert result.episode.importance == 0.8
 
+    @pytest.mark.asyncio
+    async def test_encode_high_importance_triggers_consolidation(self, mock_service):
+        """Should trigger consolidation when importance >= threshold."""
+        mock_service.pipeline.run.return_value = []
+        # Set threshold to 0.8 (default)
+        mock_service.settings = Settings(
+            openai_api_key="sk-test-dummy-key",
+            high_importance_threshold=0.8,
+        )
+
+        with patch(
+            "engram.workflows.consolidation.run_consolidation", new_callable=AsyncMock
+        ) as mock_consolidation:
+            from engram.workflows.consolidation import ConsolidationResult
+
+            mock_consolidation.return_value = ConsolidationResult(
+                episodes_processed=1,
+                semantic_memories_created=2,
+                links_created=1,
+            )
+
+            await mock_service.encode(
+                content="Critical information",
+                role="user",
+                user_id="user_123",
+                importance=0.9,  # Above threshold
+            )
+
+            mock_consolidation.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_encode_low_importance_skips_consolidation(self, mock_service):
+        """Should NOT trigger consolidation when importance < threshold."""
+        mock_service.pipeline.run.return_value = []
+        mock_service.settings = Settings(
+            openai_api_key="sk-test-dummy-key",
+            high_importance_threshold=0.8,
+        )
+
+        with patch(
+            "engram.workflows.consolidation.run_consolidation", new_callable=AsyncMock
+        ) as mock_consolidation:
+            await mock_service.encode(
+                content="Normal information",
+                role="user",
+                user_id="user_123",
+                importance=0.5,  # Below threshold
+            )
+
+            mock_consolidation.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_encode_at_threshold_triggers_consolidation(self, mock_service):
+        """Should trigger consolidation when importance == threshold."""
+        mock_service.pipeline.run.return_value = []
+        mock_service.settings = Settings(
+            openai_api_key="sk-test-dummy-key",
+            high_importance_threshold=0.8,
+        )
+
+        with patch(
+            "engram.workflows.consolidation.run_consolidation", new_callable=AsyncMock
+        ) as mock_consolidation:
+            from engram.workflows.consolidation import ConsolidationResult
+
+            mock_consolidation.return_value = ConsolidationResult(
+                episodes_processed=1,
+                semantic_memories_created=1,
+                links_created=0,
+            )
+
+            await mock_service.encode(
+                content="Important information",
+                role="user",
+                user_id="user_123",
+                importance=0.8,  # Exactly at threshold
+            )
+
+            mock_consolidation.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_encode_consolidation_failure_doesnt_fail_encode(self, mock_service):
+        """Should not fail encode if consolidation raises exception."""
+        mock_service.pipeline.run.return_value = []
+        mock_service.settings = Settings(
+            openai_api_key="sk-test-dummy-key",
+            high_importance_threshold=0.8,
+        )
+
+        with patch(
+            "engram.workflows.consolidation.run_consolidation", new_callable=AsyncMock
+        ) as mock_consolidation:
+            mock_consolidation.side_effect = Exception("Consolidation failed")
+
+            # Should not raise, encode should succeed
+            result = await mock_service.encode(
+                content="Critical information",
+                role="user",
+                user_id="user_123",
+                importance=0.9,
+            )
+
+            assert result.episode.content == "Critical information"
+
 
 class TestEngramServiceRecall:
     """Tests for EngramService.recall method."""
@@ -442,6 +546,140 @@ class TestEngramServiceRecall:
         mock_service.storage.search_procedural.assert_not_called()
         mock_service.storage.search_negation.assert_not_called()
         assert len(results) == 0
+
+    @pytest.mark.asyncio
+    async def test_recall_follow_links_traverses_related_ids(self, mock_service):
+        """Should traverse related_ids when follow_links=True."""
+        # Create two linked semantic memories
+        mock_semantic1 = SemanticMemory(
+            content="User prefers Python",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_semantic1.id = "sem_001"
+        mock_semantic1.add_link("sem_002")  # Link to second memory
+
+        mock_semantic2 = SemanticMemory(
+            content="User likes type hints",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_semantic2.id = "sem_002"
+        mock_semantic2.add_link("sem_001")  # Bidirectional link
+
+        # Initial search returns only sem_001
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = [
+            ScoredResult(memory=mock_semantic1, score=0.9)
+        ]
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = []
+
+        # Mock get_semantic to return the linked memory
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic2)
+
+        results = await mock_service.recall(
+            query="python preferences",
+            user_id="user_123",
+            follow_links=True,
+            max_hops=1,
+        )
+
+        # Should have both original and linked memory
+        assert len(results) >= 2
+        memory_ids = {r.memory_id for r in results}
+        assert "sem_001" in memory_ids
+        assert "sem_002" in memory_ids
+
+    @pytest.mark.asyncio
+    async def test_recall_follow_links_respects_max_hops(self, mock_service):
+        """Should limit link traversal depth to max_hops."""
+        # Create chain: sem_001 -> sem_002 -> sem_003
+        mock_semantic1 = SemanticMemory(
+            content="Memory 1",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_semantic1.id = "sem_001"
+        mock_semantic1.add_link("sem_002")
+
+        mock_semantic2 = SemanticMemory(
+            content="Memory 2",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_semantic2.id = "sem_002"
+        mock_semantic2.add_link("sem_003")
+
+        mock_semantic3 = SemanticMemory(
+            content="Memory 3",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_semantic3.id = "sem_003"
+
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = [
+            ScoredResult(memory=mock_semantic1, score=0.9)
+        ]
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = []
+
+        # Mock get_semantic to return memories based on ID
+        async def mock_get_semantic(memory_id: str, user_id: str):
+            if memory_id == "sem_002":
+                return mock_semantic2
+            if memory_id == "sem_003":
+                return mock_semantic3
+            return None
+
+        mock_service.storage.get_semantic = AsyncMock(side_effect=mock_get_semantic)
+
+        # max_hops=1: should get sem_001 and sem_002, but NOT sem_003
+        results = await mock_service.recall(
+            query="test",
+            user_id="user_123",
+            follow_links=True,
+            max_hops=1,
+        )
+
+        memory_ids = {r.memory_id for r in results}
+        assert "sem_001" in memory_ids
+        assert "sem_002" in memory_ids
+        assert "sem_003" not in memory_ids  # Beyond max_hops
+
+    @pytest.mark.asyncio
+    async def test_recall_follow_links_disabled_by_default(self, mock_service):
+        """Should not traverse links when follow_links=False (default)."""
+        mock_semantic = SemanticMemory(
+            content="User prefers Python",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_semantic.id = "sem_001"
+        mock_semantic.add_link("sem_002")  # Has a link
+
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = [
+            ScoredResult(memory=mock_semantic, score=0.9)
+        ]
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = []
+
+        results = await mock_service.recall(
+            query="python preferences",
+            user_id="user_123",
+            # follow_links defaults to False
+        )
+
+        # Should only have original memory, not linked
+        assert len(results) == 1
+        assert results[0].memory_id == "sem_001"
+        # get_semantic should not be called for link traversal
+        mock_service.storage.get_semantic.assert_not_called()
 
 
 class TestRecallResult:
