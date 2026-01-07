@@ -115,7 +115,7 @@ for mem in memories:
     print(mem.confidence.explain())  # "0.85: extracted, 3 sources, confirmed yesterday"
 
 # Background operations (run periodically or on-demand)
-await memory.consolidate()  # Extract semantics, build links
+await memory.consolidate()  # Extract semantics (link building planned)
 await memory.decay()        # Update scores, archive stale memories
 ```
 

@@ -106,10 +106,17 @@ Enables "what did we know on date X?" queries for debugging and audit.
 
 ### 4. Dynamic Memory Linking
 
-Memories form explicit links to related memories, enabling multi-hop reasoning:
+> **Status**: Infrastructure implemented, link population in progress.
+
+Memories can form explicit links to related memories via `related_ids`, enabling multi-hop reasoning:
 - "User uses PostgreSQL" → "PostgreSQL is relational" → "User prefers relational DBs"
 
-Inspired by A-MEM research showing 2x improvement on multi-hop reasoning benchmarks.
+**Current implementation**:
+- `related_ids` field exists on SemanticMemory and ProceduralMemory
+- `follow_links` parameter in recall() traverses links when populated
+- Consolidation identifies relationships but link storage is not yet implemented
+
+Inspired by A-MEM research showing 2x improvement on multi-hop reasoning benchmarks. Full linking support is tracked in [issue #73](https://github.com/ashita-ai/engram/issues/73).
 
 ### 5. Selectivity Through Consolidation
 

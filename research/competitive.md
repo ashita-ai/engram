@@ -146,7 +146,7 @@ Novel approaches from recent literature:
 
 **Results**: 2x improvement on multi-hop reasoning benchmarks.
 
-**Engram**: Implements dynamic linking via `related_ids` field on semantic and procedural memories, populated during consolidation.
+**Engram**: Provides infrastructure for dynamic linking via `related_ids` field on semantic and procedural memories. Link traversal (`follow_links` parameter) is implemented; automated link population during consolidation is planned.
 
 ### Hierarchical Cognitive Buffers
 
@@ -156,7 +156,7 @@ Novel approaches from recent literature:
 
 **Results**: 58.6% memory reuse vs 0% for naive RAG.
 
-**Engram**: Implements buffer promotion hierarchy (Working → Episodic → Semantic → Procedural) with explicit promotion triggers based on importance, repetition, and access patterns.
+**Engram**: Provides the memory type hierarchy (Working → Episodic → Semantic → Procedural). Automated promotion based on importance, repetition, and access patterns is planned but not yet implemented.
 
 ### Dynamic Engrams (Selectivity Through Consolidation)
 
