@@ -141,8 +141,8 @@ class StorageBase:
         Qdrant requires point IDs to be UUIDs or unsigned integers.
         We hash the key to create a deterministic UUID-format string.
         """
-        hash_bytes = hashlib.sha256(key.encode()).hexdigest()[:32]
-        return f"{hash_bytes[:8]}-{hash_bytes[8:12]}-{hash_bytes[12:16]}-{hash_bytes[16:20]}-{hash_bytes[20:32]}"
+        h = hashlib.sha256(key.encode()).hexdigest()[:32]
+        return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
 
     async def _ensure_collections(self) -> None:
         """Ensure all required collections exist with proper schemas."""
