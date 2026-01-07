@@ -275,3 +275,109 @@ class TestRunDecay:
             org_id="test_org",
             include_archived=True,
         )
+
+    @pytest.mark.asyncio
+    async def test_low_access_memory_archived(self, settings: Settings) -> None:
+        """Test old memory with low access count gets archived."""
+        # Create old memory with low retrieval_count
+        memory = self._create_memory("Old rarely accessed", extraction_base=0.6, days_old=0)
+        # Set derived_at to be older than LOW_ACCESS_AGE_DAYS (90)
+        memory.derived_at = datetime.now(UTC) - timedelta(days=100)
+        memory.retrieval_count = 1  # Below LOW_ACCESS_THRESHOLD (2)
+
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[memory])
+        mock_storage.update_semantic_memory = AsyncMock()
+
+        result = await run_decay(
+            storage=mock_storage,
+            settings=settings,
+            user_id="test_user",
+            run_promotion=False,  # Skip promotion for this test
+        )
+
+        # Should be archived due to low access
+        assert result.low_access_archived == 1
+        mock_storage.update_semantic_memory.assert_called_once()
+        updated_memory = mock_storage.update_semantic_memory.call_args[0][0]
+        assert updated_memory.archived is True
+
+    @pytest.mark.asyncio
+    async def test_frequently_accessed_memory_not_archived(self, settings: Settings) -> None:
+        """Test old memory with high access count is NOT archived."""
+        # Create old memory with high retrieval_count
+        memory = self._create_memory("Old but accessed", extraction_base=0.6, days_old=0)
+        memory.derived_at = datetime.now(UTC) - timedelta(days=100)
+        memory.retrieval_count = 10  # Above LOW_ACCESS_THRESHOLD (2)
+
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[memory])
+        mock_storage.update_semantic_memory = AsyncMock()
+
+        result = await run_decay(
+            storage=mock_storage,
+            settings=settings,
+            user_id="test_user",
+            run_promotion=False,
+        )
+
+        # Should NOT be archived due to high access
+        assert result.low_access_archived == 0
+
+    @pytest.mark.asyncio
+    async def test_promotion_runs_when_embedder_provided(self, settings: Settings) -> None:
+        """Test promotion workflow runs when embedder is provided."""
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.list_procedural_memories = AsyncMock(return_value=[])
+
+        mock_embedder = AsyncMock()
+
+        result = await run_decay(
+            storage=mock_storage,
+            settings=settings,
+            user_id="test_user",
+            embedder=mock_embedder,
+            run_promotion=True,
+        )
+
+        # Promotion should run but produce 0 since no memories to promote
+        assert result.procedural_promoted == 0
+
+    @pytest.mark.asyncio
+    async def test_promotion_skipped_when_no_embedder(self, settings: Settings) -> None:
+        """Test promotion is skipped when embedder is not provided."""
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+
+        result = await run_decay(
+            storage=mock_storage,
+            settings=settings,
+            user_id="test_user",
+            embedder=None,
+            run_promotion=True,
+        )
+
+        # Promotion skipped, result should be 0
+        assert result.procedural_promoted == 0
+
+    @pytest.mark.asyncio
+    async def test_promotion_disabled_explicitly(self, settings: Settings) -> None:
+        """Test promotion can be explicitly disabled."""
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+
+        mock_embedder = AsyncMock()
+
+        result = await run_decay(
+            storage=mock_storage,
+            settings=settings,
+            user_id="test_user",
+            embedder=mock_embedder,
+            run_promotion=False,  # Explicitly disabled
+        )
+
+        # Promotion should not run
+        assert result.procedural_promoted == 0
+        # list_procedural_memories should not be called
+        mock_storage.list_procedural_memories.assert_not_called()
