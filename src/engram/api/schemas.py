@@ -141,7 +141,7 @@ class RecallRequest(BaseModel):
     )
     memory_types: list[MemoryType] | None = Field(
         default=None,
-        description="Memory types to search. None means all. Valid: episodic, factual, semantic, procedural, negation, working",
+        description="Memory types to search. None means all.",
     )
     include_sources: bool = Field(default=False, description="Include source episodes in results")
     follow_links: bool = Field(default=False, description="Enable multi-hop reasoning")

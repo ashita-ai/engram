@@ -133,7 +133,8 @@ async def run_decay(
             await storage.delete_semantic(memory.id, user_id)
             deleted += 1
             logger.debug(
-                f"Deleted memory {memory.id}: confidence {old_confidence:.3f} -> {new_confidence:.3f}"
+                f"Deleted memory {memory.id}: "
+                f"confidence {old_confidence:.3f} -> {new_confidence:.3f}"
             )
         elif new_confidence < settings.decay_archive_threshold:
             # Archive memories below archive threshold
@@ -142,7 +143,8 @@ async def run_decay(
                 await storage.update_semantic_memory(memory)
                 archived += 1
                 logger.debug(
-                    f"Archived memory {memory.id}: confidence {old_confidence:.3f} -> {new_confidence:.3f}"
+                    f"Archived memory {memory.id}: "
+                    f"confidence {old_confidence:.3f} -> {new_confidence:.3f}"
                 )
             else:
                 # Already archived, just update confidence
