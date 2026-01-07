@@ -88,7 +88,7 @@ class RecallResult(BaseModel):
     """A single recalled memory with similarity score.
 
     Attributes:
-        memory_type: Type of memory (episode, fact, semantic, etc.).
+        memory_type: Type of memory (episodic, factual, semantic, etc.).
         content: The memory content.
         score: Similarity score (0.0-1.0).
         confidence: Confidence score for facts/semantic memories.
@@ -125,7 +125,7 @@ class VerificationResult(BaseModel):
 
     Attributes:
         memory_id: ID of the verified memory.
-        memory_type: Type of memory (fact, semantic, etc.).
+        memory_type: Type of memory (factual, semantic, etc.).
         content: The memory content.
         verified: Whether sources were found and content matches.
         source_episodes: Source episode contents.
@@ -137,7 +137,7 @@ class VerificationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     memory_id: str = Field(description="ID of the verified memory")
-    memory_type: str = Field(description="Type: fact, semantic, procedural, negation")
+    memory_type: str = Field(description="Type: factual, semantic, procedural, negation")
     content: str = Field(description="The memory content")
     verified: bool = Field(description="True if sources found and traceable")
     source_episodes: list[dict[str, Any]] = Field(
