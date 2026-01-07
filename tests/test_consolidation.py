@@ -13,6 +13,8 @@ from engram.workflows.consolidation import (
     ExtractedFact,
     IdentifiedLink,
     LLMExtractionResult,
+    MemoryEvolution,
+    _find_matching_memory,
     format_episodes_for_llm,
     run_consolidation,
 )
@@ -46,6 +48,54 @@ class TestExtractedFact:
         with pytest.raises(ValueError):
             ExtractedFact(content="test", confidence=-0.1)
 
+    # A-MEM inspired tests
+    def test_amem_fields_defaults(self) -> None:
+        """Test A-MEM fields have sensible defaults."""
+        fact = ExtractedFact(content="User prefers Python")
+        assert fact.keywords == []
+        assert fact.tags == []
+        assert fact.context == ""
+
+    def test_create_with_amem_fields(self) -> None:
+        """Test creating fact with A-MEM fields."""
+        fact = ExtractedFact(
+            content="User prefers Python for scripting",
+            confidence=0.8,
+            keywords=["python", "scripting", "preference"],
+            tags=["preference", "technical"],
+            context="programming languages",
+        )
+        assert fact.keywords == ["python", "scripting", "preference"]
+        assert fact.tags == ["preference", "technical"]
+        assert fact.context == "programming languages"
+
+
+class TestMemoryEvolution:
+    """Tests for MemoryEvolution model (A-MEM style)."""
+
+    def test_create_evolution(self) -> None:
+        """Test creating a memory evolution."""
+        evolution = MemoryEvolution(
+            target_content="User prefers Python",
+            add_tags=["programming", "preference"],
+            add_keywords=["python", "language"],
+            update_context="programming tools",
+            reason="New context about programming preferences",
+        )
+        assert evolution.target_content == "User prefers Python"
+        assert evolution.add_tags == ["programming", "preference"]
+        assert evolution.add_keywords == ["python", "language"]
+        assert evolution.update_context == "programming tools"
+        assert "programming preferences" in evolution.reason
+
+    def test_evolution_defaults(self) -> None:
+        """Test evolution has sensible defaults."""
+        evolution = MemoryEvolution(target_content="Some memory")
+        assert evolution.add_tags == []
+        assert evolution.add_keywords == []
+        assert evolution.update_context == ""
+        assert evolution.reason == ""
+
 
 class TestIdentifiedLink:
     """Tests for IdentifiedLink model."""
@@ -71,6 +121,7 @@ class TestLLMExtractionResult:
         assert result.semantic_facts == []
         assert result.links == []
         assert result.contradictions == []
+        assert result.evolutions == []
 
     def test_create_with_data(self) -> None:
         """Test creating result with data."""
@@ -91,6 +142,21 @@ class TestLLMExtractionResult:
         assert len(result.semantic_facts) == 2
         assert len(result.links) == 1
         assert len(result.contradictions) == 1
+
+    def test_create_with_evolutions(self) -> None:
+        """Test creating result with A-MEM evolutions."""
+        result = LLMExtractionResult(
+            semantic_facts=[ExtractedFact(content="User prefers TypeScript")],
+            evolutions=[
+                MemoryEvolution(
+                    target_content="User prefers JavaScript",
+                    add_tags=["typescript_related"],
+                    reason="TypeScript preference extends JS preference",
+                )
+            ],
+        )
+        assert len(result.evolutions) == 1
+        assert result.evolutions[0].target_content == "User prefers JavaScript"
 
 
 class TestConsolidationResult:
@@ -384,3 +450,271 @@ class TestDurableAgentFactory:
                 with patch("engram.workflows.Agent"):
                     factory = init_workflows(settings)
                     assert factory._initialized
+
+
+class TestFindMatchingMemory:
+    """Tests for _find_matching_memory function."""
+
+    def test_exact_match(self) -> None:
+        """Test exact content match."""
+        from engram.models import SemanticMemory
+
+        memory = SemanticMemory(
+            content="User prefers Python",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        memories = {"User prefers Python": memory}
+
+        result = _find_matching_memory("User prefers Python", memories)
+        assert result is memory
+
+    def test_normalized_match(self) -> None:
+        """Test case-insensitive and whitespace-normalized match."""
+        from engram.models import SemanticMemory
+
+        memory = SemanticMemory(
+            content="User prefers Python",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        memories = {"User prefers Python": memory}
+
+        result = _find_matching_memory("  user prefers python  ", memories)
+        assert result is memory
+
+    def test_substring_match_content_in_memory(self) -> None:
+        """Test content is substring of memory content."""
+        from engram.models import SemanticMemory
+
+        memory = SemanticMemory(
+            content="User strongly prefers Python for data science",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        memories = {"User strongly prefers Python for data science": memory}
+
+        result = _find_matching_memory("prefers python", memories)
+        assert result is memory
+
+    def test_substring_match_memory_in_content(self) -> None:
+        """Test memory content is substring of query content."""
+        from engram.models import SemanticMemory
+
+        memory = SemanticMemory(
+            content="prefers Python",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        memories = {"prefers Python": memory}
+
+        result = _find_matching_memory("User prefers Python for work", memories)
+        assert result is memory
+
+    def test_no_match_returns_none(self) -> None:
+        """Test returns None when no match found."""
+        from engram.models import SemanticMemory
+
+        memory = SemanticMemory(
+            content="User prefers Python",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        memories = {"User prefers Python": memory}
+
+        result = _find_matching_memory("totally unrelated content", memories)
+        assert result is None
+
+    def test_empty_memories_returns_none(self) -> None:
+        """Test returns None for empty memory dict."""
+        result = _find_matching_memory("any content", {})
+        assert result is None
+
+
+class TestConsolidationLinking:
+    """Tests for dynamic memory linking during consolidation."""
+
+    @pytest.mark.asyncio
+    async def test_links_created_between_memories(self) -> None:
+        """Test that links are created between memories based on LLM output."""
+        from engram.models import Episode
+
+        # Create mock episodes
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_123"
+        mock_episode.role = "user"
+        mock_episode.content = "I use PostgreSQL at work and prefer relational databases"
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.store_semantic = AsyncMock(return_value="sem_123")
+        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        # Mock LLM to return two facts with a link between them
+        mock_llm_result = LLMExtractionResult(
+            semantic_facts=[
+                ExtractedFact(content="User uses PostgreSQL"),
+                ExtractedFact(content="User prefers relational databases"),
+            ],
+            links=[
+                IdentifiedLink(
+                    source_content="User uses PostgreSQL",
+                    target_content="User prefers relational databases",
+                    relationship="implies",
+                )
+            ],
+            contradictions=[],
+        )
+
+        mock_agent_result = MagicMock()
+        mock_agent_result.output = mock_llm_result
+
+        with patch(
+            "engram.workflows.get_consolidation_agent",
+            side_effect=RuntimeError("Workflows not initialized"),
+        ):
+            with patch("pydantic_ai.Agent") as mock_agent_class:
+                mock_agent_instance = AsyncMock()
+                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
+                mock_agent_class.return_value = mock_agent_instance
+
+                result = await run_consolidation(
+                    storage=mock_storage,
+                    embedder=mock_embedder,
+                    user_id="test_user",
+                )
+
+        # Should have created 2 memories and 1 link
+        assert result.episodes_processed == 1
+        assert result.semantic_memories_created == 2
+        assert result.links_created == 1
+
+        # update_semantic_memory should have been called twice (bidirectional link)
+        assert mock_storage.update_semantic_memory.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_links_with_existing_memories(self) -> None:
+        """Test linking new memories with existing memories."""
+        from engram.models import Episode, SemanticMemory
+
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_456"
+        mock_episode.role = "user"
+        mock_episode.content = "PostgreSQL is a relational database"
+
+        # Existing memory
+        existing_memory = SemanticMemory(
+            content="User likes SQL databases",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.store_semantic = AsyncMock(return_value="sem_new")
+        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
+        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        # LLM creates link between new and existing memory
+        mock_llm_result = LLMExtractionResult(
+            semantic_facts=[
+                ExtractedFact(content="PostgreSQL is relational"),
+            ],
+            links=[
+                IdentifiedLink(
+                    source_content="PostgreSQL is relational",
+                    target_content="User likes SQL databases",
+                    relationship="related_to",
+                )
+            ],
+            contradictions=[],
+        )
+
+        mock_agent_result = MagicMock()
+        mock_agent_result.output = mock_llm_result
+
+        with patch(
+            "engram.workflows.get_consolidation_agent",
+            side_effect=RuntimeError("Workflows not initialized"),
+        ):
+            with patch("pydantic_ai.Agent") as mock_agent_class:
+                mock_agent_instance = AsyncMock()
+                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
+                mock_agent_class.return_value = mock_agent_instance
+
+                result = await run_consolidation(
+                    storage=mock_storage,
+                    embedder=mock_embedder,
+                    user_id="test_user",
+                )
+
+        # Should create 1 memory and 1 link
+        assert result.semantic_memories_created == 1
+        assert result.links_created == 1
+
+    @pytest.mark.asyncio
+    async def test_no_links_when_match_not_found(self) -> None:
+        """Test that links are not created when memories can't be matched."""
+        from engram.models import Episode
+
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_789"
+        mock_episode.role = "user"
+        mock_episode.content = "Test content"
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.store_semantic = AsyncMock(return_value="sem_test")
+        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        # LLM returns link between unmatched content
+        mock_llm_result = LLMExtractionResult(
+            semantic_facts=[
+                ExtractedFact(content="Fact A"),
+            ],
+            links=[
+                IdentifiedLink(
+                    source_content="Nonexistent fact X",
+                    target_content="Nonexistent fact Y",
+                    relationship="relates",
+                )
+            ],
+            contradictions=[],
+        )
+
+        mock_agent_result = MagicMock()
+        mock_agent_result.output = mock_llm_result
+
+        with patch(
+            "engram.workflows.get_consolidation_agent",
+            side_effect=RuntimeError("Workflows not initialized"),
+        ):
+            with patch("pydantic_ai.Agent") as mock_agent_class:
+                mock_agent_instance = AsyncMock()
+                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
+                mock_agent_class.return_value = mock_agent_instance
+
+                result = await run_consolidation(
+                    storage=mock_storage,
+                    embedder=mock_embedder,
+                    user_id="test_user",
+                )
+
+        # Memory created but no links (can't match)
+        assert result.semantic_memories_created == 1
+        assert result.links_created == 0
+        mock_storage.update_semantic_memory.assert_not_called()

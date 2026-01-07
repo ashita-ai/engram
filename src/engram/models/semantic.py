@@ -2,9 +2,48 @@
 
 from datetime import UTC, datetime
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .base import ConfidenceScore, MemoryBase, generate_id
+
+
+class EvolutionEntry(BaseModel):
+    """Record of a memory evolution event.
+
+    Tracks when and how a memory was modified during consolidation.
+
+    Attributes:
+        timestamp: When the evolution occurred.
+        trigger_memory_id: ID of the new memory that triggered this evolution.
+        field_changed: Which field was modified.
+        old_value: Previous value (as string for audit).
+        new_value: New value (as string for audit).
+        reason: Why this evolution was applied.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="When the evolution occurred",
+    )
+    trigger_memory_id: str = Field(
+        description="ID of the new memory that triggered this evolution",
+    )
+    field_changed: str = Field(
+        description="Which field was modified",
+    )
+    old_value: str = Field(
+        default="",
+        description="Previous value",
+    )
+    new_value: str = Field(
+        description="New value",
+    )
+    reason: str = Field(
+        default="",
+        description="Why this evolution was applied",
+    )
 
 
 class SemanticMemory(MemoryBase):
@@ -18,6 +57,14 @@ class SemanticMemory(MemoryBase):
     - 0.0: Newly created, broad associations
     - 1.0: Highly selective, well-consolidated
 
+    A-MEM inspired features:
+    - keywords: Key terms for this memory (improves linking)
+    - tags: Category labels (e.g., "preference", "technical", "personal")
+    - context: Domain/theme classification
+    - retrieval_count: How often accessed (activation tracking)
+    - last_accessed: When last retrieved
+    - evolution_history: Audit trail of memory modifications
+
     Attributes:
         content: The inferred semantic content.
         source_episode_ids: Episodes this was derived from.
@@ -27,6 +74,12 @@ class SemanticMemory(MemoryBase):
         confidence: Composite confidence score.
         selectivity_score: How well-consolidated (0=broad, 1=selective).
         consolidation_passes: How many times this has been refined.
+        keywords: Extracted key terms for this memory.
+        tags: Category labels for classification.
+        context: Domain or theme description.
+        retrieval_count: Number of times this memory has been accessed.
+        last_accessed: When this memory was last retrieved.
+        evolution_history: Audit trail of modifications.
     """
 
     id: str = Field(default_factory=lambda: generate_id("sem"))
@@ -66,6 +119,34 @@ class SemanticMemory(MemoryBase):
         default=False,
         description="Whether this memory is archived (low confidence)",
     )
+    # A-MEM inspired fields
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="Extracted key terms for this memory",
+    )
+    tags: list[str] = Field(
+        default_factory=list,
+        description="Category labels (e.g., preference, technical, personal)",
+    )
+    context: str = Field(
+        default="",
+        description="Domain or theme description",
+    )
+    # Activation tracking
+    retrieval_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of times this memory has been accessed",
+    )
+    last_accessed: datetime | None = Field(
+        default=None,
+        description="When this memory was last retrieved",
+    )
+    # Evolution history
+    evolution_history: list[EvolutionEntry] = Field(
+        default_factory=list,
+        description="Audit trail of memory modifications",
+    )
 
     def add_link(self, memory_id: str) -> None:
         """Add a link to a related memory."""
@@ -80,6 +161,84 @@ class SemanticMemory(MemoryBase):
     def decrease_selectivity(self, delta: float = 0.1) -> None:
         """Decrease selectivity score (pruned during consolidation)."""
         self.selectivity_score = max(0.0, self.selectivity_score - delta)
+
+    def record_access(self) -> None:
+        """Record that this memory was accessed (activation tracking).
+
+        Increments retrieval_count and updates last_accessed timestamp.
+        Called by storage layer on search hits.
+        """
+        self.retrieval_count += 1
+        self.last_accessed = datetime.now(UTC)
+
+    def add_tag(self, tag: str) -> None:
+        """Add a tag if not already present."""
+        if tag not in self.tags:
+            self.tags.append(tag)
+
+    def add_keyword(self, keyword: str) -> None:
+        """Add a keyword if not already present."""
+        keyword_lower = keyword.lower()
+        if keyword_lower not in [k.lower() for k in self.keywords]:
+            self.keywords.append(keyword)
+
+    def evolve(
+        self,
+        trigger_memory_id: str,
+        field: str,
+        new_value: str,
+        reason: str = "",
+    ) -> None:
+        """Record an evolution event (A-MEM style memory update).
+
+        Only metadata fields can be evolved (tags, keywords, context).
+        Content is immutable.
+
+        Args:
+            trigger_memory_id: ID of the new memory that triggered this evolution.
+            field: Which field was modified (tags, keywords, context).
+            new_value: New value as string representation.
+            reason: Why this evolution was applied.
+
+        Raises:
+            ValueError: If attempting to evolve content (immutable).
+        """
+        if field == "content":
+            raise ValueError("Cannot evolve content - it is immutable")
+
+        # Get old value
+        old_value = ""
+        if field == "tags":
+            old_value = ",".join(self.tags)
+        elif field == "keywords":
+            old_value = ",".join(self.keywords)
+        elif field == "context":
+            old_value = self.context
+
+        # Record the evolution
+        entry = EvolutionEntry(
+            trigger_memory_id=trigger_memory_id,
+            field_changed=field,
+            old_value=old_value,
+            new_value=new_value,
+            reason=reason,
+        )
+        self.evolution_history.append(entry)
+
+        # Apply the change
+        if field == "tags":
+            new_tags = [t.strip() for t in new_value.split(",") if t.strip()]
+            for tag in new_tags:
+                self.add_tag(tag)
+        elif field == "keywords":
+            new_keywords = [k.strip() for k in new_value.split(",") if k.strip()]
+            for keyword in new_keywords:
+                self.add_keyword(keyword)
+        elif field == "context":
+            if not self.context:
+                self.context = new_value
+            elif new_value not in self.context:
+                self.context = f"{self.context}; {new_value}"
 
     def __str__(self) -> str:
         """String representation showing content preview."""

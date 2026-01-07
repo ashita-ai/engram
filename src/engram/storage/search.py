@@ -158,6 +158,7 @@ class SearchMixin:
         limit: int = 10,
         min_confidence: float | None = None,
         derived_at_before: datetime | None = None,
+        track_activation: bool = False,
     ) -> list[ScoredResult[SemanticMemory]]:
         """Search for similar semantic memories.
 
@@ -168,6 +169,8 @@ class SearchMixin:
             limit: Maximum results to return.
             min_confidence: Minimum confidence threshold.
             derived_at_before: Only include memories derived before this time.
+            track_activation: If True, update retrieval_count and last_accessed
+                for returned memories (A-MEM style activation tracking).
 
         Returns:
             List of ScoredResult[SemanticMemory] sorted by similarity.
@@ -185,7 +188,7 @@ class SearchMixin:
             limit=limit,
         )
 
-        return [
+        scored_results = [
             ScoredResult(
                 memory=self._payload_to_memory(r.payload, SemanticMemory),
                 score=r.score,
@@ -194,6 +197,52 @@ class SearchMixin:
             if r.payload is not None
         ]
 
+        # A-MEM style activation tracking
+        if track_activation and scored_results:
+            await self._track_semantic_activation(scored_results)
+
+        return scored_results
+
+    async def _track_semantic_activation(
+        self,
+        results: list[ScoredResult[SemanticMemory]],
+    ) -> None:
+        """Update activation metadata for searched memories.
+
+        Records retrieval_count and last_accessed for A-MEM style
+        activation-based strengthening.
+
+        Args:
+            results: Search results to track activation for.
+        """
+        from datetime import UTC, datetime
+
+        collection = self._collection_name("semantic")
+
+        for scored in results:
+            memory = scored.memory
+            memory.retrieval_count += 1
+            memory.last_accessed = datetime.now(UTC)
+
+            # Update just the activation fields in storage
+            await self.client.set_payload(
+                collection_name=collection,
+                payload={
+                    "retrieval_count": memory.retrieval_count,
+                    "last_accessed": memory.last_accessed.isoformat(),
+                },
+                points=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="id",
+                                match=models.MatchValue(value=memory.id),
+                            ),
+                        ]
+                    )
+                ),
+            )
+
     async def search_procedural(
         self,
         query_vector: Sequence[float],
@@ -201,6 +250,7 @@ class SearchMixin:
         org_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
+        track_activation: bool = False,
     ) -> list[ScoredResult[ProceduralMemory]]:
         """Search for similar procedural memories.
 
@@ -210,6 +260,8 @@ class SearchMixin:
             org_id: Optional org ID filter.
             limit: Maximum results to return.
             min_confidence: Minimum confidence threshold.
+            track_activation: If True, update access_count and last_accessed
+                for returned memories (A-MEM style activation tracking).
 
         Returns:
             List of ScoredResult[ProceduralMemory] sorted by similarity.
@@ -225,7 +277,7 @@ class SearchMixin:
             limit=limit,
         )
 
-        return [
+        scored_results = [
             ScoredResult(
                 memory=self._payload_to_memory(r.payload, ProceduralMemory),
                 score=r.score,
@@ -233,6 +285,52 @@ class SearchMixin:
             for r in results
             if r.payload is not None
         ]
+
+        # A-MEM style activation tracking
+        if track_activation and scored_results:
+            await self._track_procedural_activation(scored_results)
+
+        return scored_results
+
+    async def _track_procedural_activation(
+        self,
+        results: list[ScoredResult[ProceduralMemory]],
+    ) -> None:
+        """Update activation metadata for searched procedural memories.
+
+        Records access_count and last_accessed for A-MEM style
+        activation-based strengthening.
+
+        Args:
+            results: Search results to track activation for.
+        """
+        from datetime import UTC, datetime
+
+        collection = self._collection_name("procedural")
+
+        for scored in results:
+            memory = scored.memory
+            memory.access_count += 1
+            memory.last_accessed = datetime.now(UTC)
+
+            # Update just the activation fields in storage
+            await self.client.set_payload(
+                collection_name=collection,
+                payload={
+                    "access_count": memory.access_count,
+                    "last_accessed": memory.last_accessed.isoformat(),
+                },
+                points=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="id",
+                                match=models.MatchValue(value=memory.id),
+                            ),
+                        ]
+                    )
+                ),
+            )
 
     async def search_negation(
         self,
