@@ -195,7 +195,7 @@ class EngramStorage:
         "factual",
         "semantic",
         "procedural",
-        "inhibitory",
+        "negation",
         "audit",
     ]
 

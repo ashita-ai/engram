@@ -35,10 +35,10 @@ MemoryT = TypeVar(
     AuditEntry,
 )
 
-# Collection names by memory type
+# Collection names by memory type (keys match API memory_types values)
 COLLECTION_NAMES = {
-    "episode": "episodic",
-    "fact": "factual",
+    "episodic": "episodic",
+    "factual": "factual",
     "semantic": "semantic",
     "procedural": "procedural",
     "negation": "negation",

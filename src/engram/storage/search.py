@@ -82,7 +82,7 @@ class SearchMixin:
             )
 
         results = await self._search(
-            collection="episode",
+            collection="episodic",
             query_vector=query_vector,
             filters=filters,
             limit=limit,
@@ -135,7 +135,7 @@ class SearchMixin:
             )
 
         results = await self._search(
-            collection="fact",
+            collection="factual",
             query_vector=query_vector,
             filters=filters,
             limit=limit,

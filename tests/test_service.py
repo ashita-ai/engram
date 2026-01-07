@@ -173,7 +173,7 @@ class TestEngramServiceRecall:
         )
 
         assert len(results) >= 1
-        episode_results = [r for r in results if r.memory_type == "episode"]
+        episode_results = [r for r in results if r.memory_type == "episodic"]
         assert len(episode_results) == 1
         assert episode_results[0].content == "Hello world"
         assert episode_results[0].score == 0.85  # Actual score from Qdrant
@@ -198,7 +198,7 @@ class TestEngramServiceRecall:
             user_id="user_123",
         )
 
-        fact_results = [r for r in results if r.memory_type == "fact"]
+        fact_results = [r for r in results if r.memory_type == "factual"]
         assert len(fact_results) == 1
         assert fact_results[0].content == "user@example.com"
         assert fact_results[0].source_episode_id == "ep_123"
@@ -212,7 +212,7 @@ class TestEngramServiceRecall:
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            memory_types=["fact"],  # Episode not included
+            memory_types=["factual"],  # Episode not included
         )
 
         mock_service.storage.search_episodes.assert_not_called()
@@ -225,7 +225,7 @@ class TestEngramServiceRecall:
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            memory_types=["episode"],  # Fact not included
+            memory_types=["episodic"],  # Fact not included
         )
 
         mock_service.storage.search_facts.assert_not_called()
@@ -288,7 +288,7 @@ class TestEngramServiceRecall:
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            memory_types=["episode", "fact", "semantic"],  # Procedural not included
+            memory_types=["episodic", "factual", "semantic"],  # Procedural not included
         )
 
         mock_service.storage.search_procedural.assert_not_called()
@@ -361,7 +361,7 @@ class TestEngramServiceRecall:
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            memory_types=["episode", "fact"],  # Negation not included
+            memory_types=["episodic", "factual"],  # Negation not included
         )
 
         mock_service.storage.search_negation.assert_not_called()
@@ -419,13 +419,13 @@ class TestEngramServiceRecall:
         results = await mock_service.recall(
             query="hello",
             user_id="user_123",
-            memory_types=["episode"],
+            memory_types=["episodic"],
         )
 
         mock_service.storage.search_episodes.assert_called_once()
         mock_service.storage.search_facts.assert_not_called()
         assert len(results) == 1
-        assert results[0].memory_type == "episode"
+        assert results[0].memory_type == "episodic"
 
     @pytest.mark.asyncio
     async def test_recall_memory_types_empty_excludes_all(self, mock_service):
@@ -450,13 +450,13 @@ class TestRecallResult:
     def test_recall_result_creation(self):
         """Should create RecallResult with all fields."""
         result = RecallResult(
-            memory_type="episode",
+            memory_type="episodic",
             content="Hello world",
             score=0.95,
             memory_id="ep_123",
         )
 
-        assert result.memory_type == "episode"
+        assert result.memory_type == "episodic"
         assert result.content == "Hello world"
         assert result.score == 0.95
         assert result.memory_id == "ep_123"
@@ -466,7 +466,7 @@ class TestRecallResult:
     def test_recall_result_with_optional_fields(self):
         """Should create RecallResult with optional fields."""
         result = RecallResult(
-            memory_type="fact",
+            memory_type="factual",
             content="user@example.com",
             score=0.9,
             memory_id="fact_123",
@@ -628,7 +628,7 @@ class TestWorkingMemory:
         results = await mock_service.recall(
             query="test",
             user_id="user_123",
-            memory_types=["episode", "fact"],  # Working not included
+            memory_types=["episodic", "factual"],  # Working not included
         )
 
         working_results = [r for r in results if r.memory_type == "working"]

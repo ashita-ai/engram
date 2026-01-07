@@ -57,13 +57,13 @@ class CRUDMixin:
         """
         from engram.models import Episode
 
-        return await self._get_by_id(episode_id, user_id, "episode", Episode)
+        return await self._get_by_id(episode_id, user_id, "episodic", Episode)
 
     async def get_fact(self, fact_id: str, user_id: str) -> Fact | None:
         """Get a fact by ID."""
         from engram.models import Fact
 
-        return await self._get_by_id(fact_id, user_id, "fact", Fact)
+        return await self._get_by_id(fact_id, user_id, "factual", Fact)
 
     async def get_semantic(self, memory_id: str, user_id: str) -> SemanticMemory | None:
         """Get a semantic memory by ID."""
@@ -138,11 +138,11 @@ class CRUDMixin:
         Returns:
             True if deleted, False if not found.
         """
-        return await self._delete_by_id(episode_id, user_id, "episode")
+        return await self._delete_by_id(episode_id, user_id, "episodic")
 
     async def delete_fact(self, fact_id: str, user_id: str) -> bool:
         """Delete a fact."""
-        return await self._delete_by_id(fact_id, user_id, "fact")
+        return await self._delete_by_id(fact_id, user_id, "factual")
 
     async def delete_semantic(self, memory_id: str, user_id: str) -> bool:
         """Delete a semantic memory."""
@@ -213,7 +213,7 @@ class CRUDMixin:
         """
         from engram.models import Episode
 
-        collection = self._collection_name("episode")
+        collection = self._collection_name("episodic")
 
         filters: list[models.FieldCondition] = [
             models.FieldCondition(
@@ -267,7 +267,7 @@ class CRUDMixin:
         Returns:
             Number of episodes updated.
         """
-        collection = self._collection_name("episode")
+        collection = self._collection_name("episodic")
         updated = 0
 
         for episode_id in episode_ids:

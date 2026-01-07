@@ -9,9 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from engram.models import Staleness
 
-# Valid memory types for the memory_types parameter
-MemoryType = Literal["episode", "fact", "semantic", "procedural", "negation", "working"]
-ALL_MEMORY_TYPES: set[str] = {"episode", "fact", "semantic", "procedural", "negation", "working"}
+# Valid memory types for the memory_types parameter (cognitive science terms)
+MemoryType = Literal["episodic", "factual", "semantic", "procedural", "negation", "working"]
+ALL_MEMORY_TYPES: set[str] = {
+    "episodic",
+    "factual",
+    "semantic",
+    "procedural",
+    "negation",
+    "working",
+}
 
 
 class EncodeRequest(BaseModel):
@@ -134,7 +141,7 @@ class RecallRequest(BaseModel):
     )
     memory_types: list[MemoryType] | None = Field(
         default=None,
-        description="Memory types to search. None means all. Valid: episode, fact, semantic, procedural, negation, working",
+        description="Memory types to search. None means all. Valid: episodic, factual, semantic, procedural, negation, working",
     )
     include_sources: bool = Field(default=False, description="Include source episodes in results")
     follow_links: bool = Field(default=False, description="Enable multi-hop reasoning")
@@ -173,7 +180,7 @@ class RecallResultResponse(BaseModel):
     """Response model for a single recalled memory.
 
     Attributes:
-        memory_type: Type of memory (episode, fact, semantic, etc.).
+        memory_type: Type of memory (episodic, factual, semantic, etc.).
         content: The memory content.
         score: Similarity score (0.0-1.0).
         confidence: Confidence score for facts/semantic memories.
@@ -321,7 +328,7 @@ class SourcesResponse(BaseModel):
 
     Attributes:
         memory_id: The ID of the derived memory.
-        memory_type: Type of memory (fact, semantic, procedural, negation).
+        memory_type: Type of memory (factual, semantic, procedural, negation).
         sources: Source episodes in chronological order.
         count: Number of source episodes.
     """
@@ -360,7 +367,7 @@ class VerificationResponse(BaseModel):
 
     Attributes:
         memory_id: ID of the verified memory.
-        memory_type: Type of memory (fact, semantic, etc.).
+        memory_type: Type of memory (factual, semantic, etc.).
         content: The memory content.
         verified: True if sources found and traceable.
         source_episodes: Source episode details.
@@ -372,7 +379,7 @@ class VerificationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     memory_id: str = Field(description="ID of the verified memory")
-    memory_type: str = Field(description="Type: fact, semantic, procedural, negation")
+    memory_type: str = Field(description="Type: factual, semantic, procedural, negation")
     content: str = Field(description="The memory content")
     verified: bool = Field(description="True if sources found and traceable")
     source_episodes: list[SourceEpisodeDetail] = Field(

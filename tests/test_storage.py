@@ -70,8 +70,8 @@ class TestEngramStorageInit:
 
     def test_collection_name(self, storage: EngramStorage):
         """_collection_name should apply prefix correctly."""
-        assert storage._collection_name("episode") == "test_episodic"
-        assert storage._collection_name("fact") == "test_factual"
+        assert storage._collection_name("episodic") == "test_episodic"
+        assert storage._collection_name("factual") == "test_factual"
         assert storage._collection_name("semantic") == "test_semantic"
 
     def test_build_key_with_org(self):
@@ -356,7 +356,7 @@ class TestAuditLogging:
             user_id="user_123",
             query_hash="abc",
             results_count=5,
-            memory_types=["episode"],
+            memory_types=["episodic"],
         )
 
         await storage.log_audit(encode_entry)

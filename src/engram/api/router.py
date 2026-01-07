@@ -384,7 +384,7 @@ async def get_sources(
     """
     # Determine memory type from ID prefix
     if memory_id.startswith("fact_"):
-        memory_type = "fact"
+        memory_type = "factual"
     elif memory_id.startswith("sem_"):
         memory_type = "semantic"
     elif memory_id.startswith("proc_"):
@@ -466,7 +466,7 @@ async def verify_memory(
         Response:
         {
             "memory_id": "fact_abc123",
-            "memory_type": "fact",
+            "memory_type": "factual",
             "content": "email=john@example.com",
             "verified": true,
             "source_episodes": [
