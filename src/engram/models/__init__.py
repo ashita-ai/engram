@@ -21,7 +21,7 @@ from .episode import Episode
 from .fact import Fact
 from .negation import NegationFact
 from .procedural import ProceduralMemory
-from .semantic import SemanticMemory
+from .semantic import EvolutionEntry, SemanticMemory
 
 __all__ = [
     # Base types
@@ -36,6 +36,8 @@ __all__ = [
     "SemanticMemory",
     "ProceduralMemory",
     "NegationFact",
+    # Supporting types
+    "EvolutionEntry",
     # Audit
     "AuditEntry",
 ]

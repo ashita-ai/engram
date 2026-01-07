@@ -491,6 +491,123 @@ class TestSemanticMemory:
         mem = SemanticMemory(content="Short content", user_id="user_123")
         assert "Short content" in str(mem)
 
+    # A-MEM inspired tests
+    def test_default_amem_fields(self):
+        """A-MEM fields should have sensible defaults."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        assert mem.keywords == []
+        assert mem.tags == []
+        assert mem.context == ""
+        assert mem.retrieval_count == 0
+        assert mem.last_accessed is None
+        assert mem.evolution_history == []
+
+    def test_create_with_amem_fields(self):
+        """Can create memory with A-MEM fields."""
+        mem = SemanticMemory(
+            content="User prefers Python",
+            user_id="user_123",
+            keywords=["python", "programming", "preference"],
+            tags=["preference", "technical"],
+            context="programming languages",
+        )
+        assert mem.keywords == ["python", "programming", "preference"]
+        assert mem.tags == ["preference", "technical"]
+        assert mem.context == "programming languages"
+
+    def test_record_access(self):
+        """record_access should update activation tracking."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        assert mem.retrieval_count == 0
+        assert mem.last_accessed is None
+
+        mem.record_access()
+        assert mem.retrieval_count == 1
+        assert mem.last_accessed is not None
+
+        first_access = mem.last_accessed
+        mem.record_access()
+        assert mem.retrieval_count == 2
+        assert mem.last_accessed >= first_access
+
+    def test_add_tag(self):
+        """add_tag should add unique tags."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        mem.add_tag("preference")
+        mem.add_tag("technical")
+        mem.add_tag("preference")  # Duplicate
+        assert mem.tags == ["preference", "technical"]
+
+    def test_add_keyword(self):
+        """add_keyword should add unique keywords (case-insensitive)."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        mem.add_keyword("Python")
+        mem.add_keyword("coding")
+        mem.add_keyword("python")  # Duplicate (case-insensitive)
+        assert len(mem.keywords) == 2
+        assert "Python" in mem.keywords
+        assert "coding" in mem.keywords
+
+    def test_evolve_tags(self):
+        """evolve should add tags and record history."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        mem.evolve(
+            trigger_memory_id="sem_trigger",
+            field="tags",
+            new_value="preference,technical",
+            reason="Related to user preferences",
+        )
+        assert "preference" in mem.tags
+        assert "technical" in mem.tags
+        assert len(mem.evolution_history) == 1
+        assert mem.evolution_history[0].field_changed == "tags"
+        assert mem.evolution_history[0].trigger_memory_id == "sem_trigger"
+
+    def test_evolve_keywords(self):
+        """evolve should add keywords and record history."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        mem.evolve(
+            trigger_memory_id="sem_trigger",
+            field="keywords",
+            new_value="python,coding",
+        )
+        assert "python" in mem.keywords
+        assert "coding" in mem.keywords
+        assert len(mem.evolution_history) == 1
+
+    def test_evolve_context(self):
+        """evolve should update context and record history."""
+        mem = SemanticMemory(content="Test", user_id="user_123", context="programming")
+        mem.evolve(
+            trigger_memory_id="sem_trigger",
+            field="context",
+            new_value="data science",
+        )
+        assert "programming" in mem.context
+        assert "data science" in mem.context
+        assert len(mem.evolution_history) == 1
+
+    def test_evolve_content_raises_error(self):
+        """evolve should not allow changing content (immutable)."""
+        mem = SemanticMemory(content="Original", user_id="user_123")
+        with pytest.raises(ValueError, match="Cannot evolve content"):
+            mem.evolve(
+                trigger_memory_id="sem_trigger",
+                field="content",
+                new_value="Modified",
+            )
+
+    def test_evolution_history_records_old_value(self):
+        """Evolution should record the old value for audit."""
+        mem = SemanticMemory(content="Test", user_id="user_123", tags=["old_tag"])
+        mem.evolve(
+            trigger_memory_id="sem_trigger",
+            field="tags",
+            new_value="new_tag",
+        )
+        assert mem.evolution_history[0].old_value == "old_tag"
+        assert mem.evolution_history[0].new_value == "new_tag"
+
 
 class TestProceduralMemory:
     """Tests for ProceduralMemory model."""
@@ -510,12 +627,23 @@ class TestProceduralMemory:
         assert mem.access_count == 0
 
     def test_reinforce(self):
-        """reinforce() should increment access count."""
+        """reinforce() should increment access count and update last_accessed."""
         mem = ProceduralMemory(content="Test", user_id="user_123")
+        assert mem.last_accessed is None
         mem.reinforce()
         assert mem.access_count == 1
+        assert mem.last_accessed is not None
+        first_access = mem.last_accessed
         mem.reinforce()
         assert mem.access_count == 2
+        assert mem.last_accessed >= first_access
+
+    def test_record_access_alias(self):
+        """record_access() should be an alias for reinforce()."""
+        mem = ProceduralMemory(content="Test", user_id="user_123")
+        mem.record_access()
+        assert mem.access_count == 1
+        assert mem.last_accessed is not None
 
     def test_add_link(self):
         """add_link should add unique related IDs."""

@@ -55,10 +55,22 @@ class ProceduralMemory(MemoryBase):
         ge=0,
         description="Usage count for reinforcement learning",
     )
+    last_accessed: datetime | None = Field(
+        default=None,
+        description="When this memory was last retrieved",
+    )
 
     def reinforce(self) -> None:
         """Increment access count (pattern was used successfully)."""
         self.access_count += 1
+        self.last_accessed = datetime.now(UTC)
+
+    def record_access(self) -> None:
+        """Record that this memory was accessed (activation tracking).
+
+        Alias for reinforce() for API consistency with SemanticMemory.
+        """
+        self.reinforce()
 
     def add_link(self, memory_id: str) -> None:
         """Add a link to a related memory."""

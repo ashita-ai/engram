@@ -13,6 +13,7 @@ from engram.workflows.consolidation import (
     ExtractedFact,
     IdentifiedLink,
     LLMExtractionResult,
+    MemoryEvolution,
     _find_matching_memory,
     format_episodes_for_llm,
     run_consolidation,
@@ -47,6 +48,54 @@ class TestExtractedFact:
         with pytest.raises(ValueError):
             ExtractedFact(content="test", confidence=-0.1)
 
+    # A-MEM inspired tests
+    def test_amem_fields_defaults(self) -> None:
+        """Test A-MEM fields have sensible defaults."""
+        fact = ExtractedFact(content="User prefers Python")
+        assert fact.keywords == []
+        assert fact.tags == []
+        assert fact.context == ""
+
+    def test_create_with_amem_fields(self) -> None:
+        """Test creating fact with A-MEM fields."""
+        fact = ExtractedFact(
+            content="User prefers Python for scripting",
+            confidence=0.8,
+            keywords=["python", "scripting", "preference"],
+            tags=["preference", "technical"],
+            context="programming languages",
+        )
+        assert fact.keywords == ["python", "scripting", "preference"]
+        assert fact.tags == ["preference", "technical"]
+        assert fact.context == "programming languages"
+
+
+class TestMemoryEvolution:
+    """Tests for MemoryEvolution model (A-MEM style)."""
+
+    def test_create_evolution(self) -> None:
+        """Test creating a memory evolution."""
+        evolution = MemoryEvolution(
+            target_content="User prefers Python",
+            add_tags=["programming", "preference"],
+            add_keywords=["python", "language"],
+            update_context="programming tools",
+            reason="New context about programming preferences",
+        )
+        assert evolution.target_content == "User prefers Python"
+        assert evolution.add_tags == ["programming", "preference"]
+        assert evolution.add_keywords == ["python", "language"]
+        assert evolution.update_context == "programming tools"
+        assert "programming preferences" in evolution.reason
+
+    def test_evolution_defaults(self) -> None:
+        """Test evolution has sensible defaults."""
+        evolution = MemoryEvolution(target_content="Some memory")
+        assert evolution.add_tags == []
+        assert evolution.add_keywords == []
+        assert evolution.update_context == ""
+        assert evolution.reason == ""
+
 
 class TestIdentifiedLink:
     """Tests for IdentifiedLink model."""
@@ -72,6 +121,7 @@ class TestLLMExtractionResult:
         assert result.semantic_facts == []
         assert result.links == []
         assert result.contradictions == []
+        assert result.evolutions == []
 
     def test_create_with_data(self) -> None:
         """Test creating result with data."""
@@ -92,6 +142,21 @@ class TestLLMExtractionResult:
         assert len(result.semantic_facts) == 2
         assert len(result.links) == 1
         assert len(result.contradictions) == 1
+
+    def test_create_with_evolutions(self) -> None:
+        """Test creating result with A-MEM evolutions."""
+        result = LLMExtractionResult(
+            semantic_facts=[ExtractedFact(content="User prefers TypeScript")],
+            evolutions=[
+                MemoryEvolution(
+                    target_content="User prefers JavaScript",
+                    add_tags=["typescript_related"],
+                    reason="TypeScript preference extends JS preference",
+                )
+            ],
+        )
+        assert len(result.evolutions) == 1
+        assert result.evolutions[0].target_content == "User prefers JavaScript"
 
 
 class TestConsolidationResult:
