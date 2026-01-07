@@ -228,8 +228,7 @@ class TestRecallEndpoint:
                 "org_id": "org_456",
                 "limit": 5,
                 "min_confidence": 0.8,
-                "include_episodes": False,
-                "include_facts": True,
+                "memory_types": ["fact"],
             },
         )
 
@@ -239,8 +238,7 @@ class TestRecallEndpoint:
         assert call_kwargs["org_id"] == "org_456"
         assert call_kwargs["limit"] == 5
         assert call_kwargs["min_confidence"] == 0.8
-        assert call_kwargs["include_episodes"] is False
-        assert call_kwargs["include_facts"] is True
+        assert call_kwargs["memory_types"] == ["fact"]
 
     def test_recall_empty_results(self, client, mock_service):
         """Should return empty list when no matches."""
@@ -337,8 +335,7 @@ class TestSchemas:
         )
         assert request.query == "hello"
         assert request.limit == 10  # Default
-        assert request.include_episodes is True  # Default
-        assert request.include_facts is True  # Default
+        assert request.memory_types is None  # Default (all types)
 
     def test_health_response_validation(self):
         """Should validate health response fields."""
@@ -348,3 +345,39 @@ class TestSchemas:
             storage_connected=True,
         )
         assert response.status == "healthy"
+
+    def test_recall_request_memory_types_specific(self):
+        """Should accept specific memory types."""
+        request = RecallRequest(
+            query="hello",
+            user_id="user_123",
+            memory_types=["episode", "fact"],
+        )
+        assert request.memory_types == ["episode", "fact"]
+
+    def test_recall_request_memory_types_none_means_all(self):
+        """When memory_types is None, all types should be searched."""
+        request = RecallRequest(
+            query="hello",
+            user_id="user_123",
+            memory_types=None,
+        )
+        assert request.memory_types is None
+
+    def test_recall_request_memory_types_empty_valid(self):
+        """Empty memory_types array is valid (returns no results)."""
+        request = RecallRequest(
+            query="hello",
+            user_id="user_123",
+            memory_types=[],
+        )
+        assert request.memory_types == []
+
+    def test_recall_request_memory_types_invalid_rejected(self):
+        """Invalid memory type should be rejected."""
+        with pytest.raises(ValueError):
+            RecallRequest(
+                query="hello",
+                user_id="user_123",
+                memory_types=["invalid_type"],  # type: ignore[list-item]
+            )

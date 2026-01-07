@@ -1118,11 +1118,10 @@ class TestFreshnessHints:
             user_id="user_123",
         )
 
-        # Recall including working memory
+        # Recall including working memory (default includes all types)
         results = await service.recall(
             query="email",
             user_id="user_123",
-            include_working=True,
         )
 
         # Find working memory result
@@ -1148,11 +1147,10 @@ class TestFreshnessHints:
             user_id="user_123",
         )
 
-        # Recall with fresh_only
+        # Recall with fresh_only (default includes all types including working)
         results = await service.recall(
             query="email",
             user_id="user_123",
-            include_working=True,
             freshness="fresh_only",
         )
 

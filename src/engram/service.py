@@ -349,12 +349,7 @@ class EngramService:
         limit: int = 10,
         min_confidence: float | None = None,
         min_selectivity: float = 0.0,
-        include_episodes: bool = True,
-        include_facts: bool = True,
-        include_semantic: bool = True,
-        include_procedural: bool = True,
-        include_negation: bool = True,
-        include_working: bool = True,
+        memory_types: list[str] | None = None,
         include_sources: bool = False,
         follow_links: bool = False,
         max_hops: int = 2,
@@ -372,12 +367,8 @@ class EngramService:
             limit: Maximum results per memory type.
             min_confidence: Minimum confidence for facts.
             min_selectivity: Minimum selectivity for semantic memories (0.0-1.0).
-            include_episodes: Whether to search episodes.
-            include_facts: Whether to search facts.
-            include_semantic: Whether to search semantic memories.
-            include_procedural: Whether to search procedural memories.
-            include_negation: Whether to search negation facts.
-            include_working: Whether to include working memory (current session).
+            memory_types: List of memory types to search. None means all types.
+                Valid types: episode, fact, semantic, procedural, negation, working.
             include_sources: Whether to include source episodes in results.
             follow_links: Enable multi-hop reasoning via related_ids.
             max_hops: Maximum link traversal depth when follow_links=True.
@@ -393,7 +384,7 @@ class EngramService:
                 query="phone numbers",
                 user_id="user_123",
                 limit=5,
-                freshness="fresh_only",  # Only consolidated memories
+                memory_types=["fact", "episode"],
             )
             for m in memories:
                 print(f"{m.content} (staleness: {m.staleness})")
@@ -401,13 +392,17 @@ class EngramService:
         """
         start_time = time.monotonic()
 
+        # Determine which memory types to search
+        all_types = {"episode", "fact", "semantic", "procedural", "negation", "working"}
+        types_to_search = set(memory_types) if memory_types is not None else all_types
+
         # Generate query embedding
         query_vector = await self.embedder.embed(query)
 
         results: list[RecallResult] = []
 
         # Search episodes
-        if include_episodes:
+        if "episode" in types_to_search:
             scored_episodes = await self.storage.search_episodes(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -435,7 +430,7 @@ class EngramService:
                 )
 
         # Search facts
-        if include_facts:
+        if "fact" in types_to_search:
             scored_facts = await self.storage.search_facts(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -464,7 +459,7 @@ class EngramService:
                 )
 
         # Search semantic memories
-        if include_semantic:
+        if "semantic" in types_to_search:
             scored_semantics = await self.storage.search_semantic(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -497,7 +492,7 @@ class EngramService:
                 )
 
         # Search procedural memories
-        if include_procedural:
+        if "procedural" in types_to_search:
             scored_procedurals = await self.storage.search_procedural(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -527,7 +522,7 @@ class EngramService:
                 )
 
         # Search negation facts
-        if include_negation:
+        if "negation" in types_to_search:
             scored_negations = await self.storage.search_negation(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -554,7 +549,7 @@ class EngramService:
                 )
 
         # Search working memory (in-memory, no DB round-trip)
-        if include_working and self._working_memory:
+        if "working" in types_to_search and self._working_memory:
             # Filter by user_id (and org_id if specified)
             for ep in self._working_memory:
                 if ep.user_id != user_id:
@@ -628,8 +623,7 @@ class EngramService:
         org_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
-        include_episodes: bool = True,
-        include_facts: bool = True,
+        memory_types: list[str] | None = None,
     ) -> list[RecallResult]:
         """Recall memories as they existed at a specific point in time.
 
@@ -644,8 +638,7 @@ class EngramService:
             org_id: Optional organization ID filter.
             limit: Maximum results per memory type.
             min_confidence: Minimum confidence for facts.
-            include_episodes: Whether to search episodes.
-            include_facts: Whether to search facts.
+            memory_types: List of memory types to search. None means all types.
 
         Returns:
             List of RecallResult sorted by similarity score.
@@ -662,13 +655,17 @@ class EngramService:
         """
         start_time = time.monotonic()
 
+        # Determine which memory types to search (recall_at only supports episode and fact)
+        all_types = {"episode", "fact"}
+        types_to_search = set(memory_types) & all_types if memory_types is not None else all_types
+
         # Generate query embedding
         query_vector = await self.embedder.embed(query)
 
         results: list[RecallResult] = []
 
         # Search episodes (filter by timestamp <= as_of)
-        if include_episodes:
+        if "episode" in types_to_search:
             scored_episodes = await self.storage.search_episodes(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -693,7 +690,7 @@ class EngramService:
                 )
 
         # Search facts (filter by derived_at <= as_of)
-        if include_facts:
+        if "fact" in types_to_search:
             scored_facts = await self.storage.search_facts(
                 query_vector=query_vector,
                 user_id=user_id,

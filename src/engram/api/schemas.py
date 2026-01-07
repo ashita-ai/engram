@@ -9,6 +9,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from engram.models import Staleness
 
+# Valid memory types for the memory_types parameter
+MemoryType = Literal["episode", "fact", "semantic", "procedural", "negation", "working"]
+ALL_MEMORY_TYPES: set[str] = {"episode", "fact", "semantic", "procedural", "negation", "working"}
+
 
 class EncodeRequest(BaseModel):
     """Request body for encoding a memory.
@@ -108,13 +112,11 @@ class RecallRequest(BaseModel):
         limit: Maximum results to return.
         min_confidence: Minimum confidence for facts.
         min_selectivity: Minimum selectivity for semantic memories (0.0-1.0).
-        include_episodes: Whether to search episodes.
-        include_facts: Whether to search facts.
-        include_semantic: Whether to search semantic memories.
-        include_working: Whether to include working memory.
+        memory_types: List of memory types to search. None means all types.
         include_sources: Whether to include source episodes in results.
         follow_links: Enable multi-hop reasoning via related_ids.
         max_hops: Maximum link traversal depth when follow_links=True.
+        freshness: Freshness mode for results.
         as_of: Optional bi-temporal filter (only memories derived before this time).
     """
 
@@ -130,12 +132,10 @@ class RecallRequest(BaseModel):
     min_selectivity: float = Field(
         default=0.0, ge=0.0, le=1.0, description="Minimum selectivity for semantic memories"
     )
-    include_episodes: bool = Field(default=True, description="Search episodes")
-    include_facts: bool = Field(default=True, description="Search facts")
-    include_semantic: bool = Field(default=True, description="Search semantic memories")
-    include_procedural: bool = Field(default=True, description="Search procedural memories")
-    include_negation: bool = Field(default=True, description="Search negation facts")
-    include_working: bool = Field(default=True, description="Include working memory")
+    memory_types: list[MemoryType] | None = Field(
+        default=None,
+        description="Memory types to search. None means all. Valid: episode, fact, semantic, procedural, negation, working",
+    )
     include_sources: bool = Field(default=False, description="Include source episodes in results")
     follow_links: bool = Field(default=False, description="Enable multi-hop reasoning")
     max_hops: int = Field(default=2, ge=1, le=5, description="Maximum link traversal depth")
