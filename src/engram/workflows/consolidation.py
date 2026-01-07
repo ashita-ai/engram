@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from engram.embeddings import Embedder
+    from engram.models import SemanticMemory
     from engram.storage import EngramStorage
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,40 @@ def format_episodes_for_llm(episodes: list[dict[str, str]]) -> str:
         lines.append(ep["content"])
         lines.append("")
     return "\n".join(lines)
+
+
+def _find_matching_memory(
+    content: str,
+    memories: dict[str, SemanticMemory],
+) -> SemanticMemory | None:
+    """Find a memory matching the given content.
+
+    Uses exact match first, then substring matching if not found.
+
+    Args:
+        content: Content string to match.
+        memories: Dict mapping content to SemanticMemory.
+
+    Returns:
+        Matching SemanticMemory or None.
+    """
+    # Exact match
+    if content in memories:
+        return memories[content]
+
+    # Normalize and try again
+    normalized = content.strip().lower()
+    for mem_content, memory in memories.items():
+        if mem_content.strip().lower() == normalized:
+            return memory
+
+    # Substring match (content is contained in memory or vice versa)
+    for mem_content, memory in memories.items():
+        mem_normalized = mem_content.strip().lower()
+        if normalized in mem_normalized or mem_normalized in normalized:
+            return memory
+
+    return None
 
 
 async def run_consolidation(
@@ -177,10 +212,13 @@ Be conservative. When uncertain, don't extract.""",
         result = await temp_agent.run(formatted_text)
         extraction = result.output
 
-    # 4. Store semantic memories
+    # 4. Store semantic memories and track content → memory mapping
     episode_ids = [ep.id for ep in episodes]
     memories_created = 0
     links_created = 0
+
+    # Map content to newly created memory for link building
+    content_to_memory: dict[str, SemanticMemory] = {}
 
     for fact in extraction.semantic_facts:
         # Generate embedding for the fact
@@ -196,16 +234,36 @@ Be conservative. When uncertain, don't extract.""",
         memory.confidence.value = fact.confidence
 
         await storage.store_semantic(memory)
+        content_to_memory[fact.content] = memory
         memories_created += 1
         logger.debug(f"Created semantic memory: {memory.id}")
 
-    # 5. Build links (for now, just log them - linking requires memory IDs)
+    # 5. Build links between memories
+    # First, get existing semantic memories for the user
+    existing_memories = await storage.list_semantic_memories(user_id, org_id)
+    all_memories = {m.content: m for m in existing_memories}
+    all_memories.update(content_to_memory)
+
     for link in extraction.links:
-        logger.info(
-            f"Identified link: {link.source_content[:30]}... "
-            f"--[{link.relationship}]--> {link.target_content[:30]}..."
-        )
-        links_created += 1
+        source_memory = _find_matching_memory(link.source_content, all_memories)
+        target_memory = _find_matching_memory(link.target_content, all_memories)
+
+        if source_memory and target_memory and source_memory.id != target_memory.id:
+            # Add bidirectional links
+            source_memory.add_link(target_memory.id)
+            target_memory.add_link(source_memory.id)
+
+            # Persist the updated memories
+            await storage.update_semantic_memory(source_memory)
+            await storage.update_semantic_memory(target_memory)
+
+            links_created += 1
+            logger.info(f"Linked: {source_memory.id} --[{link.relationship}]--> {target_memory.id}")
+        else:
+            logger.debug(
+                f"Could not find memories for link: {link.source_content[:30]}... "
+                f"--[{link.relationship}]--> {link.target_content[:30]}..."
+            )
 
     # 6. Mark episodes as consolidated
     await storage.mark_episodes_consolidated(episode_ids, user_id)

@@ -48,6 +48,7 @@ from .consolidation import (
     run_consolidation,
 )
 from .decay import DecayResult, run_decay
+from .promotion import PromotionResult, run_promotion
 
 if TYPE_CHECKING:
     pass
@@ -285,9 +286,11 @@ __all__ = [
     "get_decay_agent",
     "ConsolidationResult",
     "DecayResult",
+    "PromotionResult",
     "ExtractedFact",
     "IdentifiedLink",
     "LLMExtractionResult",
     "run_consolidation",
     "run_decay",
+    "run_promotion",
 ]

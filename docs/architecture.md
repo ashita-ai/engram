@@ -106,8 +106,15 @@ Enables "what did we know on date X?" queries for debugging and audit.
 
 ### 4. Dynamic Memory Linking
 
-Memories form explicit links to related memories, enabling multi-hop reasoning:
+Memories form explicit links to related memories via `related_ids`, enabling multi-hop reasoning:
 - "User uses PostgreSQL" → "PostgreSQL is relational" → "User prefers relational DBs"
+
+**Implementation**:
+- `related_ids` field on SemanticMemory and ProceduralMemory stores links
+- During consolidation, the LLM identifies relationships between memories
+- Links are stored bidirectionally and persisted to storage
+- `follow_links` parameter in recall() traverses links for multi-hop reasoning
+- `_find_matching_memory` uses exact, normalized, and substring matching to resolve link content
 
 Inspired by A-MEM research showing 2x improvement on multi-hop reasoning benchmarks.
 
@@ -143,10 +150,16 @@ Memory types form a hierarchy with explicit promotion/demotion:
 Working (volatile) → Episodic (fast decay) → Semantic (slow decay) → Procedural (very slow)
 ```
 
-Promotion triggers:
-- High-importance episode → immediate semantic extraction
-- Repeated pattern → procedural memory
-- Low access + time → archive or delete
+**Promotion implementation** (`run_promotion` workflow):
+- Analyzes semantic memories for behavioral patterns (keywords: "prefers", "always", "tends to", etc.)
+- Promotes when: selectivity_score >= 0.5, consolidation_passes >= 2, confidence >= 0.7
+- Creates ProceduralMemory with trigger_context extracted from content
+- Links procedural back to source semantic memory
+- Deduplicates to prevent creating duplicate procedural memories
+
+Demotion triggers:
+- Low access + time → archive via decay workflow
+- Very low confidence → delete via decay workflow
 
 ## Memory Types
 
