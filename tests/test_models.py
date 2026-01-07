@@ -599,12 +599,12 @@ class TestAuditEntry:
             user_id="user_123",
             query_hash="abc123",
             results_count=5,
-            memory_types=["episode", "fact"],
+            memory_types=["episodic", "factual"],
         )
         assert entry.event == "recall"
         assert entry.details["query_hash"] == "abc123"
         assert entry.details["results_count"] == 5
-        assert entry.details["memory_types"] == ["episode", "fact"]
+        assert entry.details["memory_types"] == ["episodic", "factual"]
 
     def test_for_consolidate(self):
         """for_consolidate factory should create consolidate audit entry."""

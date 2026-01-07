@@ -152,7 +152,7 @@ class TestEncodeRecallWorkflow:
         assert len(results) > 0
         # Should include both episodes and facts
         memory_types = {r.memory_type for r in results}
-        assert "episode" in memory_types or "fact" in memory_types
+        assert "episodic" in memory_types or "factual" in memory_types
 
     @pytest.mark.asyncio
     async def test_user_isolation_in_workflow(self, service, mock_storage):
@@ -443,7 +443,7 @@ class TestAPIIntegration:
         # Setup mock recall response
         mock_service.recall.return_value = [
             RecallResult(
-                memory_type="fact",
+                memory_type="factual",
                 content="test@example.com",
                 score=0.95,
                 confidence=0.9,
@@ -476,7 +476,7 @@ class TestAPIIntegration:
         mock_service.recall_at = AsyncMock()
         mock_service.recall_at.return_value = [
             RecallResult(
-                memory_type="episode",
+                memory_type="episodic",
                 content="Old memory content",
                 score=0.85,
                 confidence=None,
@@ -922,7 +922,7 @@ class TestVerifyWorkflow:
         verification = await service.verify(email_fact.id, "user_123")
 
         assert verification.memory_id == email_fact.id
-        assert verification.memory_type == "fact"
+        assert verification.memory_type == "factual"
         assert verification.verified is True
         assert len(verification.source_episodes) == 1
         assert verification.extraction_method == "extracted"
@@ -1045,13 +1045,13 @@ class TestFreshnessHints:
         )
 
         # Find episode result
-        episode_results = [r for r in results if r.memory_type == "episode"]
+        episode_results = [r for r in results if r.memory_type == "episodic"]
         assert len(episode_results) > 0
         # Episode is unconsolidated so should be STALE
         assert episode_results[0].staleness == Staleness.STALE
 
         # Find fact result
-        fact_results = [r for r in results if r.memory_type == "fact"]
+        fact_results = [r for r in results if r.memory_type == "factual"]
         assert len(fact_results) > 0
         # Facts are always FRESH
         assert fact_results[0].staleness == Staleness.FRESH
@@ -1081,7 +1081,7 @@ class TestFreshnessHints:
             user_id="user_123",
             freshness="best_effort",
         )
-        episode_count = len([r for r in all_results if r.memory_type == "episode"])
+        episode_count = len([r for r in all_results if r.memory_type == "episodic"])
         assert episode_count > 0
 
         # Recall with fresh_only should filter out stale episodes
@@ -1092,11 +1092,11 @@ class TestFreshnessHints:
         )
 
         # Episodes are STALE, so they should be filtered out
-        fresh_episode_count = len([r for r in fresh_results if r.memory_type == "episode"])
+        fresh_episode_count = len([r for r in fresh_results if r.memory_type == "episodic"])
         assert fresh_episode_count == 0
 
         # Facts are FRESH, so they should still be included
-        fresh_fact_count = len([r for r in fresh_results if r.memory_type == "fact"])
+        fresh_fact_count = len([r for r in fresh_results if r.memory_type == "factual"])
         assert fresh_fact_count > 0
 
     @pytest.mark.asyncio

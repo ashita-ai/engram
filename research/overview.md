@@ -6,7 +6,7 @@ This document explains *why* Engram makes its specific design choices, with cita
 
 ### 1. Multiple Memory Types
 
-**Design**: Engram maintains six distinct memory types (working, episodic, factual, semantic, procedural, negation) rather than a single undifferentiated store.
+**Design**: Engram maintains six distinct memory types (working, episode, fact, semantic, procedural, negation) rather than a single undifferentiated store.
 
 **Research basis**:
 

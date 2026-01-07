@@ -43,7 +43,7 @@ class StoreMixin:
         Raises:
             ValueError: If episode has no embedding.
         """
-        return await self._store_memory(episode, "episode")
+        return await self._store_memory(episode, "episodic")
 
     async def store_fact(self, fact: Fact) -> str:
         """Store a fact in the factual collection.
@@ -54,7 +54,7 @@ class StoreMixin:
         Returns:
             The fact ID.
         """
-        return await self._store_memory(fact, "fact")
+        return await self._store_memory(fact, "factual")
 
     async def store_semantic(self, memory: SemanticMemory) -> str:
         """Store a semantic memory.

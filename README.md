@@ -131,11 +131,12 @@ facts = extract_patterns(message, [EMAIL_PATTERN])
 Batch in background where errors can be caught:
 
 ```python
-# Critical path: store ground truth only
-await memory.encode(interaction)  # Fast, no LLM
+# Critical path: store ground truth + extract patterns
+result = await engram.encode(content, role="user", user_id="u1")  # Fast, no LLM
+# Facts extracted immediately via regex (emails, phones, dates)
 
-# Background: derive with oversight
-await memory.consolidate()  # LLM extraction, batched
+# Background: derive semantics with oversight (coming soon)
+# await engram.consolidate()  # LLM extraction, batched
 ```
 
 ### 3. Confidence-Gated Retrieval
@@ -144,10 +145,10 @@ Applications choose their trust level:
 
 ```python
 # High-stakes: only verified facts
-trusted = await memory.recall(query, min_confidence=0.9)
+trusted = await engram.recall(query, user_id="u1", min_confidence=0.9)
 
 # Exploratory: include inferences
-all_relevant = await memory.recall(query, min_confidence=0.5)
+all_relevant = await engram.recall(query, user_id="u1", min_confidence=0.5)
 ```
 
 ### 4. Source Verification
@@ -156,35 +157,46 @@ Trace any fact back to its source:
 
 ```python
 # Debug: why does the system believe this?
-fact = await memory.get_fact("user_email")
-episodes = await memory.get_sources(fact.source_ids)
-# → Shows original conversation where email was mentioned
+result = await engram.verify("fact_abc123", user_id="u1")
+print(result.explanation)
+# → "Pattern-matched email from source episode(s). Source: ep_xyz (2024-01-15 10:30). Confidence: 0.90"
+
+# Get raw source episodes
+episodes = await engram.get_sources("fact_abc123", user_id="u1")
+# → Returns original conversation where email was mentioned
 ```
 
 ## Usage
 
 ```python
-from engram import MemoryStore
+from engram.service import EngramService
 
-memory = MemoryStore(qdrant_url="...", user_id="user_123")
+# Initialize with async context manager
+async with EngramService.create() as engram:
+    # Store interaction (immediate, preserves ground truth)
+    result = await engram.encode(
+        content="My email is john@example.com",
+        role="user",
+        user_id="user_123",
+    )
+    print(f"Stored episode {result.episode.id}")
+    print(f"Extracted {len(result.facts)} facts")
 
-# Store interaction (immediate, preserves ground truth)
-await memory.encode(interaction, extract_facts=True)
+    # Retrieve with confidence filtering
+    memories = await engram.recall(
+        query="What's the user's email?",
+        user_id="user_123",
+        memory_types=["factual", "semantic"],
+        min_confidence=0.7,
+    )
 
-# Retrieve with confidence filtering
-memories = await memory.recall(
-    query="What databases does the user work with?",
-    memory_types=["factual", "semantic"],
-    min_confidence=0.7
-)
-
-# Verify a specific fact
-verified = await memory.verify(fact_id)
-
-# Background: consolidate and decay
-await memory.consolidate()
-await memory.decay()
+    # Verify a specific fact
+    if memories:
+        verified = await engram.verify(memories[0].memory_id, user_id="user_123")
+        print(verified.explanation)
 ```
+
+> **Coming Soon**: `consolidate()` and `decay()` background operations ([#22](https://github.com/ashita-ai/engram/issues/22))
 
 ## Design Principles
 

@@ -187,14 +187,14 @@ class TestRecallEndpoint:
         """Should recall memories and return results."""
         mock_service.recall.return_value = [
             RecallResult(
-                memory_type="episode",
+                memory_type="episodic",
                 content="Hello world",
                 score=0.95,
                 memory_id="ep_123",
                 metadata={"role": "user"},
             ),
             RecallResult(
-                memory_type="fact",
+                memory_type="factual",
                 content="user@example.com",
                 score=0.9,
                 confidence=0.85,
@@ -213,7 +213,7 @@ class TestRecallEndpoint:
         data = response.json()
         assert data["query"] == "hello"
         assert data["count"] == 2
-        assert data["results"][0]["memory_type"] == "episode"
+        assert data["results"][0]["memory_type"] == "episodic"
         assert data["results"][1]["confidence"] == 0.85
 
     def test_recall_with_all_options(self, client, mock_service):
@@ -228,7 +228,7 @@ class TestRecallEndpoint:
                 "org_id": "org_456",
                 "limit": 5,
                 "min_confidence": 0.8,
-                "memory_types": ["fact"],
+                "memory_types": ["factual"],
             },
         )
 
@@ -238,7 +238,7 @@ class TestRecallEndpoint:
         assert call_kwargs["org_id"] == "org_456"
         assert call_kwargs["limit"] == 5
         assert call_kwargs["min_confidence"] == 0.8
-        assert call_kwargs["memory_types"] == ["fact"]
+        assert call_kwargs["memory_types"] == ["factual"]
 
     def test_recall_empty_results(self, client, mock_service):
         """Should return empty list when no matches."""
@@ -351,9 +351,9 @@ class TestSchemas:
         request = RecallRequest(
             query="hello",
             user_id="user_123",
-            memory_types=["episode", "fact"],
+            memory_types=["episodic", "factual"],
         )
-        assert request.memory_types == ["episode", "fact"]
+        assert request.memory_types == ["episodic", "factual"]
 
     def test_recall_request_memory_types_none_means_all(self):
         """When memory_types is None, all types should be searched."""

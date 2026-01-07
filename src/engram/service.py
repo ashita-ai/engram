@@ -368,7 +368,7 @@ class EngramService:
             min_confidence: Minimum confidence for facts.
             min_selectivity: Minimum selectivity for semantic memories (0.0-1.0).
             memory_types: List of memory types to search. None means all types.
-                Valid types: episode, fact, semantic, procedural, negation, working.
+                Valid types: episodic, factual, semantic, procedural, negation, working.
             include_sources: Whether to include source episodes in results.
             follow_links: Enable multi-hop reasoning via related_ids.
             max_hops: Maximum link traversal depth when follow_links=True.
@@ -384,7 +384,7 @@ class EngramService:
                 query="phone numbers",
                 user_id="user_123",
                 limit=5,
-                memory_types=["fact", "episode"],
+                memory_types=["factual", "episodic"],
             )
             for m in memories:
                 print(f"{m.content} (staleness: {m.staleness})")
@@ -392,8 +392,8 @@ class EngramService:
         """
         start_time = time.monotonic()
 
-        # Determine which memory types to search
-        all_types = {"episode", "fact", "semantic", "procedural", "negation", "working"}
+        # Determine which memory types to search (cognitive science terms)
+        all_types = {"episodic", "factual", "semantic", "procedural", "negation", "working"}
         types_to_search = set(memory_types) if memory_types is not None else all_types
 
         # Generate query embedding
@@ -402,7 +402,7 @@ class EngramService:
         results: list[RecallResult] = []
 
         # Search episodes
-        if "episode" in types_to_search:
+        if "episodic" in types_to_search:
             scored_episodes = await self.storage.search_episodes(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -415,7 +415,7 @@ class EngramService:
                 ep_staleness = Staleness.FRESH if ep.consolidated else Staleness.STALE
                 results.append(
                     RecallResult(
-                        memory_type="episode",
+                        memory_type="episodic",
                         content=ep.content,
                         score=scored_ep.score,
                         memory_id=ep.id,
@@ -430,7 +430,7 @@ class EngramService:
                 )
 
         # Search facts
-        if "fact" in types_to_search:
+        if "factual" in types_to_search:
             scored_facts = await self.storage.search_facts(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -443,7 +443,7 @@ class EngramService:
                 # Facts are extracted immediately, so they're always fresh
                 results.append(
                     RecallResult(
-                        memory_type="fact",
+                        memory_type="factual",
                         content=fact.content,
                         score=scored_fact.score,
                         confidence=fact.confidence.value,
@@ -655,8 +655,8 @@ class EngramService:
         """
         start_time = time.monotonic()
 
-        # Determine which memory types to search (recall_at only supports episode and fact)
-        all_types = {"episode", "fact"}
+        # Determine which memory types to search (recall_at only supports episodic and factual)
+        all_types = {"episodic", "factual"}
         types_to_search = set(memory_types) & all_types if memory_types is not None else all_types
 
         # Generate query embedding
@@ -665,7 +665,7 @@ class EngramService:
         results: list[RecallResult] = []
 
         # Search episodes (filter by timestamp <= as_of)
-        if "episode" in types_to_search:
+        if "episodic" in types_to_search:
             scored_episodes = await self.storage.search_episodes(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -677,7 +677,7 @@ class EngramService:
                 ep = scored_ep.memory
                 results.append(
                     RecallResult(
-                        memory_type="episode",
+                        memory_type="episodic",
                         content=ep.content,
                         score=scored_ep.score,
                         memory_id=ep.id,
@@ -690,7 +690,7 @@ class EngramService:
                 )
 
         # Search facts (filter by derived_at <= as_of)
-        if "fact" in types_to_search:
+        if "factual" in types_to_search:
             scored_facts = await self.storage.search_facts(
                 query_vector=query_vector,
                 user_id=user_id,
@@ -703,7 +703,7 @@ class EngramService:
                 fact = scored_fact.memory
                 results.append(
                     RecallResult(
-                        memory_type="fact",
+                        memory_type="factual",
                         content=fact.content,
                         score=scored_fact.score,
                         confidence=fact.confidence.value,
@@ -763,7 +763,7 @@ class EngramService:
             ```python
             # Get a fact and trace it back to source
             memories = await engram.recall("email", user_id="u1")
-            fact = next(m for m in memories if m.memory_type == "fact")
+            fact = next(m for m in memories if m.memory_type == "factual")
             sources = await engram.get_sources(fact.memory_id, user_id="u1")
             for ep in sources:
                 print(f"{ep.timestamp}: {ep.content}")
@@ -857,7 +857,7 @@ class EngramService:
         category: str = ""
 
         if memory_id.startswith("fact_"):
-            memory_type = "fact"
+            memory_type = "factual"
             fact = await self.storage.get_fact(memory_id, user_id)
             if fact is None:
                 raise KeyError(f"Fact not found: {memory_id}")
@@ -970,7 +970,7 @@ class EngramService:
             source_episodes: list[SourceEpisodeSummary] = []
 
             # Facts have a single source episode
-            if result.memory_type == "fact" and result.source_episode_id:
+            if result.memory_type == "factual" and result.source_episode_id:
                 ep = await self.storage.get_episode(result.source_episode_id, user_id)
                 if ep:
                     source_episodes.append(
@@ -1162,7 +1162,7 @@ class EngramService:
             fact = await self.storage.get_fact(memory_id, user_id)
             if fact:
                 return RecallResult(
-                    memory_type="fact",
+                    memory_type="factual",
                     content=fact.content,
                     score=0.0,
                     confidence=fact.confidence.value,

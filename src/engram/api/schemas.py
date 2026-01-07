@@ -9,9 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from engram.models import Staleness
 
-# Valid memory types for the memory_types parameter
-MemoryType = Literal["episode", "fact", "semantic", "procedural", "negation", "working"]
-ALL_MEMORY_TYPES: set[str] = {"episode", "fact", "semantic", "procedural", "negation", "working"}
+# Valid memory types for the memory_types parameter (cognitive science terms)
+MemoryType = Literal["episodic", "factual", "semantic", "procedural", "negation", "working"]
+ALL_MEMORY_TYPES: set[str] = {
+    "episodic",
+    "factual",
+    "semantic",
+    "procedural",
+    "negation",
+    "working",
+}
 
 
 class EncodeRequest(BaseModel):
@@ -134,7 +141,7 @@ class RecallRequest(BaseModel):
     )
     memory_types: list[MemoryType] | None = Field(
         default=None,
-        description="Memory types to search. None means all. Valid: episode, fact, semantic, procedural, negation, working",
+        description="Memory types to search. None means all. Valid: episodic, factual, semantic, procedural, negation, working",
     )
     include_sources: bool = Field(default=False, description="Include source episodes in results")
     follow_links: bool = Field(default=False, description="Enable multi-hop reasoning")
