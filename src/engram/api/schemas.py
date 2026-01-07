@@ -134,6 +134,7 @@ class RecallRequest(BaseModel):
     include_facts: bool = Field(default=True, description="Search facts")
     include_semantic: bool = Field(default=True, description="Search semantic memories")
     include_procedural: bool = Field(default=True, description="Search procedural memories")
+    include_negation: bool = Field(default=True, description="Search negation facts")
     include_working: bool = Field(default=True, description="Include working memory")
     include_sources: bool = Field(default=False, description="Include source episodes in results")
     follow_links: bool = Field(default=False, description="Enable multi-hop reasoning")

@@ -203,6 +203,7 @@ async def recall(
                 include_facts=request.include_facts,
                 include_semantic=request.include_semantic,
                 include_procedural=request.include_procedural,
+                include_negation=request.include_negation,
                 include_working=request.include_working,
                 include_sources=request.include_sources,
                 follow_links=request.follow_links,

@@ -322,6 +322,78 @@ class TestEngramServiceRecall:
         assert metadata["access_count"] == 5
         assert "derived_at" in metadata
 
+    @pytest.mark.asyncio
+    async def test_recall_searches_negation(self, mock_service):
+        """Should search negation facts and return results."""
+        mock_negation = NegationFact(
+            content="User does NOT use MongoDB",
+            negates_pattern="mongodb",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = [
+            ScoredResult(memory=mock_negation, score=0.88)
+        ]
+
+        results = await mock_service.recall(
+            query="mongodb preferences",
+            user_id="user_123",
+        )
+
+        neg_results = [r for r in results if r.memory_type == "negation"]
+        assert len(neg_results) == 1
+        assert neg_results[0].content == "User does NOT use MongoDB"
+        assert neg_results[0].score == 0.88
+        assert neg_results[0].metadata["negates_pattern"] == "mongodb"
+
+    @pytest.mark.asyncio
+    async def test_recall_excludes_negation_when_disabled(self, mock_service):
+        """Should skip negation when include_negation=False."""
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+        mock_service.storage.search_procedural.return_value = []
+
+        await mock_service.recall(
+            query="hello",
+            user_id="user_123",
+            include_negation=False,
+        )
+
+        mock_service.storage.search_negation.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_recall_includes_negation_metadata(self, mock_service):
+        """Should include negation-specific metadata in results."""
+        mock_negation = NegationFact(
+            content="User does NOT want spam",
+            negates_pattern="spam",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = [
+            ScoredResult(memory=mock_negation, score=0.9)
+        ]
+
+        results = await mock_service.recall(
+            query="spam preferences",
+            user_id="user_123",
+        )
+
+        neg_results = [r for r in results if r.memory_type == "negation"]
+        assert len(neg_results) == 1
+        metadata = neg_results[0].metadata
+        assert metadata["negates_pattern"] == "spam"
+        assert "derived_at" in metadata
+
 
 class TestRecallResult:
     """Tests for RecallResult model."""
