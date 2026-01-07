@@ -97,10 +97,7 @@ def _should_promote_to_procedural(memory: SemanticMemory) -> bool:
         return False
 
     # Must describe a behavioral pattern
-    if not _is_behavioral_pattern(memory.content):
-        return False
-
-    return True
+    return _is_behavioral_pattern(memory.content)
 
 
 def _extract_trigger_context(content: str) -> str:
@@ -242,10 +239,8 @@ async def _get_existing_procedural_contents(
     Returns:
         Set of lowercase content strings.
     """
-    # Note: This would need a list_procedural_memories method
-    # For now, return empty set (will add duplicates until method exists)
-    # TODO: Add list_procedural_memories to storage
-    return set()
+    procedurals = await storage.list_procedural_memories(user_id, org_id)
+    return {p.content.lower() for p in procedurals}
 
 
 def _is_duplicate_pattern(content: str, existing: set[str]) -> bool:

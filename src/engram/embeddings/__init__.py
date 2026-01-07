@@ -69,12 +69,12 @@ def get_embedder(settings: Settings | None = None) -> Embedder:
             model=settings.embedding_model,
             api_key=settings.openai_api_key,
         )
-    elif provider == "fastembed":
+    if provider == "fastembed":
         return FastEmbedEmbedder(
             model=settings.embedding_model,
         )
-    else:
-        raise ValueError(f"Unknown embedding provider: {provider}")
+    msg = f"Unknown embedding provider: {provider}"
+    raise ValueError(msg)
 
 
 __all__ = [

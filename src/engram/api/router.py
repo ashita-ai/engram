@@ -70,12 +70,11 @@ async def health_check() -> HealthResponse:
             version="0.1.0",
             storage_connected=True,
         )
-    else:
-        return HealthResponse(
-            status="unhealthy",
-            version="0.1.0",
-            storage_connected=False,
-        )
+    return HealthResponse(
+        status="unhealthy",
+        version="0.1.0",
+        storage_connected=False,
+    )
 
 
 @router.post(
