@@ -179,6 +179,11 @@ async def recall(
         HTTPException: If recall fails.
     """
     try:
+        # Convert Literal list to str list for service compatibility
+        memory_types: list[str] | None = (
+            list(request.memory_types) if request.memory_types is not None else None
+        )
+
         # Use recall_at for bi-temporal queries, recall for standard queries
         if request.as_of is not None:
             results = await service.recall_at(
@@ -188,8 +193,7 @@ async def recall(
                 org_id=request.org_id,
                 limit=request.limit,
                 min_confidence=request.min_confidence,
-                include_episodes=request.include_episodes,
-                include_facts=request.include_facts,
+                memory_types=memory_types,
             )
         else:
             results = await service.recall(
@@ -199,11 +203,7 @@ async def recall(
                 limit=request.limit,
                 min_confidence=request.min_confidence,
                 min_selectivity=request.min_selectivity,
-                include_episodes=request.include_episodes,
-                include_facts=request.include_facts,
-                include_semantic=request.include_semantic,
-                include_procedural=request.include_procedural,
-                include_working=request.include_working,
+                memory_types=memory_types,
                 include_sources=request.include_sources,
                 follow_links=request.follow_links,
                 max_hops=request.max_hops,

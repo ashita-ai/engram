@@ -205,27 +205,27 @@ class TestEngramServiceRecall:
         assert fact_results[0].score == 0.92  # Actual score from Qdrant
 
     @pytest.mark.asyncio
-    async def test_recall_excludes_episodes_when_disabled(self, mock_service):
-        """Should skip episodes when include_episodes=False."""
+    async def test_recall_excludes_episodes_when_not_in_types(self, mock_service):
+        """Should skip episodes when not in memory_types."""
         mock_service.storage.search_facts.return_value = []
 
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            include_episodes=False,
+            memory_types=["fact"],  # Episode not included
         )
 
         mock_service.storage.search_episodes.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_recall_excludes_facts_when_disabled(self, mock_service):
-        """Should skip facts when include_facts=False."""
+    async def test_recall_excludes_facts_when_not_in_types(self, mock_service):
+        """Should skip facts when not in memory_types."""
         mock_service.storage.search_episodes.return_value = []
 
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            include_facts=False,
+            memory_types=["episode"],  # Fact not included
         )
 
         mock_service.storage.search_facts.assert_not_called()
@@ -279,8 +279,8 @@ class TestEngramServiceRecall:
         assert proc_results[0].metadata["trigger_context"] == "general conversation"
 
     @pytest.mark.asyncio
-    async def test_recall_excludes_procedural_when_disabled(self, mock_service):
-        """Should skip procedural when include_procedural=False."""
+    async def test_recall_excludes_procedural_when_not_in_types(self, mock_service):
+        """Should skip procedural when not in memory_types."""
         mock_service.storage.search_episodes.return_value = []
         mock_service.storage.search_facts.return_value = []
         mock_service.storage.search_semantic.return_value = []
@@ -288,7 +288,7 @@ class TestEngramServiceRecall:
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            include_procedural=False,
+            memory_types=["episode", "fact", "semantic"],  # Procedural not included
         )
 
         mock_service.storage.search_procedural.assert_not_called()
@@ -321,6 +321,127 @@ class TestEngramServiceRecall:
         assert metadata["trigger_context"] == "technical discussion"
         assert metadata["access_count"] == 5
         assert "derived_at" in metadata
+
+    @pytest.mark.asyncio
+    async def test_recall_searches_negation(self, mock_service):
+        """Should search negation facts and return results."""
+        mock_negation = NegationFact(
+            content="User does NOT use MongoDB",
+            negates_pattern="mongodb",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = [
+            ScoredResult(memory=mock_negation, score=0.88)
+        ]
+
+        results = await mock_service.recall(
+            query="mongodb preferences",
+            user_id="user_123",
+        )
+
+        neg_results = [r for r in results if r.memory_type == "negation"]
+        assert len(neg_results) == 1
+        assert neg_results[0].content == "User does NOT use MongoDB"
+        assert neg_results[0].score == 0.88
+        assert neg_results[0].metadata["negates_pattern"] == "mongodb"
+
+    @pytest.mark.asyncio
+    async def test_recall_excludes_negation_when_not_in_types(self, mock_service):
+        """Should skip negation when not in memory_types."""
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+        mock_service.storage.search_procedural.return_value = []
+
+        await mock_service.recall(
+            query="hello",
+            user_id="user_123",
+            memory_types=["episode", "fact"],  # Negation not included
+        )
+
+        mock_service.storage.search_negation.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_recall_includes_negation_metadata(self, mock_service):
+        """Should include negation-specific metadata in results."""
+        mock_negation = NegationFact(
+            content="User does NOT want spam",
+            negates_pattern="spam",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = []
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = [
+            ScoredResult(memory=mock_negation, score=0.9)
+        ]
+
+        results = await mock_service.recall(
+            query="spam preferences",
+            user_id="user_123",
+        )
+
+        neg_results = [r for r in results if r.memory_type == "negation"]
+        assert len(neg_results) == 1
+        metadata = neg_results[0].metadata
+        assert metadata["negates_pattern"] == "spam"
+        assert "derived_at" in metadata
+
+    @pytest.mark.asyncio
+    async def test_recall_with_memory_types_array(self, mock_service):
+        """Should filter by memory_types array when provided."""
+        mock_episode = Episode(
+            content="Hello world",
+            role="user",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_fact = Fact(
+            content="user@example.com",
+            category="email",
+            source_episode_id="ep_123",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_service.storage.search_episodes.return_value = [
+            ScoredResult(memory=mock_episode, score=0.85)
+        ]
+        mock_service.storage.search_facts.return_value = [ScoredResult(memory=mock_fact, score=0.9)]
+
+        # Only request episodes - should not search facts
+        results = await mock_service.recall(
+            query="hello",
+            user_id="user_123",
+            memory_types=["episode"],
+        )
+
+        mock_service.storage.search_episodes.assert_called_once()
+        mock_service.storage.search_facts.assert_not_called()
+        assert len(results) == 1
+        assert results[0].memory_type == "episode"
+
+    @pytest.mark.asyncio
+    async def test_recall_memory_types_empty_excludes_all(self, mock_service):
+        """Empty memory_types array should exclude all memory types."""
+        results = await mock_service.recall(
+            query="hello",
+            user_id="user_123",
+            memory_types=[],  # Empty list
+        )
+
+        mock_service.storage.search_episodes.assert_not_called()
+        mock_service.storage.search_facts.assert_not_called()
+        mock_service.storage.search_semantic.assert_not_called()
+        mock_service.storage.search_procedural.assert_not_called()
+        mock_service.storage.search_negation.assert_not_called()
+        assert len(results) == 0
 
 
 class TestRecallResult:
@@ -497,8 +618,8 @@ class TestWorkingMemory:
         assert working_results[0].content == "Test content"
 
     @pytest.mark.asyncio
-    async def test_recall_excludes_working_when_disabled(self, mock_service):
-        """Recall should exclude working memory when include_working=False."""
+    async def test_recall_excludes_working_when_not_in_types(self, mock_service):
+        """Recall should exclude working memory when not in memory_types."""
         await mock_service.encode(content="Test content", role="user", user_id="user_123")
 
         mock_service.storage.search_episodes.return_value = []
@@ -507,7 +628,7 @@ class TestWorkingMemory:
         results = await mock_service.recall(
             query="test",
             user_id="user_123",
-            include_working=False,
+            memory_types=["episode", "fact"],  # Working not included
         )
 
         working_results = [r for r in results if r.memory_type == "working"]
