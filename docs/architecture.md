@@ -118,11 +118,22 @@ Memories form explicit links to related memories via `related_ids`, enabling mul
 
 Inspired by A-MEM research showing 2x improvement on multi-hop reasoning benchmarks.
 
-### 5. Selectivity Through Consolidation
+### 5. Consolidation Strength (Testing Effect)
 
-Memories start broad and become selective through repeated consolidation passes. Initial extraction captures many associations; subsequent passes prune weak or contradicted ones.
+Memories that are repeatedly involved in consolidation become stronger and more stable. This is based on the **Testing Effect** research ([Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)):
 
-The `selectivity_score` on SemanticMemory is directly inspired by dynamic engram research ([Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)): biological engrams transition from unselective → selective over ~12 hours via inhibitory plasticity. Engram models this with a score that increases as memories survive consolidation passes.
+> "Repeated remembering strengthens memories much more so than repeated learning."
+
+The `consolidation_strength` field on SemanticMemory tracks how well-established a memory is:
+- 0.0: Newly created, not yet reinforced
+- 1.0: Highly consolidated, repeatedly reinforced
+
+**Implementation**: During consolidation, `strengthen()` is called when existing memories:
+1. Get linked to new memories via semantic similarity
+2. Receive LLM-identified links to new memories
+3. Undergo evolution (tag/keyword/context updates)
+
+Each call increases `consolidation_strength` by 0.1 and increments `consolidation_passes`.
 
 ### 6. Negation Tracking
 
@@ -152,7 +163,7 @@ Working (volatile) → Episodic (fast decay) → Semantic (slow decay) → Proce
 
 **Promotion implementation** (`run_promotion` workflow):
 - Analyzes semantic memories for behavioral patterns (keywords: "prefers", "always", "tends to", etc.)
-- Promotes when: selectivity_score >= 0.5, consolidation_passes >= 2, confidence >= 0.7
+- Promotes when: consolidation_strength >= 0.5, consolidation_passes >= 2, confidence >= 0.7
 - Creates ProceduralMemory with trigger_context extracted from content
 - Links procedural back to source semantic memory
 - Deduplicates to prevent creating duplicate procedural memories
@@ -212,7 +223,7 @@ class SemanticMemory(BaseModel):
     event_at: datetime
     derived_at: datetime
     confidence: ConfidenceScore          # Composite score with auditability
-    selectivity_score: float             # 0 = broad, 1 = highly selective
+    consolidation_strength: float        # 0 = new, 1 = well-established
     consolidation_passes: int            # How many times refined
     embedding: list[float]
 ```
@@ -286,7 +297,7 @@ All persistent memory types stored in Qdrant with type-specific collections (Wor
 ```
 engram_episodic     → vectors + payload (content, timestamp, session_id, importance)
 engram_factual      → vectors + payload (content, category, source_episode_id, event_at, derived_at, confidence)
-engram_semantic     → vectors + payload (content, source_episode_ids, related_ids, confidence, selectivity_score)
+engram_semantic     → vectors + payload (content, source_episode_ids, related_ids, confidence, consolidation_strength)
 engram_procedural   → vectors + payload (content, trigger_context, access_count, confidence)
 engram_negation     → vectors + payload (content, negates_pattern, source_episode_ids, confidence)
 ```
@@ -316,7 +327,7 @@ memories = await memory.recall(
     query="What databases does the user work with?",
     memory_types=["factual", "semantic"],
     min_confidence=0.7,
-    min_selectivity=0.5,           # Only well-consolidated memories
+    min_selectivity=0.5,           # Only well-consolidated memories (uses consolidation_strength)
     include_sources=True,
     follow_links=True,             # Multi-hop reasoning
 )
@@ -348,7 +359,7 @@ from pydantic_ai import Agent
 class ConsolidationResult(BaseModel):
     facts: list[str]
     links: list[tuple[str, str]]       # (memory_id, related_id)
-    pruned: list[str]                  # IDs to reduce selectivity
+    pruned: list[str]                  # IDs to weaken (reduce consolidation_strength)
     confidence: float
     reasoning: str
 
@@ -378,7 +389,7 @@ async def consolidate():
             content=fact,
             source_episode_ids=[e.id for e in episodes],
             confidence=result.data.confidence,
-            selectivity_score=0.0,     # Starts broad
+            consolidation_strength=0.0,  # Starts weak, strengthens with consolidation
             consolidation_passes=1,
         )
 
@@ -386,14 +397,13 @@ async def consolidate():
     for memory_id, related_id in result.data.links:
         await add_link(memory_id, related_id)
 
-    # Increase selectivity for surviving memories
+    # Update consolidation strength based on survival
     for memory_id in result.data.pruned:
-        await update_selectivity(memory_id, delta=-0.1)
+        memory.weaken(delta=0.1)  # Weakened if pruned
 
     for memory in existing:
         if memory.id not in result.data.pruned:
-            await update_selectivity(memory.id, delta=+0.1)
-            await increment_consolidation_passes(memory.id)
+            memory.strengthen(delta=0.1)  # Strengthened via Testing Effect
 ```
 
 ### Decay
@@ -473,5 +483,6 @@ This architecture is informed by recent research (2024-2025):
 |---------|----------|-------------|
 | Dynamic linking | [A-MEM](https://arxiv.org/abs/2502.12110) | 2x improvement on multi-hop reasoning |
 | Buffer promotion | [Cognitive Workspace](https://arxiv.org/abs/2508.13171) | 58.6% memory reuse vs 0% for naive RAG |
-| Selectivity scoring | [Tomé et al.](https://www.nature.com/articles/s41593-023-01551-w) | Engrams transition unselective → selective via inhibitory plasticity |
+| Consolidation strength | [Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) | Repeated retrieval strengthens memories (Testing Effect) |
 | Ground truth | [HaluMem](https://arxiv.org/html/2511.03506) | <56% accuracy without source preservation |
+| RIF suppression | [Anderson et al. (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/) | Retrieval actively suppresses similar non-retrieved items (implemented) |

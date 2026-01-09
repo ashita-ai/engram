@@ -273,9 +273,67 @@ The six memory types are engineering constructs:
 - **Factual** — Engineering subdivision (verbatim vs inferred) not from cognitive science
 - **Negation** — Engineering construct for storing semantic negations (what is NOT true)
 
-The `selectivity_score` on SemanticMemory is the genuine connection to Tomé et al. research on dynamic engrams and inhibitory plasticity.
-
 Be explicit about which are science-inspired and which are engineering additions.
+
+---
+
+## Scientific Foundations
+
+### Retrieval-Induced Forgetting (RIF)
+
+**What it is**: Retrieving a subset of items causes forgetting of related non-retrieved items. This is an active inhibitory process, not just competition from strengthened items.
+
+**Primary Research**:
+> Anderson, M.C., Bjork, R.A., & Bjork, E.L. (1994). "Remembering can cause forgetting: Retrieval dynamics in long-term memory." *Journal of Experimental Psychology: Learning, Memory, and Cognition*, 20(5), 1063-1087. https://pubmed.ncbi.nlm.nih.gov/7931095/
+
+**Key findings from the paper**:
+1. Retrieving some items from a category suppresses related non-retrieved items
+2. Suppression is strongest for high-similarity items (not dissimilar ones)
+3. The effect is inhibitory (active suppression), not just competition from strengthening
+4. Suppression endures 20+ minutes in human experiments
+
+**How we implement it** (opt-in via `rif_enabled=True`):
+- After recall, we identify memories that scored above `rif_threshold` but weren't returned
+- These "competitors" get confidence decay (`rif_decay`, default 0.1)
+- Episodic memories are exempt (immutable ground truth)
+- Confidence floors at 0.1 to prevent total forgetting
+
+```python
+# RIF in action
+results = await recall(
+    query="user preferences",
+    user_id="u1",
+    limit=5,
+    rif_enabled=True,     # Enable suppression
+    rif_threshold=0.5,    # Min similarity to be a "competitor"
+    rif_decay=0.1,        # Confidence decay amount
+)
+# Behind the scenes: similar memories that scored 0.5+ but weren't
+# in top 5 get confidence reduced by 0.1
+```
+
+**What we DON'T claim**: Our confidence decay is an engineering approximation of inhibitory suppression. The original research studied human memory with specific experimental paradigms (category-cued recall). We adapt the core principle for AI memory systems.
+
+### Consolidation Strength (Testing Effect)
+
+**What it is**: Memories that are repeatedly involved in retrieval and consolidation become stronger and more stable.
+
+**Primary Research**:
+> Roediger, H.L. & Karpicke, J.D. (2006). "The Power of Testing Memory: Basic Research and Implications for Educational Practice." *Perspectives on Psychological Science*, 1(3), 181-210. https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/
+
+**Key finding**: "Repeated remembering strengthens memories much more so than repeated learning."
+
+**How we implement it**: During consolidation, `strengthen()` is called when existing memories:
+1. Get linked to new memories via semantic similarity
+2. Receive LLM-identified links
+3. Undergo evolution (tag/keyword/context updates)
+
+Each call increases `consolidation_strength` by 0.1 and increments `consolidation_passes`. This tracks how well-established a memory is through repeated consolidation involvement.
+
+### What we DON'T implement
+
+- **Exact biological mechanisms**: We use cognitive science as inspiration, not blueprint.
+- **True context selectivity**: Tomé et al. (2024) describes how engrams become more context-specific via inhibitory plasticity. We don't model this — we track consolidation involvement instead.
 
 ---
 

@@ -4,12 +4,14 @@ Technical comparison of AI memory systems. Based on published papers and documen
 
 ## Summary
 
-| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Selectivity |
-|--------|--------------|------------|------------|-------------|-----------------|-------------|
-| **Engram** | Yes | Yes | Yes | Yes | Yes | Yes |
-| **Mem0** | No | No | No | No | No | No |
-| **Zep/Graphiti** | Yes | No | No | Yes | Partial | No |
-| **Letta/MemGPT** | Partial | No | No | No | No | No |
+| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Strength Tracking | RIF |
+|--------|--------------|------------|------------|-------------|-----------------|-------------------|-----|
+| **Engram** | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
+| **Mem0** | No | No | No | No | No | No | No |
+| **Zep/Graphiti** | Yes | No | No | Yes | Partial | No | No |
+| **Letta/MemGPT** | Partial | No | No | No | No | No | No |
+
+**Note on "Strength Tracking"**: All systems have some consolidation process (extraction, summarization). This column tracks whether memories get *stronger* through repeated consolidation involvement (Testing Effect). Mem0 has update phases, Letta has periodic summarization, but neither tracks consolidation_strength or passes.
 
 ## Mem0
 
@@ -156,22 +158,35 @@ Novel approaches from recent literature:
 
 **Results**: 58.6% memory reuse vs 0% for naive RAG.
 
-**Engram**: Implements buffer promotion hierarchy (Working → Episodic → Semantic → Procedural). The `run_promotion` workflow promotes well-consolidated semantic memories with behavioral patterns to procedural memory based on selectivity score, consolidation passes, and confidence.
+**Engram**: Implements buffer promotion hierarchy (Working → Episodic → Semantic → Procedural). The `run_promotion` workflow promotes well-consolidated semantic memories with behavioral patterns to procedural memory based on consolidation strength, consolidation passes, and confidence.
 
-### Dynamic Engrams (Selectivity Through Consolidation)
+### Consolidation Strength (Testing Effect)
 
-**What**: Memory engrams are not static—neurons continuously "drop out of" and "drop into" engrams during consolidation. Engrams transition from unselective → selective over ~12 hours.
+**What**: Memories that are repeatedly involved in retrieval/consolidation become stronger and more stable.
 
-**Source**: [Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)
+**Source**: [Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)
 
 **Key findings**:
-- Only 10-40% overlap between neurons activated during learning vs recall
-- Inhibitory plasticity (CCK+ interneurons) is critical for selectivity
-- Training stimulus reactivation during consolidation required for selectivity to emerge
+- "Repeated remembering strengthens memories much more so than repeated learning"
+- Retrieval acts as a rapid consolidation event
+- Memories involved in retrieval become stronger and more stable
 
-**Engram**: The `selectivity_score` (0.0-1.0) on SemanticMemory is directly inspired by this research—it increases as memories survive consolidation passes, modeling how engrams become more selective over time.
+**Engram**: The `consolidation_strength` (0.0-1.0) field on SemanticMemory tracks how well-established a memory is. During consolidation, `strengthen()` is called when existing memories get linked to new memories (via semantic similarity or LLM identification) or receive evolution updates. Each call increases consolidation_strength by 0.1 and increments `consolidation_passes`.
 
-Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct, not an implementation of neural inhibition.
+Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct.
+
+### Retrieval-Induced Forgetting (RIF)
+
+**What**: Retrieving a subset of items causes active suppression of related non-retrieved items. This is an inhibitory process, not just competition from strengthened items.
+
+**Source**: [Anderson, Bjork & Bjork (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/) — "Remembering can cause forgetting: Retrieval dynamics in long-term memory." *Journal of Experimental Psychology: Learning, Memory, and Cognition*, 20(5), 1063-1087.
+
+**Key findings**:
+- Suppression is strongest for high-similarity items (not dissimilar ones)
+- The effect is inhibitory (active suppression), not just competition from strengthening
+- Suppression endures 20+ minutes in human experiments
+
+**Engram**: Implements RIF as opt-in via `rif_enabled=True` on recall. After retrieval, memories that scored above `rif_threshold` but weren't returned get confidence decay (`rif_decay`, default 0.1). Episodic memories are exempt (immutable ground truth). Confidence floors at 0.1 to prevent total forgetting.
 
 ---
 
@@ -194,4 +209,5 @@ Note: `NegationFact` (which stores semantic negations like "User does NOT use Mo
 - [MemGPT Paper](https://arxiv.org/abs/2310.08560)
 - [A-MEM Paper](https://arxiv.org/abs/2502.12110)
 - [Cognitive Workspace](https://arxiv.org/abs/2508.13171)
-- [Dynamic and Selective Engrams](https://www.nature.com/articles/s41593-023-01551-w) — Tomé et al., Nature Neuroscience 2024
+- [Testing Effect](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) — Roediger & Karpicke, 2006
+- [Retrieval-Induced Forgetting](https://pubmed.ncbi.nlm.nih.gov/7931095/) — Anderson, Bjork & Bjork, 1994

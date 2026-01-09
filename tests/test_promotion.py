@@ -92,7 +92,7 @@ class TestShouldPromoteToProcedural:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory.selectivity_score = 0.6
+        memory.consolidation_strength = 0.6
         memory.consolidation_passes = 3
         memory.confidence.value = 0.8
 
@@ -107,7 +107,7 @@ class TestShouldPromoteToProcedural:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory.selectivity_score = 0.3  # Too low
+        memory.consolidation_strength = 0.3  # Too low
         memory.consolidation_passes = 3
         memory.confidence.value = 0.8
 
@@ -122,7 +122,7 @@ class TestShouldPromoteToProcedural:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory.selectivity_score = 0.6
+        memory.consolidation_strength = 0.6
         memory.consolidation_passes = 1  # Too few
         memory.confidence.value = 0.8
 
@@ -137,7 +137,7 @@ class TestShouldPromoteToProcedural:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory.selectivity_score = 0.6
+        memory.consolidation_strength = 0.6
         memory.consolidation_passes = 3
         memory.confidence.value = 0.5  # Too low
 
@@ -152,7 +152,7 @@ class TestShouldPromoteToProcedural:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory.selectivity_score = 0.6
+        memory.consolidation_strength = 0.6
         memory.consolidation_passes = 3
         memory.confidence.value = 0.8
 
@@ -236,7 +236,7 @@ class TestRunPromotion:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory.selectivity_score = 0.6
+        memory.consolidation_strength = 0.6
         memory.consolidation_passes = 3
         memory.confidence.value = 0.85
 
@@ -271,7 +271,7 @@ class TestRunPromotion:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory1.selectivity_score = 0.6
+        memory1.consolidation_strength = 0.6
         memory1.consolidation_passes = 3
         memory1.confidence.value = 0.85
 
@@ -281,7 +281,7 @@ class TestRunPromotion:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory2.selectivity_score = 0.2  # Too low
+        memory2.consolidation_strength = 0.2  # Too low
         memory2.consolidation_passes = 3
         memory2.confidence.value = 0.85
 
@@ -315,7 +315,7 @@ class TestRunPromotion:
                 user_id="test_user",
                 embedding=[0.1] * 384,
             )
-            mem.selectivity_score = 0.6
+            mem.consolidation_strength = 0.6
             mem.consolidation_passes = 3
             mem.confidence.value = 0.85
             memories.append(mem)

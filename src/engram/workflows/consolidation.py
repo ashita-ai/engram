@@ -125,6 +125,7 @@ class ConsolidationResult(BaseModel):
         semantic_memories_created: Number of semantic memories extracted.
         links_created: Number of memory links built.
         evolutions_applied: Number of memory evolution updates applied.
+        memories_strengthened: Number of memories that were strengthened.
         contradictions_found: List of detected contradictions.
     """
 
@@ -134,6 +135,7 @@ class ConsolidationResult(BaseModel):
     semantic_memories_created: int = Field(ge=0)
     links_created: int = Field(ge=0)
     evolutions_applied: int = Field(ge=0, default=0)
+    memories_strengthened: int = Field(ge=0, default=0)
     contradictions_found: list[str] = Field(default_factory=list)
 
 
@@ -293,6 +295,7 @@ async def run_consolidation(
             semantic_memories_created=0,
             links_created=0,
             evolutions_applied=0,
+            memories_strengthened=0,
         )
 
     logger.info(f"Processing {len(episodes)} unconsolidated episodes")
@@ -360,6 +363,7 @@ Focus on quality over quantity."""
     memories_created = 0
     links_created = 0
     evolutions_applied = 0
+    memories_strengthened = 0  # Track memory strengthening (Testing Effect research)
 
     # Map content to newly created memory for link building
     content_to_memory: dict[str, SemanticMemory] = {}
@@ -418,6 +422,11 @@ Focus on quality over quantity."""
             new_memory.add_link(similar.id)
             similar.add_link(new_memory.id)
 
+            # Strengthen existing memory through consolidation involvement
+            # (Testing Effect: retrieval/reactivation strengthens memories)
+            similar.strengthen(delta=0.1)
+            memories_strengthened += 1
+
             # Persist the updated memories
             await storage.update_semantic_memory(new_memory)
             await storage.update_semantic_memory(similar)
@@ -435,6 +444,16 @@ Focus on quality over quantity."""
             if target_memory.id not in source_memory.related_ids:
                 source_memory.add_link(target_memory.id)
                 target_memory.add_link(source_memory.id)
+
+                # Strengthen existing memories through consolidation involvement
+                # (Testing Effect: retrieval/reactivation strengthens memories)
+                if source_memory.content in existing_by_content:
+                    source_memory.strengthen(delta=0.1)
+                    memories_strengthened += 1
+                if target_memory.content in existing_by_content:
+                    target_memory.strengthen(delta=0.1)
+                    memories_strengthened += 1
+
                 await storage.update_semantic_memory(source_memory)
                 await storage.update_semantic_memory(target_memory)
                 links_created += 1
@@ -480,6 +499,11 @@ Focus on quality over quantity."""
                 reason=evolution.reason,
             )
 
+        # Strengthen evolved memory through consolidation involvement
+        # (Testing Effect: retrieval/reactivation strengthens memories)
+        target_memory.strengthen(delta=0.1)
+        memories_strengthened += 1
+
         # Persist the evolved memory
         await storage.update_semantic_memory(target_memory)
         evolutions_applied += 1
@@ -488,11 +512,14 @@ Focus on quality over quantity."""
     # 8. Mark episodes as consolidated
     await storage.mark_episodes_consolidated(episode_ids, user_id)
 
+    logger.info(f"Strengthened {memories_strengthened} memories through consolidation")
+
     return ConsolidationResult(
         episodes_processed=len(episodes),
         semantic_memories_created=memories_created,
         links_created=links_created,
         evolutions_applied=evolutions_applied,
+        memories_strengthened=memories_strengthened,
         contradictions_found=extraction.contradictions,
     )
 

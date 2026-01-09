@@ -718,3 +718,163 @@ class TestConsolidationLinking:
         assert result.semantic_memories_created == 1
         assert result.links_created == 0
         mock_storage.update_semantic_memory.assert_not_called()
+
+
+class TestConsolidationStrengthening:
+    """Tests for memory strengthening during consolidation (Testing Effect)."""
+
+    def test_consolidation_result_has_strengthened_field(self) -> None:
+        """Test ConsolidationResult includes memories_strengthened field."""
+        result = ConsolidationResult(
+            episodes_processed=5,
+            semantic_memories_created=3,
+            links_created=2,
+            evolutions_applied=1,
+            memories_strengthened=4,
+        )
+        assert result.memories_strengthened == 4
+
+    def test_consolidation_result_strengthened_default_zero(self) -> None:
+        """Test memories_strengthened defaults to 0."""
+        result = ConsolidationResult(
+            episodes_processed=1,
+            semantic_memories_created=1,
+            links_created=0,
+        )
+        assert result.memories_strengthened == 0
+
+    @pytest.mark.asyncio
+    async def test_memory_strengthened_on_link(self) -> None:
+        """Test existing memory is strengthened when linked to new memory."""
+        from engram.models import Episode, SemanticMemory
+
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_sel_001"
+        mock_episode.role = "user"
+        mock_episode.content = "I prefer Python programming"
+
+        # Existing memory with consolidation_strength 0.0
+        existing_memory = SemanticMemory(
+            content="User likes programming",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        assert existing_memory.consolidation_strength == 0.0
+        assert existing_memory.consolidation_passes == 1
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.store_semantic = AsyncMock(return_value="sem_new")
+        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
+        mock_storage.search_semantic = AsyncMock(
+            return_value=[MagicMock(memory=existing_memory, score=0.85)]
+        )
+        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_llm_result = LLMExtractionResult(
+            semantic_facts=[ExtractedFact(content="User prefers Python")],
+            links=[],
+            contradictions=[],
+        )
+
+        mock_agent_result = MagicMock()
+        mock_agent_result.output = mock_llm_result
+
+        with patch(
+            "engram.workflows.get_consolidation_agent",
+            side_effect=RuntimeError("Workflows not initialized"),
+        ):
+            with patch("pydantic_ai.Agent") as mock_agent_class:
+                mock_agent_instance = AsyncMock()
+                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
+                mock_agent_class.return_value = mock_agent_instance
+
+                result = await run_consolidation(
+                    storage=mock_storage,
+                    embedder=mock_embedder,
+                    user_id="test_user",
+                )
+
+        # Should have created memory and strengthened existing
+        assert result.semantic_memories_created == 1
+        assert result.links_created == 1
+        assert result.memories_strengthened >= 1
+
+        # Existing memory should have increased strength
+        assert existing_memory.consolidation_strength == 0.1  # Increased by 0.1
+        assert existing_memory.consolidation_passes == 2  # Also incremented
+
+    @pytest.mark.asyncio
+    async def test_memory_strengthened_on_evolution(self) -> None:
+        """Test existing memory is strengthened when evolved."""
+        from engram.models import Episode, SemanticMemory
+        from engram.workflows.consolidation import MemoryEvolution
+
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_sel_002"
+        mock_episode.role = "user"
+        mock_episode.content = "I use Python for data science"
+
+        # Existing memory to evolve
+        existing_memory = SemanticMemory(
+            content="User likes Python",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        initial_strength = existing_memory.consolidation_strength
+        initial_passes = existing_memory.consolidation_passes
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.store_semantic = AsyncMock(return_value="sem_new")
+        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
+        mock_storage.search_semantic = AsyncMock(return_value=[])
+        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        # LLM returns evolution for existing memory
+        mock_llm_result = LLMExtractionResult(
+            semantic_facts=[ExtractedFact(content="User does data science")],
+            links=[],
+            evolutions=[
+                MemoryEvolution(
+                    target_content="User likes Python",
+                    add_tags=["data-science"],
+                    reason="New context about Python usage",
+                )
+            ],
+            contradictions=[],
+        )
+
+        mock_agent_result = MagicMock()
+        mock_agent_result.output = mock_llm_result
+
+        with patch(
+            "engram.workflows.get_consolidation_agent",
+            side_effect=RuntimeError("Workflows not initialized"),
+        ):
+            with patch("pydantic_ai.Agent") as mock_agent_class:
+                mock_agent_instance = AsyncMock()
+                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
+                mock_agent_class.return_value = mock_agent_instance
+
+                result = await run_consolidation(
+                    storage=mock_storage,
+                    embedder=mock_embedder,
+                    user_id="test_user",
+                )
+
+        # Should have applied evolution and strengthened memory
+        assert result.evolutions_applied == 1
+        assert result.memories_strengthened >= 1
+
+        # Existing memory should have increased strength from evolution
+        assert existing_memory.consolidation_strength > initial_strength
+        assert existing_memory.consolidation_passes > initial_passes

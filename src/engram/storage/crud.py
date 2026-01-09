@@ -463,3 +463,144 @@ class CRUDMixin:
         )
 
         return True
+
+    async def update_fact(
+        self,
+        fact: Fact,
+    ) -> bool:
+        """Update a fact.
+
+        Args:
+            fact: Fact with updated fields.
+
+        Returns:
+            True if updated, False if not found.
+        """
+        collection = self._collection_name("facts")
+
+        # Find the point
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchValue(value=fact.id),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=fact.user_id),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+        )
+
+        if not results:
+            return False
+
+        point = results[0]
+        payload = self._memory_to_payload(fact)
+
+        await self.client.set_payload(
+            collection_name=collection,
+            payload=payload,
+            points=[point.id],
+        )
+
+        return True
+
+    async def update_procedural_memory(
+        self,
+        memory: ProceduralMemory,
+    ) -> bool:
+        """Update a procedural memory.
+
+        Args:
+            memory: ProceduralMemory with updated fields.
+
+        Returns:
+            True if updated, False if not found.
+        """
+        collection = self._collection_name("procedural")
+
+        # Find the point
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchValue(value=memory.id),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=memory.user_id),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+        )
+
+        if not results:
+            return False
+
+        point = results[0]
+        payload = self._memory_to_payload(memory)
+
+        await self.client.set_payload(
+            collection_name=collection,
+            payload=payload,
+            points=[point.id],
+        )
+
+        return True
+
+    async def update_negation_fact(
+        self,
+        negation: NegationFact,
+    ) -> bool:
+        """Update a negation fact.
+
+        Args:
+            negation: NegationFact with updated fields.
+
+        Returns:
+            True if updated, False if not found.
+        """
+        collection = self._collection_name("negation")
+
+        # Find the point
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchValue(value=negation.id),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=negation.user_id),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+        )
+
+        if not results:
+            return False
+
+        point = results[0]
+        payload = self._memory_to_payload(negation)
+
+        await self.client.set_payload(
+            collection_name=collection,
+            payload=payload,
+            points=[point.id],
+        )
+
+        return True

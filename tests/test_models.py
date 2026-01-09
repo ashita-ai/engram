@@ -446,10 +446,10 @@ class TestSemanticMemory:
         assert mem.confidence.value == 0.6
         assert mem.confidence.extraction_method == ExtractionMethod.INFERRED
 
-    def test_default_selectivity_score(self):
-        """Default selectivity should be 0.0 (newly created)."""
+    def test_default_consolidation_strength(self):
+        """Default consolidation_strength should be 0.0 (newly created)."""
         mem = SemanticMemory(content="Test", user_id="user_123")
-        assert mem.selectivity_score == 0.0
+        assert mem.consolidation_strength == 0.0
 
     def test_add_link(self):
         """add_link should add unique related IDs."""
@@ -459,32 +459,46 @@ class TestSemanticMemory:
         mem.add_link("mem_1")  # Duplicate
         assert mem.related_ids == ["mem_1", "mem_2"]
 
-    def test_increase_selectivity(self):
-        """increase_selectivity should increment score and passes."""
+    def test_strengthen(self):
+        """strengthen should increment score and passes."""
         mem = SemanticMemory(content="Test", user_id="user_123")
-        assert mem.selectivity_score == 0.0
+        assert mem.consolidation_strength == 0.0
         assert mem.consolidation_passes == 1
-        mem.increase_selectivity()
-        assert mem.selectivity_score == 0.1
+        mem.strengthen()
+        assert mem.consolidation_strength == 0.1
         assert mem.consolidation_passes == 2
 
-    def test_increase_selectivity_caps_at_one(self):
-        """Selectivity should cap at 1.0."""
-        mem = SemanticMemory(content="Test", user_id="user_123", selectivity_score=0.95)
-        mem.increase_selectivity(delta=0.1)
-        assert mem.selectivity_score == 1.0
+    def test_strengthen_caps_at_one(self):
+        """Consolidation strength should cap at 1.0."""
+        mem = SemanticMemory(content="Test", user_id="user_123", consolidation_strength=0.95)
+        mem.strengthen(delta=0.1)
+        assert mem.consolidation_strength == 1.0
 
-    def test_decrease_selectivity(self):
-        """decrease_selectivity should decrement score."""
-        mem = SemanticMemory(content="Test", user_id="user_123", selectivity_score=0.5)
-        mem.decrease_selectivity()
-        assert mem.selectivity_score == 0.4
+    def test_weaken(self):
+        """weaken should decrement score."""
+        mem = SemanticMemory(content="Test", user_id="user_123", consolidation_strength=0.5)
+        mem.weaken()
+        assert mem.consolidation_strength == 0.4
 
-    def test_decrease_selectivity_caps_at_zero(self):
-        """Selectivity should cap at 0.0."""
-        mem = SemanticMemory(content="Test", user_id="user_123", selectivity_score=0.05)
-        mem.decrease_selectivity(delta=0.1)
-        assert mem.selectivity_score == 0.0
+    def test_weaken_caps_at_zero(self):
+        """Consolidation strength should cap at 0.0."""
+        mem = SemanticMemory(content="Test", user_id="user_123", consolidation_strength=0.05)
+        mem.weaken(delta=0.1)
+        assert mem.consolidation_strength == 0.0
+
+    def test_backwards_compat_selectivity_property(self):
+        """Deprecated selectivity_score property should work for backwards compat."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        mem.consolidation_strength = 0.5
+        assert mem.selectivity_score == 0.5  # Read via deprecated property
+        mem.selectivity_score = 0.7  # Write via deprecated property
+        assert mem.consolidation_strength == 0.7
+
+    def test_backwards_compat_increase_selectivity(self):
+        """Deprecated increase_selectivity should work for backwards compat."""
+        mem = SemanticMemory(content="Test", user_id="user_123")
+        mem.increase_selectivity()
+        assert mem.consolidation_strength == 0.1
 
     def test_str_representation(self):
         """String representation should show content preview."""
