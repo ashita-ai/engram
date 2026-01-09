@@ -124,7 +124,12 @@ Memories start broad and become selective through repeated consolidation passes.
 
 The `selectivity_score` on SemanticMemory is directly inspired by dynamic engram research ([Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)): biological engrams transition from unselective → selective over ~12 hours via inhibitory plasticity.
 
-**Status**: The field exists on SemanticMemory with `increase_selectivity()` and `decrease_selectivity()` methods, but consolidation does not yet call them. Currently, `selectivity_score` remains at its default (0.0) after creation. Future work will update this score during consolidation passes.
+**Status**: Implemented. During consolidation, `increase_selectivity()` is called when existing memories:
+1. Get linked to new memories via semantic similarity
+2. Receive LLM-identified links to new memories
+3. Undergo evolution (tag/keyword/context updates)
+
+Each call increases `selectivity_score` by 0.1 and increments `consolidation_passes`. This models how biological engrams become more selective through repeated consolidation (Tomé et al.).
 
 ### 6. Negation Tracking
 

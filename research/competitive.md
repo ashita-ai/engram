@@ -6,7 +6,7 @@ Technical comparison of AI memory systems. Based on published papers and documen
 
 | System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Selectivity | RIF |
 |--------|--------------|------------|------------|-------------|-----------------|-------------|-----|
-| **Engram** | Yes | Yes | Yes | Yes | Yes | Planned | Yes |
+| **Engram** | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
 | **Mem0** | No | No | No | No | No | No | No |
 | **Zep/Graphiti** | Yes | No | No | Yes | Partial | No | No |
 | **Letta/MemGPT** | Partial | No | No | No | No | No | No |
@@ -169,7 +169,7 @@ Novel approaches from recent literature:
 - Inhibitory plasticity (CCK+ interneurons) is critical for selectivity
 - Training stimulus reactivation during consolidation required for selectivity to emerge
 
-**Engram**: The `selectivity_score` (0.0-1.0) field on SemanticMemory is directly inspired by this research. The field exists with `increase_selectivity()` and `decrease_selectivity()` methods, but consolidation does not yet call them. Future work will update this score during consolidation passes to model how engrams become more selective over time.
+**Engram**: The `selectivity_score` (0.0-1.0) field on SemanticMemory is directly inspired by this research. During consolidation, `increase_selectivity()` is called when existing memories get linked to new memories (via semantic similarity or LLM identification) or receive evolution updates. Each call increases selectivity by 0.1 and increments `consolidation_passes`, modeling how engrams become more selective through consolidation.
 
 Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct, not an implementation of neural inhibition.
 

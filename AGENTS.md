@@ -314,13 +314,18 @@ results = await recall(
 
 **What we DON'T claim**: Our confidence decay is an engineering approximation of inhibitory suppression. The original research studied human memory with specific experimental paradigms (category-cued recall). We adapt the core principle for AI memory systems.
 
-### Context Selectivity (Future)
+### Context Selectivity (Implemented)
 
 **What it is**: Memories should respond specifically to their original context, not overgeneralize.
 
 **Research**: Tomé et al. "Dynamic and selective engrams emerge with memory consolidation" Nature Neuroscience (2024). Describes how engrams become more context-specific over time.
 
-**Status**: `selectivity_score` field exists on SemanticMemory but is not yet implemented. This is distinct from RIF - it tracks memory precision, not inter-memory competition.
+**Status**: Implemented. During consolidation, `increase_selectivity()` is called when existing memories:
+1. Get linked to new memories via semantic similarity
+2. Receive LLM-identified links
+3. Undergo evolution (tag/keyword/context updates)
+
+Each call increases `selectivity_score` by 0.1 and increments `consolidation_passes`. This is distinct from RIF - it tracks memory precision, not inter-memory competition.
 
 ### What we DON'T implement
 

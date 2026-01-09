@@ -125,6 +125,7 @@ class ConsolidationResult(BaseModel):
         semantic_memories_created: Number of semantic memories extracted.
         links_created: Number of memory links built.
         evolutions_applied: Number of memory evolution updates applied.
+        selectivity_updated: Number of memories with updated selectivity scores.
         contradictions_found: List of detected contradictions.
     """
 
@@ -134,6 +135,7 @@ class ConsolidationResult(BaseModel):
     semantic_memories_created: int = Field(ge=0)
     links_created: int = Field(ge=0)
     evolutions_applied: int = Field(ge=0, default=0)
+    selectivity_updated: int = Field(ge=0, default=0)
     contradictions_found: list[str] = Field(default_factory=list)
 
 
@@ -293,6 +295,7 @@ async def run_consolidation(
             semantic_memories_created=0,
             links_created=0,
             evolutions_applied=0,
+            selectivity_updated=0,
         )
 
     logger.info(f"Processing {len(episodes)} unconsolidated episodes")
@@ -360,6 +363,7 @@ Focus on quality over quantity."""
     memories_created = 0
     links_created = 0
     evolutions_applied = 0
+    selectivity_updated = 0  # Track selectivity updates (Tomé et al.)
 
     # Map content to newly created memory for link building
     content_to_memory: dict[str, SemanticMemory] = {}
@@ -418,6 +422,11 @@ Focus on quality over quantity."""
             new_memory.add_link(similar.id)
             similar.add_link(new_memory.id)
 
+            # Increase selectivity for existing memory that survived consolidation
+            # (Tomé et al.: engrams become more selective through consolidation)
+            similar.increase_selectivity(delta=0.1)
+            selectivity_updated += 1
+
             # Persist the updated memories
             await storage.update_semantic_memory(new_memory)
             await storage.update_semantic_memory(similar)
@@ -435,6 +444,16 @@ Focus on quality over quantity."""
             if target_memory.id not in source_memory.related_ids:
                 source_memory.add_link(target_memory.id)
                 target_memory.add_link(source_memory.id)
+
+                # Increase selectivity for existing memories that got LLM-identified links
+                # (Tomé et al.: engrams become more selective through consolidation)
+                if source_memory.content in existing_by_content:
+                    source_memory.increase_selectivity(delta=0.1)
+                    selectivity_updated += 1
+                if target_memory.content in existing_by_content:
+                    target_memory.increase_selectivity(delta=0.1)
+                    selectivity_updated += 1
+
                 await storage.update_semantic_memory(source_memory)
                 await storage.update_semantic_memory(target_memory)
                 links_created += 1
@@ -480,6 +499,11 @@ Focus on quality over quantity."""
                 reason=evolution.reason,
             )
 
+        # Increase selectivity for evolved memory (survived and was enriched)
+        # (Tomé et al.: engrams become more selective through consolidation)
+        target_memory.increase_selectivity(delta=0.1)
+        selectivity_updated += 1
+
         # Persist the evolved memory
         await storage.update_semantic_memory(target_memory)
         evolutions_applied += 1
@@ -488,11 +512,14 @@ Focus on quality over quantity."""
     # 8. Mark episodes as consolidated
     await storage.mark_episodes_consolidated(episode_ids, user_id)
 
+    logger.info(f"Selectivity updated for {selectivity_updated} memories (Tomé et al.)")
+
     return ConsolidationResult(
         episodes_processed=len(episodes),
         semantic_memories_created=memories_created,
         links_created=links_created,
         evolutions_applied=evolutions_applied,
+        selectivity_updated=selectivity_updated,
         contradictions_found=extraction.contradictions,
     )
 
