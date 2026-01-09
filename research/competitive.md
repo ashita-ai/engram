@@ -57,7 +57,7 @@ Episode Subgraph (raw) ──┬──→ Semantic Entity Subgraph (extracted)
 - **Complex schema** — Three interconnected subgraphs
 - **LLM extraction on write** — Same error propagation risk as Mem0
 
-**Source**: [Graphiti Paper](https://arxiv.org/abs/2501.00227), [Documentation](https://docs.getzep.com)
+**Source**: [Zep Paper](https://arxiv.org/abs/2501.13956), [Documentation](https://docs.getzep.com)
 
 ---
 
@@ -205,7 +205,7 @@ Note: `NegationFact` (which stores semantic negations like "User does NOT use Mo
 
 - [HaluMem: Hallucinations in LLM Memory](https://arxiv.org/html/2511.03506) — Benchmark showing <56% accuracy
 - [Mem0 Paper](https://arxiv.org/abs/2504.19413)
-- [Graphiti Paper](https://arxiv.org/abs/2501.00227)
+- [Zep Paper](https://arxiv.org/abs/2501.13956)
 - [MemGPT Paper](https://arxiv.org/abs/2310.08560)
 - [A-MEM Paper](https://arxiv.org/abs/2502.12110)
 - [Cognitive Workspace](https://arxiv.org/abs/2508.13171)

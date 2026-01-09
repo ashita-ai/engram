@@ -217,11 +217,17 @@ Confidence isn't a single number — it's a composite score you can explain:
 
 Every score is auditable: *"0.73 because: extracted (0.9 base), 3 sources, last confirmed 2 months ago."*
 
-### Forgetting is a Feature
+### Memories Get Smarter Over Time
 
-Memories decay over time. Unimportant memories fade; important ones persist. This keeps the store relevant.
+Engram isn't just storage—it's a system that learns:
 
-**Retrieval-Induced Forgetting (RIF)**: Based on [Anderson et al. (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/), when memories are retrieved, similar non-retrieved memories are suppressed. Enable with `rif_enabled=True` on recall to naturally prune redundant memories.
+- **Frequently-used memories strengthen** — Every time a memory participates in consolidation or gets linked to new information, it gets stronger. Based on the [Testing Effect](https://www.sciencedirect.com/topics/psychology/testing-effect), one of the most robust findings in memory research.
+
+- **Related memories find each other** — When you say "prefer Python for scripts," that automatically links to "using Python at work." No manual organization needed.
+
+- **Irrelevant stuff fades away** — Memories decay over time. Unimportant memories fade; important ones persist. This keeps the store relevant.
+
+- **Retrieval suppresses competitors** — Based on [Anderson et al. (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/), when memories are retrieved, similar non-retrieved memories are suppressed. Enable with `rif_enabled=True` on recall to naturally prune redundant memories.
 
 ### Fast Path Stays Fast
 
@@ -234,7 +240,6 @@ Memories decay over time. Unimportant memories fade; important ones persist. Thi
 ## Documentation
 
 - [Architecture](docs/architecture.md) — Memory types, data flow, storage
-- [API Design](docs/api-design.md) — SDK, REST API, integration patterns
 - [Design Notes](docs/design.md) — Stack decisions and rationale
 - [Accuracy & Hallucination Prevention](research/accuracy.md) — Why ground truth matters
 - [Research Foundations](research/overview.md) — Theoretical basis
