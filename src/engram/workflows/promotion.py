@@ -1,12 +1,15 @@
 """Promotion workflow for promoting memories through the hierarchy.
 
 This workflow runs during decay to:
-1. Find semantic memories with high selectivity (well-consolidated)
+1. Find semantic memories with high consolidation strength
 2. Detect behavioral patterns suitable for procedural memory
 3. Promote patterns to procedural memories
 
 Buffer promotion hierarchy:
     Working (volatile) → Episodic → Semantic → Procedural
+
+Inspired by Cognitive Workspace research on hierarchical cognitive buffers
+with selective consolidation (arxiv.org/abs/2508.13171).
 """
 
 from __future__ import annotations
@@ -73,7 +76,7 @@ def _should_promote_to_procedural(memory: SemanticMemory) -> bool:
     """Determine if a semantic memory should be promoted to procedural.
 
     Promotion criteria:
-    - High selectivity score (>= 0.5) - well-consolidated
+    - High consolidation strength (>= 0.5) - well-established
     - Multiple consolidation passes (>= 2) - stable over time
     - High confidence (>= 0.7) - reliable information
     - Contains behavioral pattern keywords
@@ -84,8 +87,8 @@ def _should_promote_to_procedural(memory: SemanticMemory) -> bool:
     Returns:
         True if memory should be promoted.
     """
-    # Must have high selectivity (survived consolidation)
-    if memory.selectivity_score < 0.5:
+    # Must have high consolidation strength (repeatedly reinforced)
+    if memory.consolidation_strength < 0.5:
         return False
 
     # Must have gone through multiple consolidation passes
@@ -140,7 +143,7 @@ async def run_promotion(
     """Run the promotion workflow.
 
     This workflow:
-    1. Fetches semantic memories with high selectivity
+    1. Fetches semantic memories with high consolidation strength
     2. Identifies behavioral patterns
     3. Creates procedural memories from patterns
     4. Links new procedural memories to source semantics

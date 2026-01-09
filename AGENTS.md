@@ -314,23 +314,26 @@ results = await recall(
 
 **What we DON'T claim**: Our confidence decay is an engineering approximation of inhibitory suppression. The original research studied human memory with specific experimental paradigms (category-cued recall). We adapt the core principle for AI memory systems.
 
-### Context Selectivity (Implemented)
+### Consolidation Strength (Testing Effect)
 
-**What it is**: Memories should respond specifically to their original context, not overgeneralize.
+**What it is**: Memories that are repeatedly involved in retrieval and consolidation become stronger and more stable.
 
-**Research**: Tomé et al. "Dynamic and selective engrams emerge with memory consolidation" Nature Neuroscience (2024). Describes how engrams become more context-specific over time.
+**Primary Research**:
+> Roediger, H.L. & Karpicke, J.D. (2006). "The Power of Testing Memory: Basic Research and Implications for Educational Practice." *Perspectives on Psychological Science*, 1(3), 181-210. https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/
 
-**Status**: Implemented. During consolidation, `increase_selectivity()` is called when existing memories:
+**Key finding**: "Repeated remembering strengthens memories much more so than repeated learning."
+
+**How we implement it**: During consolidation, `strengthen()` is called when existing memories:
 1. Get linked to new memories via semantic similarity
 2. Receive LLM-identified links
 3. Undergo evolution (tag/keyword/context updates)
 
-Each call increases `selectivity_score` by 0.1 and increments `consolidation_passes`. This is distinct from RIF - it tracks memory precision, not inter-memory competition.
+Each call increases `consolidation_strength` by 0.1 and increments `consolidation_passes`. This tracks how well-established a memory is through repeated consolidation involvement.
 
 ### What we DON'T implement
 
-- **Tomé et al. inhibitory plasticity**: The paper describes neurons competing WITHIN a single engram. We don't model individual neurons.
 - **Exact biological mechanisms**: We use cognitive science as inspiration, not blueprint.
+- **True context selectivity**: Tomé et al. (2024) describes how engrams become more context-specific via inhibitory plasticity. We don't model this — we track consolidation involvement instead.
 
 ---
 

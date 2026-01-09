@@ -53,9 +53,13 @@ class SemanticMemory(MemoryBase):
     They represent inferred knowledge, preferences, and context that
     isn't explicitly stated but can be derived from conversations.
 
-    Selectivity scoring tracks how well-established a memory is:
-    - 0.0: Newly created, broad associations
-    - 1.0: Highly selective, well-consolidated
+    Consolidation strength tracks how well-established a memory is,
+    based on the Testing Effect research (Roediger & Karpicke 2006):
+    memories that are repeatedly involved in retrieval/consolidation
+    become stronger and more stable.
+
+    - 0.0: Newly created, not yet reinforced
+    - 1.0: Highly consolidated, repeatedly reinforced
 
     A-MEM inspired features:
     - keywords: Key terms for this memory (improves linking)
@@ -72,7 +76,7 @@ class SemanticMemory(MemoryBase):
         event_at: When the underlying facts were true.
         derived_at: When we inferred this memory.
         confidence: Composite confidence score.
-        selectivity_score: How well-consolidated (0=broad, 1=selective).
+        consolidation_strength: How well-established (0=new, 1=strong).
         consolidation_passes: How many times this has been refined.
         keywords: Extracted key terms for this memory.
         tags: Category labels for classification.
@@ -104,11 +108,11 @@ class SemanticMemory(MemoryBase):
         default_factory=lambda: ConfidenceScore.for_inferred(0.6),
         description="Composite confidence score",
     )
-    selectivity_score: float = Field(
+    consolidation_strength: float = Field(
         default=0.0,
         ge=0.0,
         le=1.0,
-        description="Consolidation selectivity (0=broad, 1=selective)",
+        description="How well-established via repeated consolidation (0=new, 1=strong)",
     )
     consolidation_passes: int = Field(
         default=1,
@@ -153,14 +157,38 @@ class SemanticMemory(MemoryBase):
         if memory_id not in self.related_ids:
             self.related_ids.append(memory_id)
 
-    def increase_selectivity(self, delta: float = 0.1) -> None:
-        """Increase selectivity score (survived consolidation)."""
-        self.selectivity_score = min(1.0, self.selectivity_score + delta)
+    def strengthen(self, delta: float = 0.1) -> None:
+        """Strengthen memory through consolidation involvement.
+
+        Based on Testing Effect research: memories repeatedly involved
+        in retrieval/consolidation become stronger and more stable.
+        See: Roediger & Karpicke (2006), PMC5912918.
+        """
+        self.consolidation_strength = min(1.0, self.consolidation_strength + delta)
         self.consolidation_passes += 1
 
+    def weaken(self, delta: float = 0.1) -> None:
+        """Weaken memory (pruned or contradicted during consolidation)."""
+        self.consolidation_strength = max(0.0, self.consolidation_strength - delta)
+
+    # Backwards compatibility aliases
+    def increase_selectivity(self, delta: float = 0.1) -> None:
+        """Deprecated: Use strengthen() instead."""
+        self.strengthen(delta)
+
     def decrease_selectivity(self, delta: float = 0.1) -> None:
-        """Decrease selectivity score (pruned during consolidation)."""
-        self.selectivity_score = max(0.0, self.selectivity_score - delta)
+        """Deprecated: Use weaken() instead."""
+        self.weaken(delta)
+
+    @property
+    def selectivity_score(self) -> float:
+        """Deprecated: Use consolidation_strength instead."""
+        return self.consolidation_strength
+
+    @selectivity_score.setter
+    def selectivity_score(self, value: float) -> None:
+        """Deprecated: Use consolidation_strength instead."""
+        self.consolidation_strength = value
 
     def record_access(self) -> None:
         """Record that this memory was accessed (activation tracking).

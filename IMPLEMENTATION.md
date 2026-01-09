@@ -13,7 +13,7 @@ Phase 3: Extraction     → Pattern matchers (email, phone, URL, date)
 Phase 4: Core API       → encode(), recall(), working memory
 Phase 5: Embeddings     → OpenAI + FastEmbed providers
 Phase 6: Background     → DBOS setup, consolidation workflow
-Phase 7: Semantics      → LLM extraction, linking, selectivity
+Phase 7: Semantics      → LLM extraction, linking, consolidation strength
 Phase 8: Server         → FastAPI REST API
 Phase 9: Polish         → SDK convenience, errors, logging
 Phase 10: Demo          → Marimo interactive notebook
@@ -784,7 +784,7 @@ async def decay_memories(user_id: str, org_id: str | None):
 
 ## Phase 7: Semantic Extraction
 
-**Goal**: LLM-based extraction, linking, selectivity.
+**Goal**: LLM-based extraction, linking, consolidation strength.
 
 ### 7.1 Pydantic AI Agent
 
@@ -847,32 +847,32 @@ async def build_links(
     return related_ids
 ```
 
-### 7.3 Selectivity Scoring
+### 7.3 Consolidation Strength (Testing Effect)
 
 ```python
-async def update_selectivity(memory_id: str, consolidated: bool):
-    """
-    Update selectivity score based on consolidation result.
-    Memories that survive consolidation become more selective.
-    """
-    memory = await get_memory(memory_id)
+# Memory strengthening based on Testing Effect research
+# Roediger & Karpicke (2006): "Repeated remembering strengthens memories"
 
-    if consolidated:
-        # Survived consolidation - increase selectivity
-        new_score = min(1.0, memory.selectivity_score + 0.1)
-    else:
-        # Pruned - decrease selectivity
-        new_score = max(0.0, memory.selectivity_score - 0.1)
+def strengthen_memory(memory: SemanticMemory):
+    """
+    Strengthen memory through consolidation involvement.
+    Memories that survive consolidation become stronger and more stable.
+    """
+    memory.strengthen(delta=0.1)  # Increases consolidation_strength
 
-    await update_memory(memory_id, selectivity_score=new_score)
+def weaken_memory(memory: SemanticMemory):
+    """
+    Weaken memory when pruned or contradicted.
+    """
+    memory.weaken(delta=0.1)  # Decreases consolidation_strength
 ```
 
 ### 7.4 Tasks
 
-- [ ] Implement ConsolidationResult model
-- [ ] Implement consolidation_agent with Pydantic AI
-- [ ] Implement build_links()
-- [ ] Implement update_selectivity()
+- [x] Implement ConsolidationResult model
+- [x] Implement consolidation_agent with Pydantic AI
+- [x] Implement build_links()
+- [x] Implement strengthen() / weaken() methods
 - [ ] Implement inhibitory fact detection
 - [ ] Write tests with mocked LLM responses
 

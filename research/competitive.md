@@ -4,8 +4,8 @@ Technical comparison of AI memory systems. Based on published papers and documen
 
 ## Summary
 
-| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Selectivity | RIF |
-|--------|--------------|------------|------------|-------------|-----------------|-------------|-----|
+| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Consolidation | RIF |
+|--------|--------------|------------|------------|-------------|-----------------|---------------|-----|
 | **Engram** | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
 | **Mem0** | No | No | No | No | No | No | No |
 | **Zep/Graphiti** | Yes | No | No | Yes | Partial | No | No |
@@ -156,22 +156,22 @@ Novel approaches from recent literature:
 
 **Results**: 58.6% memory reuse vs 0% for naive RAG.
 
-**Engram**: Implements buffer promotion hierarchy (Working → Episodic → Semantic → Procedural). The `run_promotion` workflow promotes well-consolidated semantic memories with behavioral patterns to procedural memory based on selectivity score, consolidation passes, and confidence.
+**Engram**: Implements buffer promotion hierarchy (Working → Episodic → Semantic → Procedural). The `run_promotion` workflow promotes well-consolidated semantic memories with behavioral patterns to procedural memory based on consolidation strength, consolidation passes, and confidence.
 
-### Dynamic Engrams (Selectivity Through Consolidation)
+### Consolidation Strength (Testing Effect)
 
-**What**: Memory engrams are not static—neurons continuously "drop out of" and "drop into" engrams during consolidation. Engrams transition from unselective → selective over ~12 hours.
+**What**: Memories that are repeatedly involved in retrieval/consolidation become stronger and more stable.
 
-**Source**: [Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)
+**Source**: [Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)
 
 **Key findings**:
-- Only 10-40% overlap between neurons activated during learning vs recall
-- Inhibitory plasticity (CCK+ interneurons) is critical for selectivity
-- Training stimulus reactivation during consolidation required for selectivity to emerge
+- "Repeated remembering strengthens memories much more so than repeated learning"
+- Retrieval acts as a rapid consolidation event
+- Memories involved in retrieval become stronger and more stable
 
-**Engram**: The `selectivity_score` (0.0-1.0) field on SemanticMemory is directly inspired by this research. During consolidation, `increase_selectivity()` is called when existing memories get linked to new memories (via semantic similarity or LLM identification) or receive evolution updates. Each call increases selectivity by 0.1 and increments `consolidation_passes`, modeling how engrams become more selective through consolidation.
+**Engram**: The `consolidation_strength` (0.0-1.0) field on SemanticMemory tracks how well-established a memory is. During consolidation, `strengthen()` is called when existing memories get linked to new memories (via semantic similarity or LLM identification) or receive evolution updates. Each call increases consolidation_strength by 0.1 and increments `consolidation_passes`.
 
-Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct, not an implementation of neural inhibition.
+Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct.
 
 ### Retrieval-Induced Forgetting (RIF)
 
@@ -207,5 +207,5 @@ Note: `NegationFact` (which stores semantic negations like "User does NOT use Mo
 - [MemGPT Paper](https://arxiv.org/abs/2310.08560)
 - [A-MEM Paper](https://arxiv.org/abs/2502.12110)
 - [Cognitive Workspace](https://arxiv.org/abs/2508.13171)
-- [Dynamic and Selective Engrams](https://www.nature.com/articles/s41593-023-01551-w) — Tomé et al., Nature Neuroscience 2024
+- [Testing Effect](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) — Roediger & Karpicke, 2006
 - [Retrieval-Induced Forgetting](https://pubmed.ncbi.nlm.nih.gov/7931095/) — Anderson, Bjork & Bjork, 1994

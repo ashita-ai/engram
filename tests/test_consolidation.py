@@ -720,32 +720,32 @@ class TestConsolidationLinking:
         mock_storage.update_semantic_memory.assert_not_called()
 
 
-class TestSelectivityScoring:
-    """Tests for selectivity scoring during consolidation (Tomé et al.)."""
+class TestConsolidationStrengthening:
+    """Tests for memory strengthening during consolidation (Testing Effect)."""
 
-    def test_consolidation_result_has_selectivity_field(self) -> None:
-        """Test ConsolidationResult includes selectivity_updated field."""
+    def test_consolidation_result_has_strengthened_field(self) -> None:
+        """Test ConsolidationResult includes memories_strengthened field."""
         result = ConsolidationResult(
             episodes_processed=5,
             semantic_memories_created=3,
             links_created=2,
             evolutions_applied=1,
-            selectivity_updated=4,
+            memories_strengthened=4,
         )
-        assert result.selectivity_updated == 4
+        assert result.memories_strengthened == 4
 
-    def test_consolidation_result_selectivity_default_zero(self) -> None:
-        """Test selectivity_updated defaults to 0."""
+    def test_consolidation_result_strengthened_default_zero(self) -> None:
+        """Test memories_strengthened defaults to 0."""
         result = ConsolidationResult(
             episodes_processed=1,
             semantic_memories_created=1,
             links_created=0,
         )
-        assert result.selectivity_updated == 0
+        assert result.memories_strengthened == 0
 
     @pytest.mark.asyncio
-    async def test_selectivity_increased_on_link(self) -> None:
-        """Test existing memory selectivity increases when linked to new memory."""
+    async def test_memory_strengthened_on_link(self) -> None:
+        """Test existing memory is strengthened when linked to new memory."""
         from engram.models import Episode, SemanticMemory
 
         mock_episode = MagicMock(spec=Episode)
@@ -753,13 +753,13 @@ class TestSelectivityScoring:
         mock_episode.role = "user"
         mock_episode.content = "I prefer Python programming"
 
-        # Existing memory with selectivity 0.0
+        # Existing memory with consolidation_strength 0.0
         existing_memory = SemanticMemory(
             content="User likes programming",
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        assert existing_memory.selectivity_score == 0.0
+        assert existing_memory.consolidation_strength == 0.0
         assert existing_memory.consolidation_passes == 1
 
         mock_storage = AsyncMock()
@@ -799,18 +799,18 @@ class TestSelectivityScoring:
                     user_id="test_user",
                 )
 
-        # Should have created memory and increased selectivity
+        # Should have created memory and strengthened existing
         assert result.semantic_memories_created == 1
         assert result.links_created == 1
-        assert result.selectivity_updated >= 1
+        assert result.memories_strengthened >= 1
 
-        # Existing memory should have increased selectivity
-        assert existing_memory.selectivity_score == 0.1  # Increased by 0.1
+        # Existing memory should have increased strength
+        assert existing_memory.consolidation_strength == 0.1  # Increased by 0.1
         assert existing_memory.consolidation_passes == 2  # Also incremented
 
     @pytest.mark.asyncio
-    async def test_selectivity_increased_on_evolution(self) -> None:
-        """Test existing memory selectivity increases when evolved."""
+    async def test_memory_strengthened_on_evolution(self) -> None:
+        """Test existing memory is strengthened when evolved."""
         from engram.models import Episode, SemanticMemory
         from engram.workflows.consolidation import MemoryEvolution
 
@@ -825,7 +825,7 @@ class TestSelectivityScoring:
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        initial_selectivity = existing_memory.selectivity_score
+        initial_strength = existing_memory.consolidation_strength
         initial_passes = existing_memory.consolidation_passes
 
         mock_storage = AsyncMock()
@@ -871,10 +871,10 @@ class TestSelectivityScoring:
                     user_id="test_user",
                 )
 
-        # Should have applied evolution and increased selectivity
+        # Should have applied evolution and strengthened memory
         assert result.evolutions_applied == 1
-        assert result.selectivity_updated >= 1
+        assert result.memories_strengthened >= 1
 
-        # Existing memory should have increased selectivity from evolution
-        assert existing_memory.selectivity_score > initial_selectivity
+        # Existing memory should have increased strength from evolution
+        assert existing_memory.consolidation_strength > initial_strength
         assert existing_memory.consolidation_passes > initial_passes
