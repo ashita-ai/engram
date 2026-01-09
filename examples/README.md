@@ -1,157 +1,168 @@
 # Engram Examples
 
-This directory contains example scripts demonstrating Engram's key features.
+Comprehensive examples demonstrating all of Engram's features.
 
 ## Directory Structure
 
 ```
 examples/
-├── local/          # No external dependencies (no Qdrant, no API keys)
-│   ├── extraction_demo.py
-│   └── confidence_demo.py
-└── external/       # Requires Qdrant and/or API keys
-    ├── quickstart.py
-    ├── multi_tenant.py
-    ├── api_client.py
-    └── consolidation_demo.py  # Requires OpenAI API key
+├── local/              # No external dependencies
+│   ├── extraction.py   # Pattern extraction + negation detection
+│   ├── confidence.py   # Confidence scoring system
+│   └── memory_types.py # All 6 memory types explained
+└── external/           # Requires Qdrant + API keys
+    ├── quickstart.py   # Core encode/recall/verify workflow
+    ├── advanced.py     # RIF, multi-hop, negation filtering
+    └── consolidation.py # LLM consolidation + linking
 ```
 
 ## Quick Start
 
 ### Local Examples (No Setup Required)
 
-These examples run without any external dependencies:
+Run without any external dependencies:
 
 ```bash
-# Pattern extraction demo
-python examples/local/extraction_demo.py
+# Pattern extraction (8 extractors + negation detection)
+uv run python examples/local/extraction.py
 
-# Confidence scoring demo
-python examples/local/confidence_demo.py
+# Confidence scoring system
+uv run python examples/local/confidence.py
+
+# All 6 memory types explained
+uv run python examples/local/memory_types.py
 ```
 
-### External Examples (Requires Qdrant)
+### External Examples (Requires Qdrant + API Key)
 
-Most external examples require Qdrant running locally:
-
+1. Start Qdrant:
 ```bash
-# Start Qdrant
 docker run -p 6333:6333 qdrant/qdrant
-
-# Run examples with FastEmbed (free, local embeddings)
-ENGRAM_EMBEDDING_PROVIDER=fastembed python examples/external/quickstart.py
-ENGRAM_EMBEDDING_PROVIDER=fastembed python examples/external/multi_tenant.py
 ```
 
-### LLM-Powered Examples (Requires OpenAI API Key)
-
-The consolidation demo requires an OpenAI API key:
-
+2. Set up `.env` (copy from `.env.example`):
 ```bash
-ENGRAM_OPENAI_API_KEY=sk-... \
-ENGRAM_EMBEDDING_PROVIDER=fastembed \
-python examples/external/consolidation_demo.py
+ENGRAM_OPENAI_API_KEY=sk-...
+ENGRAM_EMBEDDING_PROVIDER=openai
+ENGRAM_EMBEDDING_MODEL=text-embedding-3-small
+ENGRAM_QDRANT_URL=http://localhost:6333
+```
+
+3. Run examples:
+```bash
+# Core workflow: encode, recall, verify
+uv run python examples/external/quickstart.py
+
+# Advanced: RIF, multi-hop, negation filtering
+uv run python examples/external/advanced.py
+
+# LLM consolidation + semantic memories
+uv run python examples/external/consolidation.py
 ```
 
 ---
 
 ## Local Examples
 
-### 🔍 Extraction Pipeline
-**`local/extraction_demo.py`** - All 8 extractors in action
+### Pattern Extraction
+**`local/extraction.py`**
 
 Demonstrates:
-- EmailExtractor (email-validator)
-- PhoneExtractor (phonenumbers)
-- URLExtractor (validators)
-- DateExtractor (dateparser)
-- QuantityExtractor (Pint)
-- LanguageExtractor (langdetect)
-- NameExtractor (nameparser)
-- IDExtractor (python-stdnum)
+- All 8 pattern extractors (email, phone, URL, date, quantity, language, name, ID)
+- Negation detection ("I don't use X", "not interested in Y")
+- Why pattern extraction before LLM matters (no hallucination possible)
 
-### 📊 Confidence Scoring
-**`local/confidence_demo.py`** - Understanding confidence levels
+### Confidence Scoring
+**`local/confidence.py`**
 
 Explains:
-- Extraction methods (VERBATIM, EXTRACTED, INFERRED)
-- Confidence calculation formula
-- Decay over time
+- Three extraction methods: VERBATIM (100%), EXTRACTED (90%), INFERRED (60%)
+- Weighted formula: method (50%) + corroboration (25%) + recency (15%) + verification (10%)
+- Decay over time without reconfirmation
+- Human-readable explanations for every score
+
+### Memory Types
+**`local/memory_types.py`**
+
+Covers all 6 memory types:
+1. **Working** - Current session context (volatile)
+2. **Episodic** - Raw interactions (immutable ground truth)
+3. **Factual** - Pattern-extracted facts (high confidence)
+4. **Semantic** - LLM-inferred knowledge (variable confidence)
+5. **Procedural** - Behavioral patterns (how to do things)
+6. **Negation** - What is NOT true (prevents contradictions)
 
 ---
 
 ## External Examples
 
-### 🚀 Quickstart
-**`external/quickstart.py`** - Basic encode/recall workflow
+### Quickstart
+**`external/quickstart.py`**
 
-Shows:
-- Initializing EngramService
-- Storing memories with `encode()`
-- Semantic search with `recall()`
-- Automatic fact extraction
+Core workflow demonstrating:
+- `encode()` - Store episodes, extract facts
+- `recall()` - Semantic search with filtering
+- `verify()` - Trace any memory to its source
+- `min_confidence` - Confidence-gated retrieval
+- `include_sources` - Get source episodes in results
+- `memory_types` - Filter by memory type
+- Working memory management
 
-### 🔒 Multi-Tenancy
-**`external/multi_tenant.py`** - Data isolation between users and orgs
+### Advanced Features
+**`external/advanced.py`**
 
-Shows:
-- User-level isolation (`user_id`)
-- Organization-level isolation (`org_id`)
-- Same user in multiple organizations
+Advanced recall features:
+- **All 6 memory types** - Query across episodic, factual, semantic, procedural, negation, working
+- **Negation filtering** - Automatically exclude contradicted information
+- **Multi-hop reasoning** - `follow_links=True` traverses related_ids
+- **RIF (Retrieval-Induced Forgetting)** - Suppress competing memories
+- **Freshness filtering** - Only return consolidated memories
+- **Selectivity filtering** - Filter semantic memories by context-specificity
 
-### 🌐 REST API Client
-**`external/api_client.py`** - Using the HTTP API
+### Consolidation
+**`external/consolidation.py`**
 
-```bash
-# Terminal 1: Start the server
-ENGRAM_EMBEDDING_PROVIDER=fastembed uvicorn engram.api:app --reload
+LLM-powered semantic extraction:
+- Store raw episodes (ground truth)
+- Run LLM consolidation (GPT-4o-mini)
+- Create semantic memories with confidence
+- Link related memories (multi-hop)
+- Consolidation strength (Testing Effect)
+- Incremental consolidation
+- Verify derived memories back to sources
 
-# Terminal 2: Run the client
-python examples/external/api_client.py
-```
+---
 
-Demonstrates:
-- Health check endpoint
-- Encode via HTTP POST
-- Recall via HTTP POST
+## Feature Coverage
 
-### 🧠 Consolidation (LLM-Powered)
-**`external/consolidation_demo.py`** - Semantic knowledge extraction
-
-**Requires OpenAI API key!** This is the only example that makes external LLM calls.
-
-```bash
-ENGRAM_OPENAI_API_KEY=sk-... \
-ENGRAM_EMBEDDING_PROVIDER=fastembed \
-python examples/external/consolidation_demo.py
-```
-
-Shows:
-- Storing raw conversation episodes
-- Running LLM consolidation with GPT-4o-mini
-- Extracting semantic memories from episodes
-- Querying consolidated knowledge
+| Feature | Local Example | External Example |
+|---------|---------------|------------------|
+| Pattern extraction | `extraction.py` | `quickstart.py` |
+| Negation detection | `extraction.py` | `advanced.py` |
+| Confidence scoring | `confidence.py` | `quickstart.py` |
+| All 6 memory types | `memory_types.py` | `advanced.py` |
+| encode/recall | - | `quickstart.py` |
+| verify() | - | `quickstart.py` |
+| min_confidence | - | `quickstart.py` |
+| include_sources | - | `quickstart.py` |
+| Multi-hop (follow_links) | - | `advanced.py` |
+| RIF suppression | - | `advanced.py` |
+| Negation filtering | - | `advanced.py` |
+| Freshness filtering | - | `advanced.py` |
+| Selectivity filtering | - | `advanced.py` |
+| LLM consolidation | - | `consolidation.py` |
+| Memory linking | - | `consolidation.py` |
+| Consolidation strength | - | `consolidation.py` |
 
 ---
 
 ## Requirements Summary
 
-| Example | Qdrant | Embeddings | LLM API |
-|---------|--------|------------|---------|
-| local/extraction_demo.py | - | - | - |
-| local/confidence_demo.py | - | - | - |
-| external/quickstart.py | ✅ | FastEmbed or OpenAI | - |
-| external/multi_tenant.py | ✅ | FastEmbed or OpenAI | - |
-| external/api_client.py | ✅ | FastEmbed or OpenAI | - |
-| external/consolidation_demo.py | ✅ | FastEmbed or OpenAI | ✅ OpenAI |
-
-## Using FastEmbed (Free Local Embeddings)
-
-For examples that require embeddings but you don't have an OpenAI key:
-
-```bash
-export ENGRAM_EMBEDDING_PROVIDER=fastembed
-python examples/external/quickstart.py
-```
-
-FastEmbed downloads a small model (~50MB) on first use and runs locally.
+| Example | Qdrant | OpenAI API |
+|---------|--------|------------|
+| local/extraction.py | - | - |
+| local/confidence.py | - | - |
+| local/memory_types.py | - | - |
+| external/quickstart.py | ✅ | ✅ |
+| external/advanced.py | ✅ | ✅ |
+| external/consolidation.py | ✅ | ✅ |

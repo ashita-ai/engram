@@ -444,12 +444,14 @@ class TestDefaultPipeline:
     """Tests for default_pipeline factory."""
 
     def test_default_pipeline_has_all_extractors(self):
-        """default_pipeline should include all extractors."""
+        """default_pipeline should include 7 extractors (excluding LanguageExtractor)."""
         pipeline = default_pipeline()
 
-        assert len(pipeline.extractors) == 8
+        # LanguageExtractor is excluded because spoken language codes (e.g., "en")
+        # are rarely useful for memory recall and can interfere with semantic search
+        assert len(pipeline.extractors) == 7
         names = {e.name for e in pipeline.extractors}
-        assert names == {"email", "phone", "url", "date", "quantity", "language", "name", "id"}
+        assert names == {"email", "phone", "url", "date", "quantity", "name", "id"}
 
     def test_default_pipeline_extracts_multiple_types(self):
         """default_pipeline should extract from various formats."""

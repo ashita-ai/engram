@@ -39,8 +39,13 @@ from .url import URLExtractor
 def default_pipeline() -> ExtractionPipeline:
     """Create a pipeline with all default extractors.
 
+    Note: LanguageExtractor is excluded from the default pipeline because it
+    extracts natural language codes (e.g., "en" for English) which are rarely
+    useful for memory recall and can interfere with semantic search. Import
+    and add LanguageExtractor explicitly if you need language detection.
+
     Returns:
-        ExtractionPipeline configured with all 8 extractors.
+        ExtractionPipeline configured with 7 extractors.
     """
     return ExtractionPipeline(
         [
@@ -49,7 +54,6 @@ def default_pipeline() -> ExtractionPipeline:
             URLExtractor(),
             DateExtractor(),
             QuantityExtractor(),
-            LanguageExtractor(),
             NameExtractor(),
             IDExtractor(),
         ]

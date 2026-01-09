@@ -552,8 +552,21 @@ class TestConsolidationLinking:
         mock_storage.list_semantic_memories = AsyncMock(return_value=[])
         mock_storage.update_semantic_memory = AsyncMock(return_value=True)
 
+        # Use orthogonal embeddings for each fact to avoid semantic deduplication
+        # (parallel vectors like [0.1]*384 and [0.9]*384 have cosine similarity = 1.0)
+        call_count = 0
+
+        async def mock_embed(text: str) -> list[float]:
+            nonlocal call_count
+            call_count += 1
+            # Return orthogonal embeddings (cosine similarity = 0)
+            if call_count == 1:
+                return [1.0] + [0.0] * 383  # Points along dimension 0
+            else:
+                return [0.0, 1.0] + [0.0] * 382  # Points along dimension 1
+
         mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+        mock_embedder.embed = mock_embed
 
         # Mock LLM to return two facts with a link between them
         mock_llm_result = LLMExtractionResult(
@@ -607,11 +620,11 @@ class TestConsolidationLinking:
         mock_episode.role = "user"
         mock_episode.content = "PostgreSQL is a relational database"
 
-        # Existing memory
+        # Existing memory with orthogonal embedding to new fact
         existing_memory = SemanticMemory(
             content="User likes SQL databases",
             user_id="test_user",
-            embedding=[0.1] * 384,
+            embedding=[1.0] + [0.0] * 383,  # Points along dimension 0
         )
 
         mock_storage = AsyncMock()
@@ -621,8 +634,11 @@ class TestConsolidationLinking:
         mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
         mock_storage.update_semantic_memory = AsyncMock(return_value=True)
 
+        # Use orthogonal embedding for new fact to avoid triggering semantic dedup with existing
         mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+        mock_embedder.embed = AsyncMock(
+            return_value=[0.0, 1.0] + [0.0] * 382
+        )  # Orthogonal to existing
 
         # LLM creates link between new and existing memory
         mock_llm_result = LLMExtractionResult(
@@ -753,11 +769,11 @@ class TestConsolidationStrengthening:
         mock_episode.role = "user"
         mock_episode.content = "I prefer Python programming"
 
-        # Existing memory with consolidation_strength 0.0
+        # Existing memory with consolidation_strength 0.0 and orthogonal embedding
         existing_memory = SemanticMemory(
             content="User likes programming",
             user_id="test_user",
-            embedding=[0.1] * 384,
+            embedding=[1.0] + [0.0] * 383,  # Points along dimension 0
         )
         assert existing_memory.consolidation_strength == 0.0
         assert existing_memory.consolidation_passes == 1
@@ -772,8 +788,11 @@ class TestConsolidationStrengthening:
         )
         mock_storage.update_semantic_memory = AsyncMock(return_value=True)
 
+        # Use orthogonal embedding for new fact to avoid triggering semantic dedup with existing
         mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+        mock_embedder.embed = AsyncMock(
+            return_value=[0.0, 1.0] + [0.0] * 382
+        )  # Orthogonal to existing
 
         mock_llm_result = LLMExtractionResult(
             semantic_facts=[ExtractedFact(content="User prefers Python")],

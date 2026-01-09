@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -41,7 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from engram.config import Settings
 from engram.embeddings import Embedder, get_embedder
 from engram.extraction import ExtractionPipeline, NegationDetector, default_pipeline
-from engram.models import AuditEntry, Episode, Fact, Staleness
+from engram.models import AuditEntry, Episode, Fact, NegationFact, Staleness
 from engram.storage import EngramStorage
 
 
@@ -65,12 +66,14 @@ class EncodeResult(BaseModel):
     Attributes:
         episode: The stored episode.
         facts: List of facts extracted from the episode.
+        negations: List of negations detected from the episode.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     episode: Episode
     facts: list[Fact] = Field(default_factory=list)
+    negations: list[NegationFact] = Field(default_factory=list)
 
 
 class SourceEpisodeSummary(BaseModel):
@@ -357,6 +360,10 @@ class EngramService:
                 ):
                     negation.embedding = neg_embedding
                     await self.storage.store_negation(negation)
+            else:
+                negation_facts = []
+        else:
+            negation_facts = []
 
         # Log audit entry
         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -374,7 +381,7 @@ class EngramService:
         if importance >= self.settings.high_importance_threshold:
             await self._trigger_consolidation(user_id=user_id, org_id=org_id)
 
-        return EncodeResult(episode=episode, facts=facts)
+        return EncodeResult(episode=episode, facts=facts, negations=negation_facts)
 
     async def recall(
         self,
@@ -1400,9 +1407,22 @@ class EngramService:
                 filtered_results.append(result)
                 continue
 
-            # Phase 1: Pattern-based filtering (fast, substring match)
+            # Phase 1: Pattern-based filtering (fast, word boundary match)
+            # Use word boundaries for short patterns (<=3 chars) to avoid false positives
+            # e.g., "r" should match "R language" but not "Jordan" or "programmer"
             content_lower = result.content.lower()
-            is_pattern_negated = any(pattern in content_lower for pattern in negated_patterns)
+            is_pattern_negated = False
+            for pattern in negated_patterns:
+                if len(pattern) <= 3:
+                    # Use word boundary regex for short patterns
+                    if re.search(rf"\b{re.escape(pattern)}\b", content_lower):
+                        is_pattern_negated = True
+                        break
+                else:
+                    # Substring match for longer patterns
+                    if pattern in content_lower:
+                        is_pattern_negated = True
+                        break
 
             if is_pattern_negated:
                 pattern_filtered += 1

@@ -105,6 +105,10 @@ class Settings(BaseSettings):
         default=None,
         description="OpenAI API key",
     )
+    anthropic_api_key: str | None = Field(
+        default=None,
+        description="Anthropic API key",
+    )
 
     # LLM for consolidation
     llm_provider: str = Field(

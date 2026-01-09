@@ -6,7 +6,7 @@ Uses Google's phonenumbers library for robust international phone parsing.
 from __future__ import annotations
 
 import phonenumbers
-from phonenumbers import PhoneNumberFormat
+from phonenumbers import Leniency, PhoneNumberFormat
 
 from engram.models import Episode, Fact
 
@@ -53,15 +53,17 @@ class PhoneExtractor(Extractor):
         """
         valid_phones: list[str] = []
 
-        # PhoneNumberMatcher finds all phone numbers in text
+        # PhoneNumberMatcher with POSSIBLE leniency finds more phone formats
+        # including local numbers without country codes
         for match in phonenumbers.PhoneNumberMatcher(
             episode.content,
             self.default_region,
+            Leniency.POSSIBLE,
         ):
             phone = match.number
 
-            # Validate the number
-            if phonenumbers.is_valid_number(phone):
+            # Accept both valid numbers and possible numbers (local formats)
+            if phonenumbers.is_possible_number(phone):
                 # Format as E.164 (+15551234567)
                 formatted = phonenumbers.format_number(phone, PhoneNumberFormat.E164)
                 valid_phones.append(formatted)

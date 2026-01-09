@@ -17,6 +17,55 @@ from .base import Extractor
 # Matches capitalized word sequences (2-5 words)
 NAME_CANDIDATE_PATTERN = re.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,4})\b")
 
+# Blocklist of known false positives (companies, products, tech terms)
+# These look like names but are not actual people
+NON_NAME_BLOCKLIST = {
+    # Companies and products
+    "hugging face",
+    "weights biases",
+    "open source",
+    "machine learning",
+    "deep learning",
+    "artificial intelligence",
+    "natural language",
+    "neural network",
+    "neural networks",
+    "computer vision",
+    "reinforcement learning",
+    "transfer learning",
+    "stack overflow",
+    "visual studio",
+    "google cloud",
+    "amazon web",
+    "microsoft azure",
+    "red hat",
+    "palo alto",
+    "los angeles",
+    "san francisco",
+    "new york",
+    "las vegas",
+    "monte carlo",
+    # Common tech phrases that look like names
+    "hello world",
+    "dead letter",
+    "hot reload",
+    "cold start",
+    "warm start",
+    "big data",
+    "smart contract",
+    "clean code",
+    # Sentence fragments with prepositions + programming languages
+    "for go",
+    "for rust",
+    "for python",
+    "in go",
+    "in rust",
+    "in python",
+    "with go",
+    "with rust",
+    "with python",
+}
+
 
 class NameExtractor(Extractor):
     """Extract human names from episode content.
@@ -54,6 +103,10 @@ class NameExtractor(Extractor):
         candidates = NAME_CANDIDATE_PATTERN.findall(episode.content)
 
         for candidate in candidates:
+            # Skip known non-names (companies, products, tech terms)
+            if candidate.lower() in NON_NAME_BLOCKLIST:
+                continue
+
             # Parse with nameparser
             parsed = HumanName(candidate)
 

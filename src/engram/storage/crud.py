@@ -532,7 +532,7 @@ class CRUDMixin:
         Returns:
             True if updated, False if not found.
         """
-        collection = self._collection_name("facts")
+        collection = self._collection_name("factual")
 
         # Find the point
         results, _ = await self.client.scroll(

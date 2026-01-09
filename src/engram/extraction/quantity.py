@@ -30,8 +30,38 @@ QUANTITY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Units that are ambiguous with time/date notation - skip these
-_AMBIGUOUS_UNITS = {"am", "pm", "st", "nd", "rd", "th"}
+# Units that are ambiguous with time/date notation or common words - skip these
+_AMBIGUOUS_UNITS = {"am", "pm", "st", "nd", "rd", "th", "unit", "units", "item", "items", "a", "an"}
+
+
+def _pluralize_unit(unit_str: str, magnitude: float) -> str:
+    """Pluralize a unit string based on magnitude.
+
+    Args:
+        unit_str: The unit string (e.g., "kilogram", "year")
+        magnitude: The numeric magnitude
+
+    Returns:
+        Pluralized unit string if magnitude != 1
+    """
+    if magnitude == 1:
+        return unit_str
+
+    # Units that don't change in plural
+    invariant = {"hertz", "hz", "siemens", "lux", "fps"}
+    if unit_str.lower() in invariant:
+        return unit_str
+
+    # Units ending in 's', 'x', 'z', 'ch', 'sh' get 'es'
+    if unit_str.endswith(("s", "x", "z", "ch", "sh")):
+        return unit_str + "es"
+
+    # Units ending in 'y' after consonant get 'ies'
+    if unit_str.endswith("y") and len(unit_str) > 1 and unit_str[-2] not in "aeiou":
+        return unit_str[:-1] + "ies"
+
+    # Default: add 's'
+    return unit_str + "s"
 
 
 class QuantityExtractor(Extractor):
@@ -80,9 +110,16 @@ class QuantityExtractor(Extractor):
                 # Use Quantity constructor to handle all units including offset units
                 quantity = _ureg.Quantity(magnitude, unit_str)
 
-                # Format as "magnitude unit" (e.g., "5.0 kilometer")
-                # Use compact format for cleaner output
-                formatted = f"{quantity.magnitude} {quantity.units:~P}"
+                # Format as "magnitude unit(s)" with proper pluralization
+                # Strip trailing zeros for cleaner output (10.0 -> 10)
+                magnitude_clean = (
+                    int(quantity.magnitude)
+                    if quantity.magnitude == int(quantity.magnitude)
+                    else quantity.magnitude
+                )
+                unit_str_base = str(quantity.units)
+                unit_str_final = _pluralize_unit(unit_str_base, magnitude_clean)
+                formatted = f"{magnitude_clean} {unit_str_final}"
                 valid_quantities.append(formatted)
 
             except (UndefinedUnitError, OffsetUnitCalculusError, ValueError):

@@ -144,7 +144,6 @@ class ConfidenceScore(BaseModel):
         """
         time_ago = self._time_ago(self.last_confirmed)
         parts = [
-            f"{self.value:.2f}:",
             self.extraction_method.value,
             f"{self.supporting_episodes} source{'s' if self.supporting_episodes != 1 else ''}",
         ]
@@ -155,7 +154,7 @@ class ConfidenceScore(BaseModel):
             parts.append(
                 f"{self.contradictions} contradiction{'s' if self.contradictions != 1 else ''}"
             )
-        return ", ".join(parts)
+        return f"{self.value:.2f}: " + ", ".join(parts)
 
     @staticmethod
     def _time_ago(dt: datetime) -> str:

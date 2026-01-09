@@ -406,8 +406,41 @@ Focus on quality over quantity."""
     content_to_memory: dict[str, SemanticMemory] = {}
 
     for fact in extraction.semantic_facts:
-        # Generate embedding for the fact
+        # Generate embedding for the fact first (needed for deduplication)
         embedding = await embedder.embed(fact.content)
+
+        # Check for semantic duplicates using embedding similarity (not just exact match)
+        # This catches paraphrases like "User prefers PyTorch" vs "The user's preference is PyTorch"
+        duplicate_found = False
+        for existing_memory in existing_by_content.values():
+            if existing_memory.embedding is not None:
+                # Compute cosine similarity
+                dot_product = sum(
+                    a * b for a, b in zip(embedding, existing_memory.embedding, strict=True)
+                )
+                norm1 = sum(a * a for a in embedding) ** 0.5
+                norm2 = sum(b * b for b in existing_memory.embedding) ** 0.5
+                if norm1 > 0 and norm2 > 0:
+                    similarity = dot_product / (norm1 * norm2)
+                    if similarity >= 0.92:  # High threshold for semantic duplicates
+                        # Strengthen existing memory instead of creating duplicate
+                        existing_memory.strengthen(delta=0.1)
+                        # Add new episode IDs to source list
+                        for ep_id in episode_ids:
+                            if ep_id not in existing_memory.source_episode_ids:
+                                existing_memory.source_episode_ids.append(ep_id)
+                        await storage.update_semantic_memory(existing_memory)
+                        content_to_memory[fact.content] = existing_memory
+                        memories_strengthened += 1
+                        duplicate_found = True
+                        logger.debug(
+                            f"Semantic duplicate (sim={similarity:.2f}): "
+                            f"strengthened {existing_memory.id}"
+                        )
+                        break
+
+        if duplicate_found:
+            continue
 
         memory = SemanticMemory(
             content=fact.content,
@@ -420,10 +453,18 @@ Focus on quality over quantity."""
             tags=fact.tags,
             context=fact.context,
         )
-        memory.confidence.value = fact.confidence
+        # LLM confidence modulates the inferred base (0.6), never exceeds it
+        # An LLM cannot claim 100% certainty for inherently uncertain inferences
+        inferred_base = 0.6
+        memory.confidence.value = inferred_base * fact.confidence
+
+        # Give new memories an initial consolidation strength
+        # (They've been consolidated once, so strengthen() gives them 0.1)
+        memory.strengthen(delta=0.1)
 
         await storage.store_semantic(memory)
         content_to_memory[fact.content] = memory
+        existing_by_content[fact.content] = memory  # Track for future dedup in same batch
         memories_created += 1
         logger.debug(f"Created semantic memory: {memory.id} with tags={fact.tags}")
 
@@ -546,17 +587,31 @@ Focus on quality over quantity."""
         evolutions_applied += 1
         logger.info(f"Evolved memory {target_memory.id}: {evolution.reason}")
 
-    # 8. Store detected negations
+    # 8. Store detected negations (with deduplication)
     from engram.models import NegationFact
     from engram.models.base import ConfidenceScore
 
+    # Get existing negations to avoid duplicates
+    existing_negations = await storage.list_negation_facts(user_id, org_id)
+    existing_patterns = {neg.negates_pattern.lower() for neg in existing_negations}
+    seen_patterns: set[str] = set()  # Track within current batch
+
     for negation in extraction.negations:
+        pattern = negation.negates_pattern.lower()
+
+        # Skip if this pattern already exists or was already processed in this batch
+        if pattern in existing_patterns or pattern in seen_patterns:
+            logger.debug(f"Skipping duplicate negation for pattern: {pattern}")
+            continue
+
+        seen_patterns.add(pattern)
+
         # Generate embedding for the negation
         embedding = await embedder.embed(negation.statement)
 
         neg_fact = NegationFact(
             content=negation.statement,
-            negates_pattern=negation.negates_pattern.lower(),
+            negates_pattern=pattern,
             source_episode_ids=episode_ids,
             user_id=user_id,
             org_id=org_id,
@@ -566,7 +621,7 @@ Focus on quality over quantity."""
 
         await storage.store_negation(neg_fact)
         negations_created += 1
-        logger.info(f"Created negation: {neg_fact.id} negates '{negation.negates_pattern}'")
+        logger.info(f"Created negation: {neg_fact.id} negates '{pattern}'")
 
     # 9. Mark episodes as consolidated
     await storage.mark_episodes_consolidated(episode_ids, user_id)

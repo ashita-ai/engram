@@ -28,45 +28,49 @@ class NegationMatch(BaseModel):
     span: tuple[int, int] = Field(description="Character positions in original text")
 
 
-# Patterns that indicate negation
+# Core negation patterns - simplified for reliability
+# Edge cases are handled by LLM during consolidation
 # Format: (pattern, group_index_for_negated_term)
+# Patterns capture term + optional version (e.g., "Python 2", "React 18")
 NEGATION_PATTERNS = [
-    # "I don't/do not use X"
+    # "I don't/do not use/like/want/need/prefer X [version]"
     (
-        r"\b(?:I|i)\s+(?:don't|do\s+not|don't)\s+(?:use|like|want|need|have|prefer)\s+([A-Za-z0-9_-]+)",
+        r"\b(?:I|i)\s+(?:don't|do\s+not|don't)\s+(?:use|like|want|need|prefer)\s+([A-Za-z][A-Za-z0-9_-]*(?:\s+\d+(?:\.\d+)?[a-z]?)?)",
         1,
     ),
-    # "I'm not/am not a X user"
-    (r"\b(?:I'm|I\s+am|i'm|i\s+am)\s+not\s+(?:a\s+)?([A-Za-z0-9_-]+)", 1),
-    # "I never use/used X"
-    (r"\b(?:I|i)\s+never\s+(?:use|used|like|liked|want|wanted|have|had)\s+([A-Za-z0-9_-]+)", 1),
-    # "I no longer use X"
-    (r"\b(?:I|i)\s+no\s+longer\s+(?:use|like|want|need|have|prefer)\s+([A-Za-z0-9_-]+)", 1),
-    # "not X" in corrections: "Actually, not Python"
-    (r"\b(?:actually|no|nope),?\s+not\s+([A-Za-z0-9_-]+)", 1),
-    # "X is wrong/incorrect"
-    (r"\b([A-Za-z0-9_-]+)\s+is\s+(?:wrong|incorrect|false|not\s+(?:right|correct|true))", 1),
-    # "my X is not Y" (e.g., "my email is not jane@example.com")
-    (r"\bmy\s+([A-Za-z0-9_-]+)\s+is\s+not\s+([A-Za-z0-9@._-]+)", 2),
-    # "that's not my X"
-    (r"\b(?:that's|that\s+is)\s+not\s+my\s+([A-Za-z0-9_-]+)", 1),
-    # "I stopped using X"
-    (r"\b(?:I|i)\s+stopped\s+(?:using|liking)\s+([A-Za-z0-9_-]+)", 1),
-    # "not anymore" patterns: "I don't use X anymore"
-    (r"\b(?:I|i)\s+(?:don't|do\s+not)\s+([A-Za-z0-9_-]+)\s+anymore", 1),
+    # "I'm not a/an X" - identity negation
+    (r"\b(?:I'm|I\s+am|i'm|i\s+am)\s+not\s+(?:a|an)\s+([A-Za-z][A-Za-z0-9_-]*)", 1),
+    # "I'm not interested in X"
+    (r"\b(?:I'm|I\s+am|i'm|i\s+am)\s+not\s+interested\s+in\s+([A-Za-z][A-Za-z0-9_-]*)", 1),
+    # "I never use/used X [version]"
+    (r"\b(?:I|i)\s+never\s+(?:use|used)\s+([A-Za-z][A-Za-z0-9_-]*(?:\s+\d+(?:\.\d+)?[a-z]?)?)", 1),
+    # "I/We no longer use/support X [version]"
+    (
+        r"\b(?:I|i|we|We)\s+no\s+longer\s+(?:use|support)\s+([A-Za-z][A-Za-z0-9_-]*(?:\s+\d+(?:\.\d+)?[a-z]?)?)",
+        1,
+    ),
 ]
 
 # Compiled patterns for efficiency
 _COMPILED_PATTERNS = [(re.compile(p, re.IGNORECASE), g) for p, g in NEGATION_PATTERNS]
 
+# Short terms that are valid for negation (programming languages, etc.)
+# These bypass the 2-character minimum check
+# Note: These patterns require word-boundary matching during filtering to avoid
+# false positives (e.g., "r" matching every word containing the letter)
+SHORT_TERM_ALLOWLIST = {"r", "c", "d", "f", "j", "go"}  # R, C, D, F#, J, Go (languages)
+
 
 def detect_negations(text: str) -> list[NegationMatch]:
     """Detect explicit negations in text.
 
-    Uses pattern matching to find statements like:
+    Uses simplified pattern matching for high-confidence cases:
     - "I don't use MongoDB"
     - "I'm not a Java developer"
-    - "My email is not jane@example.com"
+    - "I never use Windows"
+    - "We no longer support Python 2"
+
+    Edge cases are handled by LLM during consolidation.
 
     Args:
         text: Text to search for negations.
@@ -95,6 +99,11 @@ def detect_negations(text: str) -> list[NegationMatch]:
                 negated_term = match.group(group_idx).strip()
             except IndexError:
                 negated_term = match.group(1).strip()
+
+            # Skip patterns that are too short (single letters cause overly broad matches)
+            # Minimum 2 characters unless it's a known short-term (R, C, Go, etc.)
+            if len(negated_term) < 2 and negated_term.lower() not in SHORT_TERM_ALLOWLIST:
+                continue
 
             # Clean up the full statement
             statement = match.group(0).strip()
