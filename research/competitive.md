@@ -4,12 +4,12 @@ Technical comparison of AI memory systems. Based on published papers and documen
 
 ## Summary
 
-| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Selectivity |
-|--------|--------------|------------|------------|-------------|-----------------|-------------|
-| **Engram** | Yes | Yes | Yes | Yes | Yes | Yes |
-| **Mem0** | No | No | No | No | No | No |
-| **Zep/Graphiti** | Yes | No | No | Yes | Partial | No |
-| **Letta/MemGPT** | Partial | No | No | No | No | No |
+| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Selectivity | RIF |
+|--------|--------------|------------|------------|-------------|-----------------|-------------|-----|
+| **Engram** | Yes | Yes | Yes | Yes | Yes | Planned | Yes |
+| **Mem0** | No | No | No | No | No | No | No |
+| **Zep/Graphiti** | Yes | No | No | Yes | Partial | No | No |
+| **Letta/MemGPT** | Partial | No | No | No | No | No | No |
 
 ## Mem0
 
@@ -169,9 +169,22 @@ Novel approaches from recent literature:
 - Inhibitory plasticity (CCK+ interneurons) is critical for selectivity
 - Training stimulus reactivation during consolidation required for selectivity to emerge
 
-**Engram**: The `selectivity_score` (0.0-1.0) on SemanticMemory is directly inspired by this research—it increases as memories survive consolidation passes, modeling how engrams become more selective over time.
+**Engram**: The `selectivity_score` (0.0-1.0) field on SemanticMemory is directly inspired by this research. The field exists with `increase_selectivity()` and `decrease_selectivity()` methods, but consolidation does not yet call them. Future work will update this score during consolidation passes to model how engrams become more selective over time.
 
 Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct, not an implementation of neural inhibition.
+
+### Retrieval-Induced Forgetting (RIF)
+
+**What**: Retrieving a subset of items causes active suppression of related non-retrieved items. This is an inhibitory process, not just competition from strengthened items.
+
+**Source**: [Anderson, Bjork & Bjork (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/) — "Remembering can cause forgetting: Retrieval dynamics in long-term memory." *Journal of Experimental Psychology: Learning, Memory, and Cognition*, 20(5), 1063-1087.
+
+**Key findings**:
+- Suppression is strongest for high-similarity items (not dissimilar ones)
+- The effect is inhibitory (active suppression), not just competition from strengthening
+- Suppression endures 20+ minutes in human experiments
+
+**Engram**: Implements RIF as opt-in via `rif_enabled=True` on recall. After retrieval, memories that scored above `rif_threshold` but weren't returned get confidence decay (`rif_decay`, default 0.1). Episodic memories are exempt (immutable ground truth). Confidence floors at 0.1 to prevent total forgetting.
 
 ---
 
@@ -195,3 +208,4 @@ Note: `NegationFact` (which stores semantic negations like "User does NOT use Mo
 - [A-MEM Paper](https://arxiv.org/abs/2502.12110)
 - [Cognitive Workspace](https://arxiv.org/abs/2508.13171)
 - [Dynamic and Selective Engrams](https://www.nature.com/articles/s41593-023-01551-w) — Tomé et al., Nature Neuroscience 2024
+- [Retrieval-Induced Forgetting](https://pubmed.ncbi.nlm.nih.gov/7931095/) — Anderson, Bjork & Bjork, 1994

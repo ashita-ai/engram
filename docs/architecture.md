@@ -122,7 +122,9 @@ Inspired by A-MEM research showing 2x improvement on multi-hop reasoning benchma
 
 Memories start broad and become selective through repeated consolidation passes. Initial extraction captures many associations; subsequent passes prune weak or contradicted ones.
 
-The `selectivity_score` on SemanticMemory is directly inspired by dynamic engram research ([Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)): biological engrams transition from unselective → selective over ~12 hours via inhibitory plasticity. Engram models this with a score that increases as memories survive consolidation passes.
+The `selectivity_score` on SemanticMemory is directly inspired by dynamic engram research ([Tomé et al., Nature Neuroscience 2024](https://www.nature.com/articles/s41593-023-01551-w)): biological engrams transition from unselective → selective over ~12 hours via inhibitory plasticity.
+
+**Status**: The field exists on SemanticMemory with `increase_selectivity()` and `decrease_selectivity()` methods, but consolidation does not yet call them. Currently, `selectivity_score` remains at its default (0.0) after creation. Future work will update this score during consolidation passes.
 
 ### 6. Negation Tracking
 
@@ -473,5 +475,6 @@ This architecture is informed by recent research (2024-2025):
 |---------|----------|-------------|
 | Dynamic linking | [A-MEM](https://arxiv.org/abs/2502.12110) | 2x improvement on multi-hop reasoning |
 | Buffer promotion | [Cognitive Workspace](https://arxiv.org/abs/2508.13171) | 58.6% memory reuse vs 0% for naive RAG |
-| Selectivity scoring | [Tomé et al.](https://www.nature.com/articles/s41593-023-01551-w) | Engrams transition unselective → selective via inhibitory plasticity |
+| Selectivity scoring | [Tomé et al.](https://www.nature.com/articles/s41593-023-01551-w) | Engrams transition unselective → selective via inhibitory plasticity (field exists, planned) |
 | Ground truth | [HaluMem](https://arxiv.org/html/2511.03506) | <56% accuracy without source preservation |
+| RIF suppression | [Anderson et al. (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/) | Retrieval actively suppresses similar non-retrieved items (implemented) |
