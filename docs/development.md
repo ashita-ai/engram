@@ -1,26 +1,11 @@
-# Design Notes
+# Development Guide
 
-Technical decisions and rationale for the Engram stack.
+Setup, configuration, and development workflow for Engram.
 
-## Stack Overview
+For system architecture, see [architecture.md](architecture.md).
+For research foundations, see [research/overview.md](research/overview.md).
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     Application Layer                        │
-├─────────────────────────────────────────────────────────────┤
-│                      Engram API                              │
-│         encode() / recall() / consolidate() / decay()        │
-├─────────────────────────────────────────────────────────────┤
-│  Pydantic          │  Pydantic AI       │  python-dotenv    │
-│  Data models       │  LLM agents        │  Configuration    │
-├─────────────────────────────────────────────────────────────┤
-│                        Qdrant                                │
-│              Vector storage for all memory types             │
-├─────────────────────────────────────────────────────────────┤
-│                   Docker / Docker Compose                    │
-│              Local dev and production deployment             │
-└─────────────────────────────────────────────────────────────┘
-```
+---
 
 ## Core Dependencies
 
@@ -118,68 +103,6 @@ engram_factual     # Pattern-extracted facts
 engram_semantic    # LLM-inferred knowledge
 engram_procedural  # Behavioral patterns
 engram_inhibitory  # What is NOT true (negations)
-```
-
-### Durable Execution: DBOS (Local) + Temporal (Production)
-
-Engram's `consolidate()` operation runs LLM extraction in the background. This needs durable execution to handle crashes, retries, and long-running workflows.
-
-**Two-tier approach**:
-
-| Environment | Backend | Why |
-|-------------|---------|-----|
-| **Local dev / examples** | DBOS | In-process, just needs SQLite, zero infrastructure |
-| **Production** | Temporal | Distributed, battle-tested, full visibility |
-
-**DBOS (Local)**:
-```python
-from dbos import DBOS
-
-@DBOS.workflow()
-async def consolidate_workflow(episodes: list[str]) -> list[Fact]:
-    """Durable consolidation - survives crashes."""
-    result = await consolidation_agent.run(episodes)
-    return result.data.facts
-```
-
-**Temporal (Production)**:
-```python
-from temporalio import workflow, activity
-
-@activity.defn
-async def extract_facts(episodes: list[str]) -> list[Fact]:
-    result = await consolidation_agent.run(episodes)
-    return result.data.facts
-
-@workflow.defn
-class ConsolidateWorkflow:
-    @workflow.run
-    async def run(self, episodes: list[str]) -> list[Fact]:
-        return await workflow.execute_activity(
-            extract_facts,
-            episodes,
-            start_to_close_timeout=timedelta(minutes=5),
-        )
-```
-
-**Configuration** (`.env`):
-```bash
-# Local dev
-DURABLE_BACKEND=dbos
-
-# Production
-DURABLE_BACKEND=temporal
-TEMPORAL_ADDRESS=temporal:7233
-```
-
-**The code abstraction**:
-```python
-# src/engram/durability.py
-async def run_durable(fn, *args):
-    if settings.durable_backend == "dbos":
-        return await dbos_run(fn, *args)
-    else:
-        return await temporal_run(fn, *args)
 ```
 
 ## Configuration

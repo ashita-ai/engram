@@ -240,10 +240,9 @@ Engram isn't just storage—it's a system that learns:
 ## Documentation
 
 - [Architecture](docs/architecture.md) — Memory types, data flow, storage
-- [Design Notes](docs/design.md) — Stack decisions and rationale
-- [Accuracy & Hallucination Prevention](research/accuracy.md) — Why ground truth matters
-- [Research Foundations](research/overview.md) — Theoretical basis
-- [Competitive Analysis](research/competitive.md) — How Engram compares to alternatives
+- [Development Guide](docs/development.md) — Setup, configuration, workflow
+- [Research Foundations](docs/research/overview.md) — Theoretical basis and the accuracy problem
+- [Competitive Analysis](docs/research/competitive.md) — How Engram compares to alternatives
 
 ## Status
 

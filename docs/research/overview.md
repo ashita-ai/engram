@@ -2,6 +2,42 @@
 
 This document explains *why* Engram makes its specific design choices, with citations to supporting research.
 
+---
+
+## The Problem: AI Memory Accuracy
+
+Most AI memory systems use LLM-based extraction on every message. This creates compounding problems:
+
+1. **Extraction errors** — LLMs make mistakes when extracting facts
+2. **Information loss** — Summarization discards details
+3. **Error propagation** — Corrupted memories distort future decisions
+4. **No recovery** — Once source data is lost, errors are permanent
+
+### Empirical Evidence
+
+The HaluMem benchmark (2024) evaluated memory-augmented LLM systems on factual accuracy:
+
+> "All systems achieve answer accuracies below 56%, with both hallucination rate and omission rate remaining high... Systems suffer omission rates above 50%, primarily stemming from insufficient coverage in memory extraction."
+> — [HaluMem: Evaluating Hallucinations in Memory Systems](https://arxiv.org/html/2511.03506)
+
+Error types in LLM extraction:
+- **Omission** — Missing important facts
+- **Hallucination** — Generating facts that weren't present
+- **Conflation** — Merging distinct facts incorrectly
+- **Misattribution** — Assigning facts to wrong entities
+
+### The Solution
+
+Store raw data first. Derive later. Never lose the original.
+
+```
+Episode (immutable) → Derived Facts → Application
+       ↑                    ↓
+       └────── recovery ────┘
+```
+
+---
+
 ## Design Decisions and Their Research Basis
 
 ### 1. Multiple Memory Types
@@ -45,8 +81,6 @@ This is a problem for AI systems. Recent benchmarks show alarming error rates:
 > — [HaluMem: Hallucinations in LLM Memory, 2024](https://arxiv.org/html/2511.03506)
 
 **Engineering implication**: If derived memories can be wrong, the original is needed to recover. Engram preserves ground truth so extraction errors are correctable.
-
-See: [Accuracy Problem](accuracy.md)
 
 ---
 
@@ -187,7 +221,6 @@ Engram uses cognitive science as design inspiration, not strict implementation.
 
 ## Further Reading
 
-- [Accuracy & Hallucination Prevention](accuracy.md) — The core problem Engram solves
 - [Competitive Analysis](competitive.md) — How Engram compares to alternatives
 
 ---
