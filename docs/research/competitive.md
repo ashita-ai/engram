@@ -7,32 +7,47 @@ Technical comparison of AI memory systems. Based on published papers and documen
 | System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Strength Tracking | RIF |
 |--------|--------------|------------|------------|-------------|-----------------|-------------------|-----|
 | **Engram** | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| **Mem0** | No | No | No | No | No | No | No |
+| **Mem0** | No | No | Partial | No | Yes (Mem0ᵍ) | No | No |
 | **Zep/Graphiti** | Yes | No | No | Yes | Partial | No | No |
 | **Letta/MemGPT** | Partial | No | No | No | No | No | No |
 
-**Note on "Strength Tracking"**: All systems have some consolidation process (extraction, summarization). This column tracks whether memories get *stronger* through repeated consolidation involvement (Testing Effect). Mem0 has update phases, Letta has periodic summarization, but neither tracks consolidation_strength or passes.
+**Notes**:
+- **Strength Tracking**: Whether memories get *stronger* through repeated consolidation (Testing Effect). No system except Engram tracks consolidation_strength or passes.
+- **Mem0 Forgetting**: Mem0 has lifecycle policies for time-based expiration, but not principled decay based on access/importance.
+- **Mem0 Dynamic Linking**: Mem0ᵍ (graph variant) stores entities as nodes and relations as edges.
 
 ## Mem0
 
-**Architecture**: Two-phase LLM extraction on every write.
+**Architecture**: Two-phase LLM extraction on every write, with optional graph memory (Mem0ᵍ).
 
 ```
-Message → LLM Extract → LLM Categorize (ADD/UPDATE/DELETE/NOOP) → Graph Store
+Message → LLM Extract → LLM Categorize (ADD/UPDATE/DELETE/NOOP) → Store
+                                                                    ↓
+                                                    Vector Store OR Graph Store (Mem0ᵍ)
 ```
+
+**Mem0ᵍ (Graph Variant)**:
+- Entity Extractor identifies entities as nodes
+- Relations Generator infers labeled edges
+- Conflict Detector flags overlapping/contradictory elements
+- Update Resolver decides: add, merge, invalidate, or skip
 
 **What it does well**:
 - Compresses conversation history (26K → 7K tokens claimed)
 - Simple API
-- Active development
+- Active development ($24M raised Oct 2025)
+- Graph memory (Mem0ᵍ) enables relationship queries
+- Lifecycle policies for time-based expiration
+- 26% improvement over OpenAI baseline on LLM-as-Judge metric
 
 **Limitations**:
 - **No ground truth preservation** — Original messages discarded after extraction
 - **LLM extraction on write** — Errors become permanent
 - **No confidence tracking** — All memories treated as equally reliable
-- **No forgetting** — Unbounded growth
+- **Forgetting is time-based only** — No access/importance-based decay
+- **No consolidation strength** — Memories don't get stronger through repeated use
 
-**Source**: [Mem0 Paper](https://arxiv.org/abs/2504.19413), [Documentation](https://docs.mem0.ai)
+**Source**: [Mem0 Paper](https://arxiv.org/abs/2504.19413), [Documentation](https://docs.mem0.ai), [Graph Memory Docs](https://docs.mem0.ai/open-source/features/graph-memory)
 
 ---
 
