@@ -2,7 +2,7 @@
 
 Engram is a memory system for LLM applications built on Pydantic AI with durable execution.
 
-> **Status**: Pre-alpha. This document describes the target architecture. Code examples show proposed APIs, not current implementations.
+> **Status**: Pre-alpha. Core APIs (`encode`, `recall`, `verify`, `recall_at`) are implemented. Background workflows (`consolidate`, `decay`, `promote`) are functional.
 
 ## Stack
 
@@ -17,9 +17,9 @@ Engram is a memory system for LLM applications built on Pydantic AI with durable
 │              Agents with structured outputs                   │
 ├─────────────────────────────────────────────────────────────┤
 │               Durable Execution                              │
-│         ┌──────────────┬──────────────┐                      │
-│         │ DBOS (local) │   Temporal   │                      │
-│         └──────────────┴──────────────┘                      │
+│    ┌──────────────┬──────────────┬──────────────┐            │
+│    │ DBOS (local) │   Temporal   │   Prefect    │            │
+│    └──────────────┴──────────────┴──────────────┘            │
 ├─────────────────────────────────────────────────────────────┤
 │                       Qdrant                                 │
 │              Vector storage for all memory types             │
@@ -100,9 +100,9 @@ confidence *= exp(-days_since_confirmed / decay_half_life_days)
 
 Every derived fact tracks two timestamps:
 - `event_at`: When the fact was true (from the source episode)
-- `derived_at`: When we extracted it
+- `derived_at`: When it was extracted
 
-Enables "what did we know on date X?" queries for debugging and audit.
+Enables "what was known on date X?" queries for debugging and audit.
 
 ### 4. Dynamic Memory Linking
 
@@ -311,46 +311,45 @@ engram_negation     → vectors + payload (content, negates_pattern, source_epis
 ## API
 
 ```python
-from engram import MemoryStore
+from engram.service import EngramService
 
-memory = MemoryStore(
-    qdrant_url="http://localhost:6333",
-    user_id="user_123",
-    durable_backend="dbos"  # or "temporal"
-)
+# Initialize with async context manager
+async with EngramService.create() as engram:
+    # Store (immediate, preserves ground truth)
+    result = await engram.encode(
+        content="My email is john@example.com",
+        role="user",
+        user_id="user_123",
+    )
 
-# Store (immediate, preserves ground truth)
-await memory.encode(interaction, extract_facts=True)
+    # Retrieve (with confidence filtering)
+    memories = await engram.recall(
+        query="What databases does the user work with?",
+        user_id="user_123",
+        memory_types=["factual", "semantic"],
+        min_confidence=0.7,
+        follow_links=True,             # Multi-hop reasoning
+    )
 
-# Retrieve (with confidence filtering, negation filtering)
-memories = await memory.recall(
-    query="What databases does the user work with?",
-    memory_types=["factual", "semantic"],
-    min_confidence=0.7,
-    min_selectivity=0.5,           # Only well-consolidated memories (uses consolidation_strength)
-    include_sources=True,
-    follow_links=True,             # Multi-hop reasoning
-)
+    # Verify a fact against its source
+    verified = await engram.verify(memory_id, user_id="user_123")
 
-# Verify a fact against its source
-verified = await memory.verify(fact_id)
+    # Temporal queries
+    memories = await engram.recall_at(
+        query="What was known about the user?",
+        user_id="user_123",
+        as_of=datetime(2024, 6, 1),    # Point-in-time query
+    )
 
-# Temporal queries
-memories = await memory.recall_at(
-    query="What did we know about the user?",
-    as_of=datetime(2024, 6, 1),    # Point-in-time query
-)
-
-# Background operations (run as durable workflows)
-await memory.consolidate()         # Extract, link, prune
-await memory.decay()               # Update scores, archive, promote
+    # Background operations (run as durable workflows)
+    await engram.consolidate(user_id="user_123")  # Extract, link, strengthen
 ```
 
 ## Background Operations
 
 ### Consolidation
 
-Runs on schedule. Extracts semantic patterns, builds links, prunes weak associations:
+Implemented via `run_consolidation()`. Extracts semantic patterns, builds links, strengthens memories:
 
 ```python
 from pydantic import BaseModel
@@ -408,7 +407,7 @@ async def consolidate():
 
 ### Decay
 
-Updates importance scores based on time and access:
+Implemented via `run_decay()`. Updates importance scores based on time and access:
 
 ```python
 async def decay():
