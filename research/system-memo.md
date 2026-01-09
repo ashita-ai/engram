@@ -4,13 +4,13 @@
 
 ---
 
-## The Problem Everyone Ignores
+## The Accuracy Problem
 
-Ask ChatGPT what you told it last week. It has no idea.
+AI memory systems exist. The problem is they're wrong more than half the time.
 
-Current AI memory solutions try to fix this by extracting "facts" from your conversations and storing them. Sounds reasonable. But here's the dirty secret: they throw away your actual words and keep only what the AI *thinks* you meant. When the AI misunderstands (and it will), there's no way back.
+The HaluMem benchmark tested leading memory systems and found accuracy below 56%, with omission rates exceeding 50%. This isn't edge cases—it's the baseline.
 
-Recent benchmarks show these systems get it wrong **more than half the time**. That's not memory. That's a coin flip.
+Why? Most systems follow a pattern: conversation happens, LLM extracts "facts," facts go into a database. The original words get thrown away. Every extraction pass can introduce mistakes. Every summarization loses detail. After a few iterations, you're querying a game of telephone.
 
 ## What Engram Does Differently
 
