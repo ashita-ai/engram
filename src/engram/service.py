@@ -358,11 +358,18 @@ class EngramService:
         follow_links: bool = False,
         max_hops: int = 2,
         freshness: str = "best_effort",
+        rif_enabled: bool = False,
+        rif_threshold: float = 0.5,
+        rif_decay: float = 0.1,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
         Searches across memory types and returns unified results
         sorted by similarity score.
+
+        Supports Retrieval-Induced Forgetting (RIF) based on Anderson et al. (1994):
+        when memories are retrieved, similar but non-retrieved memories are suppressed.
+        This naturally prunes redundant/overlapping memories over time.
 
         Args:
             query: Natural language query.
@@ -378,6 +385,11 @@ class EngramService:
             max_hops: Maximum link traversal depth when follow_links=True.
             freshness: Freshness mode - "best_effort" returns all, "fresh_only" only
                 returns fully consolidated memories.
+            rif_enabled: Enable Retrieval-Induced Forgetting. When True, memories
+                that competed but weren't retrieved get confidence decay.
+            rif_threshold: Minimum similarity score for a memory to be considered
+                a "competitor" that gets suppressed (default 0.5).
+            rif_decay: Amount to decay confidence of suppressed memories (default 0.1).
 
         Returns:
             List of RecallResult sorted by similarity score, with staleness metadata.
@@ -603,17 +615,31 @@ class EngramService:
         if include_sources:
             final_results = await self._enrich_with_sources(final_results, user_id)
 
+        # Retrieval-Induced Forgetting (RIF): suppress competing memories
+        # Based on Anderson et al. (1994) - retrieved memories suppress similar non-retrieved ones
+        suppressed_count = 0
+        if rif_enabled:
+            retrieved_ids = {r.memory_id for r in final_results}
+            suppressed_count = await self._apply_rif_suppression(
+                all_results=results,
+                retrieved_ids=retrieved_ids,
+                rif_threshold=rif_threshold,
+                rif_decay=rif_decay,
+                user_id=user_id,
+            )
+
         # Log audit entry (hash query to avoid PII in logs)
         duration_ms = int((time.monotonic() - start_time) * 1000)
         query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
-        memory_types = list({r.memory_type for r in final_results})
+        result_memory_types = list({r.memory_type for r in final_results})
         audit_entry = AuditEntry.for_recall(
             user_id=user_id,
             query_hash=query_hash,
             results_count=len(final_results),
-            memory_types=memory_types,
+            memory_types=result_memory_types,
             org_id=org_id,
             duration_ms=duration_ms,
+            rif_suppressed=suppressed_count if rif_enabled else None,
         )
         await self.storage.log_audit(audit_entry)
 
@@ -1220,3 +1246,101 @@ class EngramService:
         except Exception as e:
             # Log but don't fail the encode operation
             logger.warning(f"High-importance consolidation failed: {e}")
+
+    async def _apply_rif_suppression(
+        self,
+        all_results: list[RecallResult],
+        retrieved_ids: set[str],
+        rif_threshold: float,
+        rif_decay: float,
+        user_id: str,
+    ) -> int:
+        """Apply Retrieval-Induced Forgetting to competing memories.
+
+        Based on Anderson et al. (1994): when memory A is retrieved,
+        similar but non-retrieved memories are actively suppressed.
+        This naturally prunes redundant/overlapping memories over time.
+
+        Args:
+            all_results: All candidate results from search (before limit).
+            retrieved_ids: IDs of memories that were actually retrieved.
+            rif_threshold: Minimum score for a memory to be considered a competitor.
+            rif_decay: Amount to decay confidence of suppressed memories.
+            user_id: User ID for multi-tenancy.
+
+        Returns:
+            Number of memories that were suppressed.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        suppressed_count = 0
+
+        for result in all_results:
+            # Skip if this memory was retrieved
+            if result.memory_id in retrieved_ids:
+                continue
+
+            # Skip if below competition threshold (not similar enough to compete)
+            if result.score < rif_threshold:
+                continue
+
+            # Skip episodic memories and working memory (immutable ground truth)
+            # RIF only applies to derived memories with confidence scores
+            if result.memory_type in ("episodic", "working"):
+                continue
+
+            # Apply suppression based on memory type
+            if result.memory_type == "factual":
+                fact = await self.storage.get_fact(result.memory_id, user_id)
+                if fact and fact.confidence.value > rif_decay:
+                    new_confidence = max(0.1, fact.confidence.value - rif_decay)
+                    fact.confidence.value = new_confidence
+                    await self.storage.update_fact(fact)
+                    suppressed_count += 1
+                    logger.debug(
+                        f"RIF suppressed fact {fact.id}: "
+                        f"confidence {result.confidence:.2f} -> {new_confidence:.2f}"
+                    )
+
+            elif result.memory_type == "semantic":
+                semantic = await self.storage.get_semantic(result.memory_id, user_id)
+                if semantic and semantic.confidence.value > rif_decay:
+                    new_confidence = max(0.1, semantic.confidence.value - rif_decay)
+                    semantic.confidence.value = new_confidence
+                    await self.storage.update_semantic_memory(semantic)
+                    suppressed_count += 1
+                    logger.debug(
+                        f"RIF suppressed semantic {semantic.id}: "
+                        f"confidence {result.confidence:.2f} -> {new_confidence:.2f}"
+                    )
+
+            elif result.memory_type == "procedural":
+                procedural = await self.storage.get_procedural(result.memory_id, user_id)
+                if procedural and procedural.confidence.value > rif_decay:
+                    new_confidence = max(0.1, procedural.confidence.value - rif_decay)
+                    procedural.confidence.value = new_confidence
+                    await self.storage.update_procedural_memory(procedural)
+                    suppressed_count += 1
+                    logger.debug(
+                        f"RIF suppressed procedural {procedural.id}: "
+                        f"confidence {result.confidence:.2f} -> {new_confidence:.2f}"
+                    )
+
+            elif result.memory_type == "negation":
+                negation = await self.storage.get_negation(result.memory_id, user_id)
+                if negation and negation.confidence.value > rif_decay:
+                    new_confidence = max(0.1, negation.confidence.value - rif_decay)
+                    negation.confidence.value = new_confidence
+                    await self.storage.update_negation_fact(negation)
+                    suppressed_count += 1
+                    logger.debug(
+                        f"RIF suppressed negation {negation.id}: "
+                        f"confidence {result.confidence:.2f} -> {new_confidence:.2f}"
+                    )
+
+        if suppressed_count > 0:
+            logger.info(f"RIF: suppressed {suppressed_count} competing memories")
+
+        return suppressed_count

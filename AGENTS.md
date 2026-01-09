@@ -273,9 +273,38 @@ The six memory types are engineering constructs:
 - **Factual** — Engineering subdivision (verbatim vs inferred) not from cognitive science
 - **Negation** — Engineering construct for storing semantic negations (what is NOT true)
 
-The `selectivity_score` on SemanticMemory is the genuine connection to Tomé et al. research on dynamic engrams and inhibitory plasticity.
-
 Be explicit about which are science-inspired and which are engineering additions.
+
+---
+
+## Scientific Foundations
+
+### Retrieval-Induced Forgetting (RIF)
+
+**What it is**: When memory A is retrieved, similar but non-retrieved memories are actively suppressed.
+
+**Research**: Anderson, M.C., Bjork, R.A., & Bjork, E.L. (1994). "Remembering can cause forgetting: Retrieval dynamics in long-term memory." 30+ years of replicated research.
+
+**How we use it**: After recall, memories that competed but weren't retrieved get confidence decay. This naturally prunes redundant/overlapping memories over time.
+
+```python
+# RIF in action
+results = recall(query, limit=5)  # Returns top 5
+# Behind the scenes: similar memories ranked 6-15 get suppressed
+```
+
+### Context Selectivity (Future)
+
+**What it is**: Memories should respond specifically to their original context, not overgeneralize.
+
+**Research**: Tomé et al. "Dynamic and selective engrams emerge with memory consolidation" Nature Neuroscience (2024). Describes how engrams become more context-specific over time.
+
+**Status**: `selectivity_score` field exists on SemanticMemory but is not yet implemented. This is distinct from RIF - it tracks memory precision, not inter-memory competition.
+
+### What we DON'T implement
+
+- **Tomé et al. inhibitory plasticity**: The paper describes neurons competing WITHIN a single engram. We don't model individual neurons.
+- **Exact biological mechanisms**: We use cognitive science as inspiration, not blueprint.
 
 ---
 

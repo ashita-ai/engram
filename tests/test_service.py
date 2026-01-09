@@ -1064,3 +1064,349 @@ class TestGetSources:
         assert len(episodes) == 2
         assert episodes[0].id == "ep_old"
         assert episodes[1].id == "ep_new"
+
+
+class TestRetrievalInducedForgetting:
+    """Tests for Retrieval-Induced Forgetting (RIF).
+
+    Based on Anderson et al. (1994): when memories are retrieved,
+    similar but non-retrieved memories are suppressed.
+    """
+
+    @pytest.fixture
+    def mock_service(self):
+        """Create a service with mocked dependencies for RIF testing."""
+        storage = AsyncMock()
+        storage.search_episodes = AsyncMock(return_value=[])
+        storage.search_facts = AsyncMock(return_value=[])
+        storage.search_semantic = AsyncMock(return_value=[])
+        storage.search_procedural = AsyncMock(return_value=[])
+        storage.search_negation = AsyncMock(return_value=[])
+        storage.log_audit = AsyncMock()
+        storage.get_fact = AsyncMock()
+        storage.get_semantic = AsyncMock()
+        storage.update_fact = AsyncMock(return_value=True)
+        storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+
+        pipeline = MagicMock()
+
+        settings = Settings(openai_api_key="sk-test-dummy-key")
+
+        return EngramService(
+            storage=storage,
+            embedder=embedder,
+            pipeline=pipeline,
+            settings=settings,
+        )
+
+    @pytest.mark.asyncio
+    async def test_rif_disabled_by_default(self, mock_service):
+        """RIF should be disabled by default - no suppression occurs."""
+        # Create test facts with different scores
+        fact1 = Fact(
+            id="fact_1",
+            content="Retrieved fact",
+            category="test",
+            source_episode_id="ep_1",
+            user_id="user_123",
+        )
+        fact1.confidence.value = 0.9
+
+        fact2 = Fact(
+            id="fact_2",
+            content="Non-retrieved fact",
+            category="test",
+            source_episode_id="ep_2",
+            user_id="user_123",
+        )
+        fact2.confidence.value = 0.8
+
+        mock_service.storage.search_facts.return_value = [
+            ScoredResult(memory=fact1, score=0.9),
+            ScoredResult(memory=fact2, score=0.6),
+        ]
+
+        # Default recall - no RIF
+        await mock_service.recall(
+            query="test query",
+            user_id="user_123",
+            limit=1,  # Only return top result
+            memory_types=["factual"],
+        )
+
+        # Verify fact2 was NOT suppressed (update_fact not called)
+        mock_service.storage.update_fact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rif_enabled_suppresses_competing_facts(self, mock_service):
+        """With RIF enabled, similar non-retrieved facts should be suppressed."""
+        # Create test facts with different scores
+        fact1 = Fact(
+            id="fact_1",
+            content="Retrieved fact",
+            category="test",
+            source_episode_id="ep_1",
+            user_id="user_123",
+        )
+        fact1.confidence.value = 0.9
+
+        fact2 = Fact(
+            id="fact_2",
+            content="Non-retrieved competing fact",
+            category="test",
+            source_episode_id="ep_2",
+            user_id="user_123",
+        )
+        fact2.confidence.value = 0.8
+
+        mock_service.storage.search_facts.return_value = [
+            ScoredResult(memory=fact1, score=0.9),
+            ScoredResult(memory=fact2, score=0.6),  # Above threshold
+        ]
+        mock_service.storage.get_fact.return_value = fact2
+
+        # Recall with RIF enabled
+        await mock_service.recall(
+            query="test query",
+            user_id="user_123",
+            limit=1,
+            memory_types=["factual"],
+            rif_enabled=True,
+            rif_threshold=0.5,  # fact2 at 0.6 is above threshold
+            rif_decay=0.1,
+        )
+
+        # Verify fact2 was suppressed
+        mock_service.storage.get_fact.assert_called_with("fact_2", "user_123")
+        mock_service.storage.update_fact.assert_called_once()
+
+        # Verify the confidence was decayed
+        updated_fact = mock_service.storage.update_fact.call_args[0][0]
+        assert updated_fact.confidence.value == pytest.approx(0.7, rel=0.01)
+
+    @pytest.mark.asyncio
+    async def test_rif_does_not_suppress_retrieved_memories(self, mock_service):
+        """RIF should not suppress memories that were actually retrieved."""
+        fact1 = Fact(
+            id="fact_1",
+            content="Retrieved fact",
+            category="test",
+            source_episode_id="ep_1",
+            user_id="user_123",
+        )
+        fact1.confidence.value = 0.9
+
+        mock_service.storage.search_facts.return_value = [
+            ScoredResult(memory=fact1, score=0.9),
+        ]
+
+        await mock_service.recall(
+            query="test query",
+            user_id="user_123",
+            limit=1,
+            memory_types=["factual"],
+            rif_enabled=True,
+        )
+
+        # fact1 was retrieved, so it should NOT be suppressed
+        mock_service.storage.update_fact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rif_does_not_suppress_below_threshold(self, mock_service):
+        """RIF should not suppress memories below the similarity threshold."""
+        fact1 = Fact(
+            id="fact_1",
+            content="Retrieved fact",
+            category="test",
+            source_episode_id="ep_1",
+            user_id="user_123",
+        )
+        fact1.confidence.value = 0.9
+
+        fact2 = Fact(
+            id="fact_2",
+            content="Low similarity fact",
+            category="test",
+            source_episode_id="ep_2",
+            user_id="user_123",
+        )
+        fact2.confidence.value = 0.8
+
+        mock_service.storage.search_facts.return_value = [
+            ScoredResult(memory=fact1, score=0.9),
+            ScoredResult(memory=fact2, score=0.3),  # Below threshold
+        ]
+
+        await mock_service.recall(
+            query="test query",
+            user_id="user_123",
+            limit=1,
+            memory_types=["factual"],
+            rif_enabled=True,
+            rif_threshold=0.5,  # fact2 at 0.3 is below
+        )
+
+        # fact2 is below threshold, so not suppressed
+        mock_service.storage.update_fact.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rif_does_not_suppress_episodic_memories(self, mock_service):
+        """RIF should not suppress episodic memories (ground truth is immutable)."""
+        ep1 = Episode(
+            id="ep_1",
+            content="First episode",
+            role="user",
+            user_id="user_123",
+        )
+        ep2 = Episode(
+            id="ep_2",
+            content="Second episode",
+            role="user",
+            user_id="user_123",
+        )
+
+        mock_service.storage.search_episodes.return_value = [
+            ScoredResult(memory=ep1, score=0.9),
+            ScoredResult(memory=ep2, score=0.6),
+        ]
+
+        await mock_service.recall(
+            query="test query",
+            user_id="user_123",
+            limit=1,
+            memory_types=["episodic"],
+            rif_enabled=True,
+            rif_threshold=0.5,
+        )
+
+        # Episodes are immutable ground truth - no updates
+        mock_service.storage.update_fact.assert_not_called()
+        mock_service.storage.update_semantic_memory.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_rif_suppresses_semantic_memories(self, mock_service):
+        """RIF should suppress competing semantic memories."""
+        sem1 = SemanticMemory(
+            id="sem_1",
+            content="Retrieved semantic",
+            source_episode_ids=["ep_1"],
+            user_id="user_123",
+        )
+        sem1.confidence.value = 0.8
+
+        sem2 = SemanticMemory(
+            id="sem_2",
+            content="Competing semantic",
+            source_episode_ids=["ep_2"],
+            user_id="user_123",
+        )
+        sem2.confidence.value = 0.7
+
+        mock_service.storage.search_semantic.return_value = [
+            ScoredResult(memory=sem1, score=0.9),
+            ScoredResult(memory=sem2, score=0.6),
+        ]
+        mock_service.storage.get_semantic.return_value = sem2
+
+        await mock_service.recall(
+            query="test query",
+            user_id="user_123",
+            limit=1,
+            memory_types=["semantic"],
+            rif_enabled=True,
+            rif_threshold=0.5,
+            rif_decay=0.1,
+        )
+
+        # Verify sem2 was suppressed
+        mock_service.storage.get_semantic.assert_called_with("sem_2", "user_123")
+        mock_service.storage.update_semantic_memory.assert_called_once()
+
+        # Verify the confidence was decayed
+        updated_sem = mock_service.storage.update_semantic_memory.call_args[0][0]
+        assert updated_sem.confidence.value == pytest.approx(0.6, rel=0.01)
+
+    @pytest.mark.asyncio
+    async def test_rif_audit_logging(self, mock_service):
+        """RIF suppression count should be logged in audit entry."""
+        fact1 = Fact(
+            id="fact_1",
+            content="Retrieved fact",
+            category="test",
+            source_episode_id="ep_1",
+            user_id="user_123",
+        )
+        fact1.confidence.value = 0.9
+
+        fact2 = Fact(
+            id="fact_2",
+            content="Suppressed fact",
+            category="test",
+            source_episode_id="ep_2",
+            user_id="user_123",
+        )
+        fact2.confidence.value = 0.8
+
+        mock_service.storage.search_facts.return_value = [
+            ScoredResult(memory=fact1, score=0.9),
+            ScoredResult(memory=fact2, score=0.6),
+        ]
+        mock_service.storage.get_fact.return_value = fact2
+
+        await mock_service.recall(
+            query="test query",
+            user_id="user_123",
+            limit=1,
+            memory_types=["factual"],
+            rif_enabled=True,
+            rif_threshold=0.5,
+        )
+
+        # Check audit entry includes RIF suppression count
+        mock_service.storage.log_audit.assert_called_once()
+        audit_entry = mock_service.storage.log_audit.call_args[0][0]
+        assert audit_entry.details.get("rif_suppressed") == 1
+
+    @pytest.mark.asyncio
+    async def test_rif_minimum_confidence_floor(self, mock_service):
+        """RIF should not decay confidence below 0.1 floor."""
+        fact1 = Fact(
+            id="fact_1",
+            content="Retrieved fact",
+            category="test",
+            source_episode_id="ep_1",
+            user_id="user_123",
+        )
+        fact1.confidence.value = 0.9
+
+        fact2 = Fact(
+            id="fact_2",
+            content="Very low confidence fact",
+            category="test",
+            source_episode_id="ep_2",
+            user_id="user_123",
+        )
+        fact2.confidence.value = 0.15  # Low confidence
+
+        mock_service.storage.search_facts.return_value = [
+            ScoredResult(memory=fact1, score=0.9),
+            ScoredResult(memory=fact2, score=0.6),
+        ]
+        mock_service.storage.get_fact.return_value = fact2
+
+        await mock_service.recall(
+            query="test query",
+            user_id="user_123",
+            limit=1,
+            memory_types=["factual"],
+            rif_enabled=True,
+            rif_threshold=0.5,
+            rif_decay=0.1,  # Would bring to 0.05 without floor
+        )
+
+        # Verify confidence floored at 0.1
+        updated_fact = mock_service.storage.update_fact.call_args[0][0]
+        assert updated_fact.confidence.value == 0.1
