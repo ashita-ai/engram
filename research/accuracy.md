@@ -94,7 +94,7 @@ Ground truth preservation enables composite confidence scoring:
 | Recency | 15% | Recently confirmed facts score higher |
 | Verification | 10% | Format checks passed (valid email, etc.) |
 
-Every score is auditable — you can explain *why* confidence is 0.73.
+Every score is auditable — the system can explain *why* confidence is 0.73.
 
 Applications can filter by confidence:
 - High-stakes decisions: `min_confidence=0.9`

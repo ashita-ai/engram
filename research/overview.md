@@ -44,7 +44,7 @@ This is a problem for AI systems. Recent benchmarks show alarming error rates:
 > "All systems achieve answer accuracies below 56%, with both hallucination rate and omission rate remaining high... Systems suffer omission rates above 50%, primarily stemming from insufficient coverage in memory extraction."
 > — [HaluMem: Hallucinations in LLM Memory, 2024](https://arxiv.org/html/2511.03506)
 
-**Engineering implication**: If derived memories can be wrong, you need the original to recover. Engram preserves ground truth so extraction errors are correctable.
+**Engineering implication**: If derived memories can be wrong, the original is needed to recover. Engram preserves ground truth so extraction errors are correctable.
 
 See: [Accuracy Problem](accuracy.md)
 
@@ -124,7 +124,7 @@ Memory consolidation in the brain is a slow, offline process:
 > "REM sleep cueing impairs recognition memory for cued memories. Memory benefit was driven by the product of SWS and REM sleep cueing, not independent contributions."
 > — [Yuksel et al., 2025](https://www.nature.com/articles/s42003-025-07868-5)
 
-**Note**: We cite sleep research for context, not because Engram models sleep stages. Our deferred consolidation is an engineering pattern (batch processing is cheaper and allows error correction), not a neuroscience simulation. The sleep literature shows that consolidation is naturally an offline process, which validates our approach of separating fast encoding from slow consolidation.
+**Note**: Sleep research is cited for context, not because Engram models sleep stages. Deferred consolidation is an engineering pattern (batch processing is cheaper and allows error correction), not a neuroscience simulation. The sleep literature shows that consolidation is naturally an offline process, which validates separating fast encoding from slow consolidation.
 
 Recent neuroscience shows multiple consolidation pathways:
 
@@ -157,9 +157,9 @@ The levels of processing framework shows deeper encoding produces stronger memor
 
 ## Known Limitations
 
-We use cognitive science as design inspiration, not strict implementation.
+Engram uses cognitive science as design inspiration, not strict implementation.
 
-### What We DON'T Model
+### What Engram Doesn't Model
 
 | Research Concept | What the Paper Says | What Engram Does Instead |
 |-----------------|---------------------|--------------------------|
@@ -177,7 +177,7 @@ We use cognitive science as design inspiration, not strict implementation.
 | Consolidation | Standard theory actively debated; Multiple Trace Theory challenges it ([Nadel & Moscovitch, 1997](https://pmc.ncbi.nlm.nih.gov/articles/PMC9720899/)) |
 | Ebbinghaus decay | Oversimplification; interference and context matter; may follow power law |
 
-**Why we use them anyway**: The core insights are valuable for engineering even if the details are debated:
+**Why use them anyway**: The core insights are valuable for engineering even if the details are debated:
 - Different information needs different handling
 - Ground truth preservation prevents error propagation
 - Some forgetting is necessary for relevance

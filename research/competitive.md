@@ -90,7 +90,7 @@ Main Context (working) ←→ Archival Memory (long-term)
 
 ### 1. Ground Truth Preservation
 
-Like Zep, we preserve raw interactions. Unlike Zep:
+Like Zep, Engram preserves raw interactions. Unlike Zep:
 - Explicit immutability guarantees
 - Clear separation between episodic (immutable) and derived (mutable)
 - Recovery path when extraction fails
@@ -106,7 +106,7 @@ Unique to Engram — confidence is a composite score, not a single tier:
 | Recency | 15% | When was this last confirmed |
 | Verification | 10% | Format/validity checks passed |
 
-**Key differentiator:** Scores are fully auditable. You can explain *why* confidence is 0.73, not just that it is.
+**Key differentiator:** Scores are fully auditable. The system can explain *why* confidence is 0.73, not just that it is.
 
 Applications filter by confidence. High-stakes queries use only trusted facts. Facts decay if not re-confirmed.
 
@@ -132,11 +132,11 @@ Novel approaches from recent literature:
 
 ### Bi-Temporal Data Model
 
-**What**: Track both event time (when fact was true) and ingestion time (when we learned it).
+**What**: Track both event time (when fact was true) and ingestion time (when it was learned).
 
 **Who has it**: Zep/Graphiti
 
-**Value**: Enables "what did we know on date X?" queries. Useful for debugging and audit.
+**Value**: Enables "what was known on date X?" queries. Useful for debugging and audit.
 
 **Engram**: Implements bi-temporal tracking with explicit `event_at` and `derived_at` timestamps on all derived memories.
 
@@ -190,12 +190,12 @@ Note: `NegationFact` (which stores semantic negations like "User does NOT use Mo
 
 ---
 
-## What We Don't Do (Intentionally)
+## What Engram Doesn't Do (Intentionally)
 
-| Approach | Why We Avoid It |
+| Approach | Why Engram Avoids It |
 |----------|-----------------|
 | LLM extraction on write | Errors become permanent |
-| Token compression focus | We optimize for accuracy, not size |
+| Token compression focus | Engram optimizes for accuracy, not size |
 | Complex graph schemas | Over-engineering for most use cases |
 | Self-editing memory | Risks ground truth corruption |
 
