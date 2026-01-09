@@ -358,7 +358,6 @@ class EngramService:
         follow_links: bool = False,
         max_hops: int = 2,
         freshness: str = "best_effort",
-        competition_strength: float = 0.0,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
@@ -379,10 +378,6 @@ class EngramService:
             max_hops: Maximum link traversal depth when follow_links=True.
             freshness: Freshness mode - "best_effort" returns all, "fresh_only" only
                 returns fully consolidated memories.
-            competition_strength: Memory competition strength (0.0-1.0). When > 0,
-                overlapping memories compete and losers get score penalties.
-                Based on: Tomé et al. "Dynamic and selective engrams emerge with
-                memory consolidation" Nature Neuroscience (2024).
 
         Returns:
             List of RecallResult sorted by similarity score, with staleness metadata.
@@ -588,16 +583,6 @@ class EngramService:
 
         # Sort by score descending
         results.sort(key=lambda r: r.score, reverse=True)
-
-        # Apply memory competition (Tomé et al. Nature Neuroscience 2024)
-        if competition_strength > 0 and len(results) > 1:
-            results = await self._apply_competition(
-                results=results,
-                user_id=user_id,
-                competition_strength=competition_strength,
-            )
-            # Re-sort after competition penalties
-            results.sort(key=lambda r: r.score, reverse=True)
 
         # Apply freshness filtering
         if freshness == "fresh_only":
@@ -1235,159 +1220,3 @@ class EngramService:
         except Exception as e:
             # Log but don't fail the encode operation
             logger.warning(f"High-importance consolidation failed: {e}")
-
-    async def _apply_competition(
-        self,
-        results: list[RecallResult],
-        user_id: str,
-        competition_strength: float,
-        similarity_threshold: float = 0.7,
-    ) -> list[RecallResult]:
-        """Apply memory competition to recall results.
-
-        Implements inhibitory plasticity inspired by Tomé et al. "Dynamic and
-        selective engrams emerge with memory consolidation" Nature Neuroscience
-        (2024). When memories overlap significantly (high mutual similarity),
-        they compete. The winner (higher selectivity) suppresses the loser.
-
-        Args:
-            results: List of recall results to process.
-            user_id: User ID for fetching memory details.
-            competition_strength: How strongly winners suppress losers (0.0-1.0).
-            similarity_threshold: Minimum similarity to trigger competition.
-
-        Returns:
-            List of RecallResult with competition penalties applied.
-        """
-        if len(results) < 2:
-            return results
-
-        # Build memory ID to embedding map for similarity calculation
-        embeddings: dict[str, list[float] | None] = {}
-        selectivity_scores: dict[str, float] = {}
-
-        for r in results:
-            # Get embedding for this memory
-            embedding = await self._get_memory_embedding(r.memory_id, user_id)
-            embeddings[r.memory_id] = embedding
-
-            # Get selectivity score (semantic memories have it, others use default)
-            if r.memory_type == "semantic":
-                selectivity = r.metadata.get("selectivity", 0.5)
-            else:
-                # Non-semantic memories get moderate selectivity
-                selectivity = 0.5
-            selectivity_scores[r.memory_id] = selectivity
-
-        # Track suppression for metadata
-        suppressed_by: dict[str, str] = {}
-        penalties: dict[str, float] = {}
-
-        # Compare all pairs for competition
-        for i, r1 in enumerate(results):
-            emb1 = embeddings.get(r1.memory_id)
-            if emb1 is None:
-                continue
-
-            for r2 in results[i + 1 :]:
-                emb2 = embeddings.get(r2.memory_id)
-                if emb2 is None:
-                    continue
-
-                # Calculate similarity between memories
-                similarity = _cosine_similarity(emb1, emb2)
-
-                if similarity < similarity_threshold:
-                    continue  # Not similar enough to compete
-
-                # Competition: higher selectivity wins
-                sel1 = selectivity_scores[r1.memory_id]
-                sel2 = selectivity_scores[r2.memory_id]
-
-                if sel1 > sel2:
-                    # r1 wins, r2 gets penalized
-                    loser_id = r2.memory_id
-                    winner_id = r1.memory_id
-                elif sel2 > sel1:
-                    # r2 wins, r1 gets penalized
-                    loser_id = r1.memory_id
-                    winner_id = r2.memory_id
-                else:
-                    # Tie: higher original score wins
-                    if r1.score >= r2.score:
-                        loser_id = r2.memory_id
-                        winner_id = r1.memory_id
-                    else:
-                        loser_id = r1.memory_id
-                        winner_id = r2.memory_id
-
-                # Calculate penalty: stronger competition + higher similarity = more suppression
-                penalty = competition_strength * similarity
-                current_penalty = penalties.get(loser_id, 0.0)
-                if penalty > current_penalty:
-                    penalties[loser_id] = penalty
-                    suppressed_by[loser_id] = winner_id
-
-        # Apply penalties and update metadata
-        updated_results: list[RecallResult] = []
-        for r in results:
-            penalty = penalties.get(r.memory_id, 0.0)
-            if penalty > 0:
-                # Apply penalty to score
-                new_score = max(0.0, r.score * (1.0 - penalty))
-                # Update metadata with competition info
-                new_metadata = dict(r.metadata)
-                new_metadata["suppressed_by"] = suppressed_by.get(r.memory_id)
-                new_metadata["competition_penalty"] = penalty
-
-                updated_results.append(
-                    RecallResult(
-                        memory_type=r.memory_type,
-                        content=r.content,
-                        score=new_score,
-                        confidence=r.confidence,
-                        memory_id=r.memory_id,
-                        source_episode_id=r.source_episode_id,
-                        source_episodes=r.source_episodes,
-                        related_ids=r.related_ids,
-                        hop_distance=r.hop_distance,
-                        staleness=r.staleness,
-                        consolidated_at=r.consolidated_at,
-                        metadata=new_metadata,
-                    )
-                )
-            else:
-                updated_results.append(r)
-
-        return updated_results
-
-    async def _get_memory_embedding(
-        self,
-        memory_id: str,
-        user_id: str,
-    ) -> list[float] | None:
-        """Get the embedding vector for a memory by ID.
-
-        Args:
-            memory_id: ID of the memory.
-            user_id: User ID for isolation.
-
-        Returns:
-            Embedding vector or None if not found.
-        """
-        if memory_id.startswith("ep_"):
-            ep = await self.storage.get_episode(memory_id, user_id)
-            return ep.embedding if ep else None
-        elif memory_id.startswith("fact_"):
-            fact = await self.storage.get_fact(memory_id, user_id)
-            return fact.embedding if fact else None
-        elif memory_id.startswith("sem_"):
-            sem = await self.storage.get_semantic(memory_id, user_id)
-            return sem.embedding if sem else None
-        elif memory_id.startswith("proc_"):
-            proc = await self.storage.get_procedural(memory_id, user_id)
-            return proc.embedding if proc else None
-        elif memory_id.startswith("neg_"):
-            neg = await self.storage.get_negation(memory_id, user_id)
-            return neg.embedding if neg else None
-        return None

@@ -414,6 +414,36 @@ Focus on quality over quantity."""
             if similar.id in new_memory.related_ids:
                 continue
 
+            # INHIBITORY PLASTICITY (Tomé et al. Nature Neuroscience 2024)
+            # During consolidation, overlapping memories compete.
+            # Winner (more sources/higher confidence) becomes more selective.
+            # Loser becomes less selective (may be pruned in decay workflow).
+            new_sources = len(new_memory.source_episode_ids)
+            existing_sources = len(similar.source_episode_ids)
+
+            if existing_sources > new_sources:
+                # Existing memory wins - it has more corroboration
+                similar.increase_selectivity(delta=0.1)
+                # New memory starts with default selectivity (0.0)
+                logger.debug(
+                    f"Inhibitory plasticity: {similar.id} wins over {new_memory.id} "
+                    f"({existing_sources} vs {new_sources} sources)"
+                )
+            elif new_sources > existing_sources:
+                # New memory wins - decrease existing selectivity
+                new_memory.increase_selectivity(delta=0.1)
+                similar.decrease_selectivity(delta=0.05)
+                logger.debug(
+                    f"Inhibitory plasticity: {new_memory.id} wins over {similar.id} "
+                    f"({new_sources} vs {existing_sources} sources)"
+                )
+            else:
+                # Tie - use confidence as tiebreaker
+                if similar.confidence.value >= new_memory.confidence.value:
+                    similar.increase_selectivity(delta=0.05)
+                else:
+                    new_memory.increase_selectivity(delta=0.05)
+
             # Add bidirectional links
             new_memory.add_link(similar.id)
             similar.add_link(new_memory.id)

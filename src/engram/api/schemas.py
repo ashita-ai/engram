@@ -150,12 +150,6 @@ class RecallRequest(BaseModel):
         default="best_effort",
         description="Freshness mode: best_effort returns all, fresh_only only consolidated",
     )
-    competition_strength: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Memory competition strength. When > 0, overlapping memories compete.",
-    )
     as_of: datetime | None = Field(
         default=None,
         description="Bi-temporal query: only return memories derived before this time",

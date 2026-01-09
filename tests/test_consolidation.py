@@ -718,3 +718,167 @@ class TestConsolidationLinking:
         assert result.semantic_memories_created == 1
         assert result.links_created == 0
         mock_storage.update_semantic_memory.assert_not_called()
+
+
+class TestInhibitoryPlasticity:
+    """Tests for inhibitory plasticity during consolidation.
+
+    Based on Tomé et al. "Dynamic and selective engrams emerge with memory
+    consolidation" Nature Neuroscience (2024). During consolidation, overlapping
+    memories compete and winners become more selective.
+    """
+
+    @pytest.mark.asyncio
+    async def test_existing_memory_wins_with_more_sources(self) -> None:
+        """Existing memory with more sources should increase selectivity."""
+        from engram.models import Episode, SemanticMemory
+
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_new"
+        mock_episode.role = "user"
+        mock_episode.content = "I like Python programming"
+
+        # Existing memory with multiple sources (should win)
+        existing_memory = SemanticMemory(
+            content="User prefers Python",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+            source_episode_ids=["ep_1", "ep_2", "ep_3"],  # 3 sources
+        )
+        existing_memory.selectivity_score = 0.3  # Starting selectivity
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.store_semantic = AsyncMock(return_value="sem_new")
+        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
+
+        # Track update calls to verify selectivity changes
+        updated_memories: list = []
+
+        async def capture_update(memory):
+            updated_memories.append(memory)
+            return True
+
+        mock_storage.update_semantic_memory = AsyncMock(side_effect=capture_update)
+
+        # Mock search to return existing memory as similar
+        mock_storage.search_semantic = AsyncMock(
+            return_value=[MagicMock(memory=existing_memory, score=0.9)]
+        )
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        # LLM creates one new fact
+        mock_llm_result = LLMExtractionResult(
+            semantic_facts=[
+                ExtractedFact(content="User enjoys Python coding"),
+            ],
+            links=[],
+            contradictions=[],
+        )
+
+        mock_agent_result = MagicMock()
+        mock_agent_result.output = mock_llm_result
+
+        with patch(
+            "engram.workflows.get_consolidation_agent",
+            side_effect=RuntimeError("Workflows not initialized"),
+        ):
+            with patch("pydantic_ai.Agent") as mock_agent_class:
+                mock_agent_instance = AsyncMock()
+                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
+                mock_agent_class.return_value = mock_agent_instance
+
+                await run_consolidation(
+                    storage=mock_storage,
+                    embedder=mock_embedder,
+                    user_id="test_user",
+                )
+
+        # Existing memory should have increased selectivity (winner)
+        existing_updates = [m for m in updated_memories if m.id == existing_memory.id]
+        assert len(existing_updates) > 0
+        # Check that selectivity increased (0.3 + 0.1 = 0.4)
+        assert existing_updates[-1].selectivity_score > 0.3
+
+    @pytest.mark.asyncio
+    async def test_new_memory_wins_over_weak_existing(self) -> None:
+        """New memory with more sources should win over weak existing memory."""
+        from engram.models import Episode, SemanticMemory
+
+        # New episode that will create a memory with 2 sources
+        mock_episode1 = MagicMock(spec=Episode)
+        mock_episode1.id = "ep_a"
+        mock_episode1.role = "user"
+        mock_episode1.content = "I strongly prefer Python for data science"
+
+        mock_episode2 = MagicMock(spec=Episode)
+        mock_episode2.id = "ep_b"
+        mock_episode2.role = "user"
+        mock_episode2.content = "Python is my go-to language"
+
+        # Existing memory with only 1 source (should lose)
+        existing_memory = SemanticMemory(
+            content="User uses Python",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+            source_episode_ids=["ep_old"],  # Only 1 source
+        )
+        existing_memory.selectivity_score = 0.5  # Starting selectivity
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unconsolidated_episodes = AsyncMock(
+            return_value=[mock_episode1, mock_episode2]
+        )
+        mock_storage.store_semantic = AsyncMock(return_value="sem_new")
+        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=2)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
+
+        updated_memories: list = []
+
+        async def capture_update(memory):
+            updated_memories.append(memory)
+            return True
+
+        mock_storage.update_semantic_memory = AsyncMock(side_effect=capture_update)
+        mock_storage.search_semantic = AsyncMock(
+            return_value=[MagicMock(memory=existing_memory, score=0.9)]
+        )
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        # LLM creates one new fact from both episodes
+        mock_llm_result = LLMExtractionResult(
+            semantic_facts=[
+                ExtractedFact(content="User strongly prefers Python for data science"),
+            ],
+            links=[],
+            contradictions=[],
+        )
+
+        mock_agent_result = MagicMock()
+        mock_agent_result.output = mock_llm_result
+
+        with patch(
+            "engram.workflows.get_consolidation_agent",
+            side_effect=RuntimeError("Workflows not initialized"),
+        ):
+            with patch("pydantic_ai.Agent") as mock_agent_class:
+                mock_agent_instance = AsyncMock()
+                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
+                mock_agent_class.return_value = mock_agent_instance
+
+                await run_consolidation(
+                    storage=mock_storage,
+                    embedder=mock_embedder,
+                    user_id="test_user",
+                )
+
+        # Existing memory should have decreased selectivity (loser)
+        existing_updates = [m for m in updated_memories if m.id == existing_memory.id]
+        assert len(existing_updates) > 0
+        # Check that selectivity decreased (0.5 - 0.05 = 0.45)
+        assert existing_updates[-1].selectivity_score < 0.5

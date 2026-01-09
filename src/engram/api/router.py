@@ -207,7 +207,6 @@ async def recall(
                 follow_links=request.follow_links,
                 max_hops=request.max_hops,
                 freshness=request.freshness,
-                competition_strength=request.competition_strength,
             )
 
         result_responses = [
