@@ -417,6 +417,62 @@ class CRUDMixin:
 
         return memories
 
+    async def list_negation_facts(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        limit: int = 1000,
+    ) -> list[NegationFact]:
+        """List all negation facts for a user.
+
+        Used for filtering during recall to exclude memories that
+        match negated patterns.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            limit: Maximum facts to return.
+
+        Returns:
+            List of NegationFact objects.
+        """
+        from engram.models import NegationFact
+
+        collection = self._collection_name("negation")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        facts: list[NegationFact] = []
+        for point in results:
+            if point.payload is not None:
+                fact = self._payload_to_memory(point.payload, NegationFact)
+                if isinstance(point.vector, list):
+                    fact.embedding = point.vector
+                facts.append(fact)
+
+        return facts
+
     async def update_semantic_memory(
         self,
         memory: SemanticMemory,

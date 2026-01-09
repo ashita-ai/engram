@@ -93,6 +93,27 @@ class MemoryEvolution(BaseModel):
     )
 
 
+class DetectedNegation(BaseModel):
+    """A negation detected by the LLM.
+
+    Negations record what is explicitly NOT true, enabling filtering
+    during recall to prevent false positives from outdated information.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    statement: str = Field(description="The negation statement (e.g., 'User does NOT use MongoDB')")
+    negates_pattern: str = Field(
+        description="Pattern/keyword this negates for retrieval filtering (e.g., 'mongodb')"
+    )
+    confidence: float = Field(
+        ge=0.0, le=1.0, default=0.7, description="Confidence in this negation"
+    )
+    source_context: str = Field(
+        default="", description="Original context where negation was stated"
+    )
+
+
 class LLMExtractionResult(BaseModel):
     """Structured output from the consolidation LLM agent.
 
@@ -115,6 +136,10 @@ class LLMExtractionResult(BaseModel):
         default_factory=list,
         description="Suggested updates to existing memories based on new context",
     )
+    negations: list[DetectedNegation] = Field(
+        default_factory=list,
+        description="Explicit negations detected (what is NOT true)",
+    )
 
 
 class ConsolidationResult(BaseModel):
@@ -123,6 +148,7 @@ class ConsolidationResult(BaseModel):
     Attributes:
         episodes_processed: Number of episodes that were processed.
         semantic_memories_created: Number of semantic memories extracted.
+        negations_created: Number of negation facts created.
         links_created: Number of memory links built.
         evolutions_applied: Number of memory evolution updates applied.
         memories_strengthened: Number of memories that were strengthened.
@@ -133,6 +159,7 @@ class ConsolidationResult(BaseModel):
 
     episodes_processed: int = Field(ge=0)
     semantic_memories_created: int = Field(ge=0)
+    negations_created: int = Field(ge=0, default=0)
     links_created: int = Field(ge=0)
     evolutions_applied: int = Field(ge=0, default=0)
     memories_strengthened: int = Field(ge=0, default=0)
@@ -336,6 +363,15 @@ For EVOLUTIONS (updates to existing memories):
 - Only suggest tag/keyword/context updates, not content changes
 - Explain why the evolution is suggested
 
+For NEGATIONS (what is NOT true):
+- Detect explicit negations: "I don't use X", "I'm not a Y", "I never Z"
+- Detect corrections: "Actually, that's wrong", "No, my email is different"
+- Detect contradictions with existing memories
+- For each negation, provide:
+  - statement: The negation (e.g., "User does NOT use MongoDB")
+  - negates_pattern: Keyword to filter in retrieval (e.g., "mongodb")
+  - confidence: How certain (0.6-0.9)
+
 Be conservative. When uncertain, don't extract.
 Focus on quality over quantity."""
 
@@ -361,6 +397,7 @@ Focus on quality over quantity."""
     # 5. Store semantic memories with A-MEM metadata
     episode_ids = [ep.id for ep in episodes]
     memories_created = 0
+    negations_created = 0
     links_created = 0
     evolutions_applied = 0
     memories_strengthened = 0  # Track memory strengthening (Testing Effect research)
@@ -509,7 +546,29 @@ Focus on quality over quantity."""
         evolutions_applied += 1
         logger.info(f"Evolved memory {target_memory.id}: {evolution.reason}")
 
-    # 8. Mark episodes as consolidated
+    # 8. Store detected negations
+    from engram.models import NegationFact
+    from engram.models.base import ConfidenceScore
+
+    for negation in extraction.negations:
+        # Generate embedding for the negation
+        embedding = await embedder.embed(negation.statement)
+
+        neg_fact = NegationFact(
+            content=negation.statement,
+            negates_pattern=negation.negates_pattern.lower(),
+            source_episode_ids=episode_ids,
+            user_id=user_id,
+            org_id=org_id,
+            embedding=embedding,
+            confidence=ConfidenceScore.for_inferred(negation.confidence),
+        )
+
+        await storage.store_negation(neg_fact)
+        negations_created += 1
+        logger.info(f"Created negation: {neg_fact.id} negates '{negation.negates_pattern}'")
+
+    # 9. Mark episodes as consolidated
     await storage.mark_episodes_consolidated(episode_ids, user_id)
 
     logger.info(f"Strengthened {memories_strengthened} memories through consolidation")
@@ -517,6 +576,7 @@ Focus on quality over quantity."""
     return ConsolidationResult(
         episodes_processed=len(episodes),
         semantic_memories_created=memories_created,
+        negations_created=negations_created,
         links_created=links_created,
         evolutions_applied=evolutions_applied,
         memories_strengthened=memories_strengthened,
@@ -526,6 +586,7 @@ Focus on quality over quantity."""
 
 __all__ = [
     "ConsolidationResult",
+    "DetectedNegation",
     "ExtractedFact",
     "IdentifiedLink",
     "LLMExtractionResult",

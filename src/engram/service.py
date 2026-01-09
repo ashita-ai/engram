@@ -40,7 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from engram.config import Settings
 from engram.embeddings import Embedder, get_embedder
-from engram.extraction import ExtractionPipeline, default_pipeline
+from engram.extraction import ExtractionPipeline, NegationDetector, default_pipeline
 from engram.models import AuditEntry, Episode, Fact, Staleness
 from engram.storage import EngramStorage
 
@@ -172,6 +172,7 @@ class EngramService:
     embedder: Embedder
     pipeline: ExtractionPipeline
     settings: Settings
+    negation_detector: NegationDetector = field(default_factory=NegationDetector)
 
     # Working memory: in-memory episodes for current session (not persisted separately)
     _working_memory: list[Episode] = field(default_factory=list, init=False, repr=False)
@@ -327,6 +328,19 @@ class EngramService:
                     await self.storage.store_fact(fact)
                     facts.append(fact)
 
+            # Detect and store negations (separate from regular facts)
+            negation_facts = self.negation_detector.detect(episode)
+            if negation_facts:
+                # Batch embed negation contents
+                negation_contents = [neg.content for neg in negation_facts]
+                negation_embeddings = await self.embedder.embed_batch(negation_contents)
+
+                for negation, neg_embedding in zip(
+                    negation_facts, negation_embeddings, strict=True
+                ):
+                    negation.embedding = neg_embedding
+                    await self.storage.store_negation(negation)
+
         # Log audit entry
         duration_ms = int((time.monotonic() - start_time) * 1000)
         audit_entry = AuditEntry.for_encode(
@@ -361,6 +375,7 @@ class EngramService:
         rif_enabled: bool = False,
         rif_threshold: float = 0.5,
         rif_decay: float = 0.1,
+        apply_negation_filter: bool = True,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
@@ -370,6 +385,10 @@ class EngramService:
         Supports Retrieval-Induced Forgetting (RIF) based on Anderson et al. (1994):
         when memories are retrieved, similar but non-retrieved memories are suppressed.
         This naturally prunes redundant/overlapping memories over time.
+
+        Supports negation filtering: when enabled, memories that match negated
+        patterns (e.g., "I don't use MongoDB") are filtered out to prevent
+        returning outdated or contradicted information.
 
         Args:
             query: Natural language query.
@@ -390,6 +409,7 @@ class EngramService:
             rif_threshold: Minimum similarity score for a memory to be considered
                 a "competitor" that gets suppressed (default 0.5).
             rif_decay: Amount to decay confidence of suppressed memories (default 0.1).
+            apply_negation_filter: Filter out memories that match negated patterns (default True).
 
         Returns:
             List of RecallResult sorted by similarity score, with staleness metadata.
@@ -595,6 +615,10 @@ class EngramService:
 
         # Sort by score descending
         results.sort(key=lambda r: r.score, reverse=True)
+
+        # Apply negation filtering: remove memories that match negated patterns
+        if apply_negation_filter:
+            results = await self._apply_negation_filtering(results, user_id, org_id)
 
         # Apply freshness filtering
         if freshness == "fresh_only":
@@ -1246,6 +1270,65 @@ class EngramService:
         except Exception as e:
             # Log but don't fail the encode operation
             logger.warning(f"High-importance consolidation failed: {e}")
+
+    async def _apply_negation_filtering(
+        self,
+        results: list[RecallResult],
+        user_id: str,
+        org_id: str | None = None,
+    ) -> list[RecallResult]:
+        """Filter out memories that match negated patterns.
+
+        Retrieves all negation facts for the user and filters out any
+        results whose content matches the negated patterns. This prevents
+        returning outdated or contradicted information.
+
+        Args:
+            results: List of recall results to filter.
+            user_id: User ID for multi-tenancy.
+            org_id: Optional organization ID filter.
+
+        Returns:
+            Filtered list of results with negated items removed.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Get all negation facts for this user
+        negations = await self.storage.list_negation_facts(user_id, org_id)
+
+        if not negations:
+            return results
+
+        # Build set of negated patterns (lowercase for case-insensitive matching)
+        negated_patterns = {neg.negates_pattern.lower() for neg in negations}
+
+        filtered_results: list[RecallResult] = []
+        filtered_count = 0
+
+        for result in results:
+            # Don't filter negation facts themselves
+            if result.memory_type == "negation":
+                filtered_results.append(result)
+                continue
+
+            # Check if any negated pattern appears in the content
+            content_lower = result.content.lower()
+            is_negated = any(pattern in content_lower for pattern in negated_patterns)
+
+            if is_negated:
+                filtered_count += 1
+                logger.debug(
+                    f"Filtered out {result.memory_type} {result.memory_id}: matches negated pattern"
+                )
+            else:
+                filtered_results.append(result)
+
+        if filtered_count > 0:
+            logger.info(f"Negation filter removed {filtered_count} results")
+
+        return filtered_results
 
     async def _apply_rif_suppression(
         self,

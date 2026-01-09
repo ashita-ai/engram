@@ -29,6 +29,7 @@ from .date import DateExtractor
 from .email import EmailExtractor
 from .language import LanguageExtractor
 from .name import NameExtractor
+from .negation import NegationDetector, NegationMatch, create_negation_facts, detect_negations
 from .phone import PhoneExtractor
 from .quantity import QuantityExtractor
 from .stdnum import IDExtractor
@@ -69,6 +70,11 @@ __all__ = [
     "LanguageExtractor",
     "NameExtractor",
     "IDExtractor",
+    # Negation detection
+    "NegationDetector",
+    "NegationMatch",
+    "detect_negations",
+    "create_negation_facts",
     # Factory
     "default_pipeline",
 ]
