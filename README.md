@@ -221,6 +221,8 @@ Every score is auditable: *"0.73 because: extracted (0.9 base), 3 sources, last 
 
 Memories decay over time. Unimportant memories fade; important ones persist. This keeps the store relevant.
 
+**Retrieval-Induced Forgetting (RIF)**: Based on [Anderson et al. (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/), when memories are retrieved, similar non-retrieved memories are suppressed. Enable with `rif_enabled=True` on recall to naturally prune redundant memories.
+
 ### Fast Path Stays Fast
 
 | Operation | When | Cost |
