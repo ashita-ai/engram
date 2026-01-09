@@ -1,88 +1,66 @@
-# Engram: An Intelligent Memory System
+# Engram: Memory That Actually Works
 
-**Memo** | January 2025
-
----
-
-## The Problem
-
-Current AI memory systems suffer from a fundamental accuracy problem. The HaluMem benchmark (2024) shows all systems achieve below 56% accuracy, with omission rates above 50%. The root cause: these systems discard raw interactions after LLM extraction, making errors permanent and unrecoverable.
-
-## Our Approach
-
-Engram treats memory as a **layered system** where raw truth flows upward through increasingly refined representations, each layer serving a distinct purpose and backed by cognitive science research.
-
-### The Memory Hierarchy
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  PROCEDURAL    Behavioral patterns ("User prefers concise")     │
-│                Promoted from semantic via Testing Effect        │
-├─────────────────────────────────────────────────────────────────┤
-│  SEMANTIC      Inferred knowledge, linked via A-MEM             │
-│                Strengthened through repeated consolidation      │
-├─────────────────────────────────────────────────────────────────┤
-│  FACTUAL       Pattern-extracted facts (emails, dates, phones)  │
-│                Deterministic extraction, no LLM hallucination   │
-├─────────────────────────────────────────────────────────────────┤
-│  EPISODIC      Immutable ground truth (verbatim interactions)   │
-│                Recovery path when derived memories are wrong    │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-**Key insight**: Information flows upward, but ground truth is never discarded. When a semantic memory seems wrong, we can trace it back to source episodes and re-extract.
-
-### How Components Work Together
-
-**1. Encode (Immediate)**
-Raw interaction → Episodic memory (immutable) → Pattern extraction → Factual memories
-
-No LLM on the write path. Deterministic patterns (regex for emails, validators for dates) extract high-confidence facts immediately. LLM work is deferred.
-
-**2. Consolidate (Background)**
-Episodes batch → LLM extraction → Semantic memories → Dynamic linking → Strength updates
-
-During consolidation, the LLM extracts semantic knowledge. New memories link to existing ones via embedding similarity (A-MEM research). Existing memories that participate in consolidation get **strengthened** (Testing Effect: "repeated remembering strengthens memories more than repeated learning").
-
-**3. Recall (Query Time)**
-Query → Multi-type retrieval → Confidence filtering → Link traversal → RIF suppression
-
-Retrieval pulls from multiple memory types, filters by confidence, and follows links for multi-hop reasoning. Optionally, RIF (Retrieval-Induced Forgetting) suppresses near-miss competitors, naturally pruning redundant memories.
-
-**4. Decay (Periodic)**
-Time passes → Unaccessed memories decay → Low-confidence pruned → Important memories persist
-
-Ebbinghaus-inspired forgetting keeps the store relevant. Memories decay based on time and access patterns. High-importance, frequently-accessed memories persist; stale, unused ones fade.
-
-### Why This Is Intelligent
-
-| Behavior | Mechanism | Research Basis |
-|----------|-----------|----------------|
-| Memories strengthen with use | `consolidation_strength` increases during consolidation | Testing Effect (Roediger & Karpicke 2006) |
-| Related memories link together | Dynamic linking via semantic similarity | A-MEM (NeurIPS 2025) |
-| Competitors get suppressed | RIF decays near-miss confidence | Anderson, Bjork & Bjork (1994) |
-| Unimportant memories fade | Time-based decay with access weighting | Ebbinghaus (1885) |
-| Patterns promote to procedures | High-strength semantic → procedural | Cognitive Workspace (2024) |
-| Errors are recoverable | Episodic ground truth preserved | Memory reconstruction research |
-
-The system exhibits **emergent intelligence**: memories that matter naturally persist and strengthen, while noise fades away. This isn't programmed behavior—it emerges from the interaction of consolidation, retrieval, and decay.
-
-### What Makes Us Different
-
-| Capability | Engram | Competitors |
-|------------|--------|-------------|
-| Ground truth preservation | Yes (episodic immutable) | Mem0: No, Zep: Yes, Letta: Partial |
-| Composite confidence scoring | Yes (method + corroboration + recency) | None |
-| Strength through consolidation | Yes (Testing Effect) | None track this |
-| Retrieval-induced forgetting | Yes (opt-in) | None |
-| Principled decay | Yes (Ebbinghaus-inspired) | None |
-
-## Conclusion
-
-Engram is not just a memory store—it's a system where memories **compete, strengthen, link, and fade** based on principles from cognitive science. The result is a memory layer that naturally surfaces what matters and forgets what doesn't, while maintaining the ground truth needed to recover from errors.
-
-This is memory that learns.
+**January 2025**
 
 ---
 
-*References: HaluMem (arxiv.org/html/2511.03506), Testing Effect (PMC5912918), A-MEM (arxiv.org/abs/2502.12110), RIF (PMID 7931095), Cognitive Workspace (arxiv.org/abs/2508.13171)*
+## The Problem Everyone Ignores
+
+Ask ChatGPT what you told it last week. It has no idea.
+
+Current AI memory solutions try to fix this by extracting "facts" from your conversations and storing them. Sounds reasonable. But here's the dirty secret: they throw away your actual words and keep only what the AI *thinks* you meant. When the AI misunderstands (and it will), there's no way back.
+
+Recent benchmarks show these systems get it wrong **more than half the time**. That's not memory. That's a coin flip.
+
+## What We Do Differently
+
+Engram never throws away what you actually said.
+
+Think of it like your own memory. You remember the conversation with your friend (the episode), but you also remember the takeaway (the meaning). If someone questions your takeaway, you can go back to what was actually said. That's what we do.
+
+```
+What you said  →  Stored forever, untouched
+       ↓
+What it means  →  Extracted, but always traceable back
+```
+
+## How Memories Get Smarter
+
+Here's where it gets interesting. We didn't just build storage—we built something that learns.
+
+**Memories that matter stick around.** Every time a memory gets used—retrieved, linked to something new, confirmed by new information—it gets stronger. Just like how you remember things better when you actually use them. (This is real science: the Testing Effect is one of the most robust findings in memory research.)
+
+**Related memories find each other.** When you tell us you "prefer Python for scripts," that automatically links to the memory about you "using Python at work." You don't have to organize anything. The system figures out what goes together.
+
+**Irrelevant stuff fades away.** That random detail from six months ago that never came up again? It slowly fades, just like real memory. This isn't a bug—it's how memory is supposed to work. It keeps the important stuff front and center.
+
+**Retrieval has consequences.** When you search for something and get results back, the memories that *almost* matched but didn't make the cut get slightly weaker. This naturally prunes redundant or outdated information. (Psychologists call this Retrieval-Induced Forgetting, and yes, your brain does this too.)
+
+## The Result
+
+Put it all together and you get a memory system where:
+
+- **Frequently-used facts** rise to the top automatically
+- **Stale information** fades without you doing anything
+- **Wrong extractions** can be traced back and fixed
+- **Related knowledge** connects itself
+
+You don't manage it. It manages itself.
+
+## Why This Matters
+
+Every AI agent needs memory to be useful. But memory that hallucinates is worse than no memory at all—it confidently tells you wrong things.
+
+We built Engram because we were tired of AI memory that:
+- Forgets what you literally just told it
+- Confidently states things you never said
+- Treats a wild guess the same as a direct quote
+- Grows forever until it's useless
+
+Memory should work like memory. It should remember what matters, forget what doesn't, and always let you check the receipts.
+
+That's Engram.
+
+---
+
+*Want the technical details? See [architecture.md](../docs/architecture.md) and [research foundations](overview.md).*
