@@ -4,12 +4,14 @@ Technical comparison of AI memory systems. Based on published papers and documen
 
 ## Summary
 
-| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Consolidation | RIF |
-|--------|--------------|------------|------------|-------------|-----------------|---------------|-----|
+| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Strength Tracking | RIF |
+|--------|--------------|------------|------------|-------------|-----------------|-------------------|-----|
 | **Engram** | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
 | **Mem0** | No | No | No | No | No | No | No |
 | **Zep/Graphiti** | Yes | No | No | Yes | Partial | No | No |
 | **Letta/MemGPT** | Partial | No | No | No | No | No | No |
+
+**Note on "Strength Tracking"**: All systems have some consolidation process (extraction, summarization). This column tracks whether memories get *stronger* through repeated consolidation involvement (Testing Effect). Mem0 has update phases, Letta has periodic summarization, but neither tracks consolidation_strength or passes.
 
 ## Mem0
 
