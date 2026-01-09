@@ -260,6 +260,8 @@ class EngramService:
         session_id: str | None = None,
         importance: float = 0.5,
         run_extraction: bool = True,
+        deduplicate_facts: bool = True,
+        dedup_threshold: float = 0.95,
     ) -> EncodeResult:
         """Encode content as an episode and optionally extract facts.
 
@@ -277,6 +279,10 @@ class EngramService:
             session_id: Optional session ID for grouping.
             importance: Importance score (0.0-1.0).
             run_extraction: Whether to run fact extraction.
+            deduplicate_facts: Whether to skip storing facts that are semantically
+                similar to existing facts (default True).
+            dedup_threshold: Similarity threshold for deduplication (default 0.95).
+                Higher values require more exact matches.
 
         Returns:
             EncodeResult with the stored episode and extracted facts.
@@ -316,6 +322,7 @@ class EngramService:
 
         # Extract and store facts
         facts: list[Fact] = []
+        dedup_skipped = 0
         if run_extraction:
             extracted_facts = self.pipeline.run(episode)
             if extracted_facts:
@@ -325,6 +332,16 @@ class EngramService:
 
                 for fact, fact_embedding in zip(extracted_facts, fact_embeddings, strict=True):
                     fact.embedding = fact_embedding
+
+                    # Semantic deduplication: check for existing similar facts
+                    if deduplicate_facts:
+                        is_duplicate = await self._is_duplicate_fact(
+                            fact, fact_embedding, user_id, org_id, dedup_threshold
+                        )
+                        if is_duplicate:
+                            dedup_skipped += 1
+                            continue
+
                     await self.storage.store_fact(fact)
                     facts.append(fact)
 
@@ -376,6 +393,7 @@ class EngramService:
         rif_threshold: float = 0.5,
         rif_decay: float = 0.1,
         apply_negation_filter: bool = True,
+        negation_similarity_threshold: float | None = 0.75,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
@@ -410,6 +428,9 @@ class EngramService:
                 a "competitor" that gets suppressed (default 0.5).
             rif_decay: Amount to decay confidence of suppressed memories (default 0.1).
             apply_negation_filter: Filter out memories that match negated patterns (default True).
+            negation_similarity_threshold: Semantic similarity threshold for negation filtering.
+                If set (default 0.75), uses embedding similarity to filter semantically related
+                memories. Set to None to use only pattern-based (substring) filtering.
 
         Returns:
             List of RecallResult sorted by similarity score, with staleness metadata.
@@ -618,7 +639,9 @@ class EngramService:
 
         # Apply negation filtering: remove memories that match negated patterns
         if apply_negation_filter:
-            results = await self._apply_negation_filtering(results, user_id, org_id)
+            results = await self._apply_negation_filtering(
+                results, user_id, org_id, negation_similarity_threshold
+            )
 
         # Apply freshness filtering
         if freshness == "fresh_only":
@@ -1271,22 +1294,76 @@ class EngramService:
             # Log but don't fail the encode operation
             logger.warning(f"High-importance consolidation failed: {e}")
 
+    async def _is_duplicate_fact(
+        self,
+        fact: Fact,
+        embedding: list[float],
+        user_id: str,
+        org_id: str | None,
+        threshold: float,
+    ) -> bool:
+        """Check if a semantically similar fact already exists.
+
+        Uses vector search to find existing facts with high similarity.
+        Only considers facts in the same category to avoid false positives.
+
+        Args:
+            fact: The new fact to check.
+            embedding: Pre-computed embedding for the fact.
+            user_id: User ID for multi-tenancy.
+            org_id: Optional organization ID.
+            threshold: Similarity threshold for deduplication.
+
+        Returns:
+            True if a duplicate exists, False otherwise.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Search for similar existing facts
+        similar_facts = await self.storage.search_facts(
+            query_vector=embedding,
+            user_id=user_id,
+            org_id=org_id,
+            limit=3,  # Only need to find one match
+        )
+
+        for scored_fact in similar_facts:
+            existing = scored_fact.memory
+            # Must be same category (email vs email, phone vs phone)
+            if existing.category != fact.category:
+                continue
+
+            # Check similarity threshold
+            if scored_fact.score >= threshold:
+                logger.debug(
+                    f"Duplicate fact skipped: '{fact.content}' similar to "
+                    f"'{existing.content}' (score: {scored_fact.score:.3f})"
+                )
+                return True
+
+        return False
+
     async def _apply_negation_filtering(
         self,
         results: list[RecallResult],
         user_id: str,
         org_id: str | None = None,
+        similarity_threshold: float | None = 0.75,
     ) -> list[RecallResult]:
         """Filter out memories that match negated patterns.
 
-        Retrieves all negation facts for the user and filters out any
-        results whose content matches the negated patterns. This prevents
-        returning outdated or contradicted information.
+        Uses a two-pronged approach:
+        1. Pattern-based (substring): Fast, catches exact keyword matches
+        2. Embedding-based (semantic): Catches related terms like "Mongo" ≈ "MongoDB"
 
         Args:
             results: List of recall results to filter.
             user_id: User ID for multi-tenancy.
             org_id: Optional organization ID filter.
+            similarity_threshold: Threshold for semantic similarity filtering.
+                If None, only pattern-based filtering is used.
 
         Returns:
             Filtered list of results with negated items removed.
@@ -1304,8 +1381,18 @@ class EngramService:
         # Build set of negated patterns (lowercase for case-insensitive matching)
         negated_patterns = {neg.negates_pattern.lower() for neg in negations}
 
+        # Prepare embedding-based filtering if threshold is set
+        pattern_embeddings: dict[str, list[float]] = {}
+        if similarity_threshold is not None:
+            # Embed all unique negated patterns (batch for efficiency)
+            unique_patterns = list(negated_patterns)
+            if unique_patterns:
+                embeddings = await self.embedder.embed_batch(unique_patterns)
+                pattern_embeddings = dict(zip(unique_patterns, embeddings, strict=True))
+
         filtered_results: list[RecallResult] = []
-        filtered_count = 0
+        pattern_filtered = 0
+        semantic_filtered = 0
 
         for result in results:
             # Don't filter negation facts themselves
@@ -1313,22 +1400,87 @@ class EngramService:
                 filtered_results.append(result)
                 continue
 
-            # Check if any negated pattern appears in the content
+            # Phase 1: Pattern-based filtering (fast, substring match)
             content_lower = result.content.lower()
-            is_negated = any(pattern in content_lower for pattern in negated_patterns)
+            is_pattern_negated = any(pattern in content_lower for pattern in negated_patterns)
 
-            if is_negated:
-                filtered_count += 1
+            if is_pattern_negated:
+                pattern_filtered += 1
                 logger.debug(
-                    f"Filtered out {result.memory_type} {result.memory_id}: matches negated pattern"
+                    f"Pattern-filtered {result.memory_type} {result.memory_id}: "
+                    "matches negated pattern"
                 )
-            else:
+                continue
+
+            # Phase 2: Embedding-based filtering (semantic similarity)
+            is_semantic_negated = False
+            if similarity_threshold is not None and pattern_embeddings:
+                # Get embedding for this result's content
+                result_embedding = await self._get_result_embedding(result, user_id)
+
+                if result_embedding is not None:
+                    # Check similarity against all negated pattern embeddings
+                    for pattern, pattern_emb in pattern_embeddings.items():
+                        similarity = _cosine_similarity(result_embedding, pattern_emb)
+                        if similarity >= similarity_threshold:
+                            is_semantic_negated = True
+                            semantic_filtered += 1
+                            logger.debug(
+                                f"Semantic-filtered {result.memory_type} {result.memory_id}: "
+                                f"similarity {similarity:.2f} to '{pattern}'"
+                            )
+                            break
+
+            if not is_semantic_negated:
                 filtered_results.append(result)
 
-        if filtered_count > 0:
-            logger.info(f"Negation filter removed {filtered_count} results")
+        total_filtered = pattern_filtered + semantic_filtered
+        if total_filtered > 0:
+            logger.info(
+                f"Negation filter: {pattern_filtered} pattern-based, "
+                f"{semantic_filtered} semantic-based"
+            )
 
         return filtered_results
+
+    async def _get_result_embedding(
+        self,
+        result: RecallResult,
+        user_id: str,
+    ) -> list[float] | None:
+        """Get embedding for a recall result from storage.
+
+        Args:
+            result: The recall result.
+            user_id: User ID for multi-tenancy.
+
+        Returns:
+            Embedding vector or None if not found.
+        """
+        if result.memory_type == "episodic":
+            ep = await self.storage.get_episode(result.memory_id, user_id)
+            return ep.embedding if ep else None
+
+        elif result.memory_type == "factual":
+            fact = await self.storage.get_fact(result.memory_id, user_id)
+            return fact.embedding if fact else None
+
+        elif result.memory_type == "semantic":
+            sem = await self.storage.get_semantic(result.memory_id, user_id)
+            return sem.embedding if sem else None
+
+        elif result.memory_type == "procedural":
+            proc = await self.storage.get_procedural(result.memory_id, user_id)
+            return proc.embedding if proc else None
+
+        elif result.memory_type == "working":
+            # Working memory is in-memory, find by ID
+            for ep in self._working_memory:
+                if ep.id == result.memory_id:
+                    return ep.embedding
+            return None
+
+        return None
 
     async def _apply_rif_suppression(
         self,
