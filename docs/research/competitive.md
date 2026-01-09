@@ -101,6 +101,48 @@ Main Context (working) ←→ Archival Memory (long-term)
 
 ---
 
+## Engram
+
+**Architecture**: Ground truth preservation with deferred LLM processing.
+
+```
+Message → Embed → Store Episode (immutable)
+              ↓
+        Pattern Extract → Store Facts (high confidence, no LLM)
+              ↓
+        Detect Negations → Store NegationFacts
+              │
+              └──────────────────────────────────────────────┐
+                                                             ↓
+                                            [BACKGROUND - Durable Workflow]
+                                                             ↓
+                                            LLM Consolidation (batched)
+                                                    ↓
+                                    ┌───────────────┼───────────────┐
+                                    ↓               ↓               ↓
+                            SemanticMemory    Links/Relations   Negations
+                                    ↓               ↓               ↓
+                            Strengthen existing memories (Testing Effect)
+```
+
+**Write path characteristics**:
+- **Immediate**: Episode stored verbatim + pattern extraction + embedding
+- **Deferred**: LLM consolidation runs in background (durable workflow)
+- **Everything embedded**: All memory types semantically searchable
+
+**What it does well**:
+- Ground truth preserved (episodes immutable)
+- Pattern extraction before LLM (no hallucination on structured data)
+- Composite confidence scores (auditable)
+- Principled forgetting (access + importance + time)
+- Consolidation strength (Testing Effect)
+- Retrieval-induced forgetting (RIF)
+- Semantic search across all memory types
+
+**Source**: [Architecture](../architecture.md), [GitHub](https://github.com/ashita-ai/engram)
+
+---
+
 ## Engram's Differentiators
 
 ### 1. Ground Truth Preservation
