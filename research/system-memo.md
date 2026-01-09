@@ -1,6 +1,6 @@
 # Engram: Memory That Actually Works
 
-**January 2025**
+**January 2026**
 
 ---
 
