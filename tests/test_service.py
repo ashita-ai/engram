@@ -681,6 +681,156 @@ class TestEngramServiceRecall:
         # get_semantic should not be called for link traversal
         mock_service.storage.get_semantic.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_recall_competition_penalizes_similar_memories(self, mock_service):
+        """Should penalize overlapping memories when competition is enabled."""
+        # Create two similar semantic memories with different selectivity
+        from engram.models import SemanticMemory
+
+        # Same embedding = high similarity = competition
+        shared_embedding = [0.1] * 384
+
+        sem1 = SemanticMemory(
+            content="User prefers Python",
+            user_id="user_123",
+            embedding=shared_embedding,
+        )
+        sem1.selectivity_score = 0.8  # Higher selectivity - winner
+
+        sem2 = SemanticMemory(
+            content="User likes Python programming",
+            user_id="user_123",
+            embedding=shared_embedding,
+        )
+        sem2.selectivity_score = 0.3  # Lower selectivity - loser
+
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = [
+            ScoredResult(memory=sem1, score=0.9),
+            ScoredResult(memory=sem2, score=0.85),
+        ]
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = []
+
+        # Mock get_semantic to return memories for embedding lookup
+        async def get_semantic_side_effect(memory_id: str, user_id: str):
+            if memory_id == sem1.id:
+                return sem1
+            if memory_id == sem2.id:
+                return sem2
+            return None
+
+        mock_service.storage.get_semantic = AsyncMock(side_effect=get_semantic_side_effect)
+
+        results = await mock_service.recall(
+            query="python",
+            user_id="user_123",
+            competition_strength=0.5,
+        )
+
+        # Both results should be returned, but loser should be penalized
+        assert len(results) == 2
+
+        # Find the penalized memory
+        penalized = [r for r in results if "competition_penalty" in r.metadata]
+        assert len(penalized) == 1
+        assert penalized[0].memory_id == sem2.id  # Lower selectivity = loser
+        assert penalized[0].metadata["suppressed_by"] == sem1.id
+
+    @pytest.mark.asyncio
+    async def test_recall_competition_disabled_by_default(self, mock_service):
+        """Should not apply competition when competition_strength=0."""
+        from engram.models import SemanticMemory
+
+        shared_embedding = [0.1] * 384
+
+        sem1 = SemanticMemory(
+            content="User prefers Python",
+            user_id="user_123",
+            embedding=shared_embedding,
+        )
+        sem1.selectivity_score = 0.8
+
+        sem2 = SemanticMemory(
+            content="User likes Python programming",
+            user_id="user_123",
+            embedding=shared_embedding,
+        )
+        sem2.selectivity_score = 0.3
+
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = [
+            ScoredResult(memory=sem1, score=0.9),
+            ScoredResult(memory=sem2, score=0.85),
+        ]
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = []
+
+        results = await mock_service.recall(
+            query="python",
+            user_id="user_123",
+            # competition_strength defaults to 0.0
+        )
+
+        # No competition penalties
+        penalized = [r for r in results if "competition_penalty" in r.metadata]
+        assert len(penalized) == 0
+
+    @pytest.mark.asyncio
+    async def test_recall_competition_reorders_results(self, mock_service):
+        """Should reorder results after competition penalties."""
+        from engram.models import SemanticMemory
+
+        shared_embedding = [0.1] * 384
+
+        # sem1: higher initial score, lower selectivity
+        sem1 = SemanticMemory(
+            content="User prefers Python",
+            user_id="user_123",
+            embedding=shared_embedding,
+        )
+        sem1.selectivity_score = 0.2  # Low selectivity - loser
+
+        # sem2: lower initial score, higher selectivity
+        sem2 = SemanticMemory(
+            content="User likes Python programming",
+            user_id="user_123",
+            embedding=shared_embedding,
+        )
+        sem2.selectivity_score = 0.9  # High selectivity - winner
+
+        mock_service.storage.search_episodes.return_value = []
+        mock_service.storage.search_facts.return_value = []
+        mock_service.storage.search_semantic.return_value = [
+            ScoredResult(memory=sem1, score=0.95),  # Higher initial score
+            ScoredResult(memory=sem2, score=0.80),  # Lower initial score
+        ]
+        mock_service.storage.search_procedural.return_value = []
+        mock_service.storage.search_negation.return_value = []
+
+        async def get_semantic_side_effect(memory_id: str, user_id: str):
+            if memory_id == sem1.id:
+                return sem1
+            if memory_id == sem2.id:
+                return sem2
+            return None
+
+        mock_service.storage.get_semantic = AsyncMock(side_effect=get_semantic_side_effect)
+
+        results = await mock_service.recall(
+            query="python",
+            user_id="user_123",
+            competition_strength=0.8,  # Strong competition
+        )
+
+        # After competition, sem2 (winner) should be first
+        # sem1 should be penalized and have lower score
+        assert results[0].memory_id == sem2.id  # Winner stays at top
+        assert results[1].memory_id == sem1.id  # Loser demoted
+        assert results[1].score < 0.95  # Score reduced
+
 
 class TestRecallResult:
     """Tests for RecallResult model."""
