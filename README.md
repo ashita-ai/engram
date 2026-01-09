@@ -114,6 +114,55 @@ flowchart LR
 | **Procedural** | Variable | LLM inference | Behavioral preferences |
 | **Negation** | Variable | Negation detection | What is NOT true |
 
+## Semantic Search Everywhere
+
+**Every memory type is semantically searchable.** When you store or extract anything, Engram:
+
+1. **Embeds it** — Converts text to a vector representation
+2. **Stores in Qdrant** — Vector database enables similarity search
+3. **Searches semantically** — Query "contact info" finds emails, phones, addresses
+
+```
+User: "My email is user@example.com"
+                ↓
+┌─────────────────────────────────────────────────────────────┐
+│  Episode                                                    │
+│  ├── content: "My email is user@example.com"               │
+│  └── embedding: [0.12, -0.34, 0.56, ...]  ← semantic search │
+└─────────────────────────────────────────────────────────────┘
+                ↓ pattern extraction
+┌─────────────────────────────────────────────────────────────┐
+│  Fact                                                       │
+│  ├── content: "user@example.com"                           │
+│  ├── category: "email"                                      │
+│  └── embedding: [0.23, -0.45, 0.67, ...]  ← semantic search │
+└─────────────────────────────────────────────────────────────┘
+                ↓ consolidation (LLM)
+┌─────────────────────────────────────────────────────────────┐
+│  SemanticMemory                                             │
+│  ├── content: "User's primary email is user@example.com"   │
+│  └── embedding: [0.34, -0.56, 0.78, ...]  ← semantic search │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**The semantic layer is end-to-end:**
+
+| Stage | What happens | Semantic capability |
+|-------|--------------|---------------------|
+| **Encode** | Episode embedded | "contact" finds "my email is..." |
+| **Extract** | Facts embedded | "email" finds "user@example.com" |
+| **Consolidate** | Semantic memories embedded | "communication preferences" finds derived insights |
+| **Recall** | Query embedded, similarity search | Natural language queries work |
+
+**Pattern extraction is an optimization, not a limitation.** Deterministic extractors (emails, phones, dates) provide high-confidence facts quickly. The embedding layer makes everything semantically discoverable regardless of extraction method.
+
+```python
+# These all work via semantic similarity:
+await engram.recall("contact information", user_id="u1")  # Finds emails, phones
+await engram.recall("how to reach the user", user_id="u1")  # Same results
+await engram.recall("user@example.com", user_id="u1")  # Exact match also works
+```
+
 ## Preventing Hallucinations
 
 ### 1. Deterministic Extraction First

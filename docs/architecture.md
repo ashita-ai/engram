@@ -308,6 +308,78 @@ engram_negation     → vectors + payload (content, negates_pattern, source_epis
 - **Factual/Semantic/Negation**: Standard HNSW
 - **Procedural**: HNSW with context filtering
 
+## Semantic Layer
+
+**Everything is embedded.** Every memory type carries a vector embedding, enabling semantic similarity search across all content. This is the core of how Engram handles natural language queries.
+
+### How It Works
+
+```
+User: "My email is user@example.com"
+                    │
+                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  1. EMBED: Convert text to vector                                        │
+│     content → embedding model → [0.12, -0.34, 0.56, ...]                 │
+└──────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  2. STORE: Save with embedding                                           │
+│     Episode { content, embedding } → Qdrant                              │
+└──────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  3. EXTRACT: Pattern match + embed extracted facts                       │
+│     "user@example.com" → embedding → Fact { content, embedding }         │
+└──────────────────────────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│  4. CONSOLIDATE: LLM inference + embed semantic memories                 │
+│     "User's email is user@example.com" → SemanticMemory { embedding }    │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Semantic Search in Practice
+
+All recall operations use vector similarity search:
+
+```python
+# Query gets embedded, then searches across all memory types
+query = "contact information"
+query_vector = embed(query)  # [0.23, -0.45, 0.67, ...]
+
+# Searches:
+# - Episodes: "my email is user@example.com" → similarity 0.82
+# - Facts: "user@example.com" → similarity 0.78
+# - Semantic: "User's primary contact is email" → similarity 0.85
+```
+
+### Why Pattern Extraction + Embeddings?
+
+| Approach | Speed | Confidence | Semantic |
+|----------|-------|------------|----------|
+| **Pattern extraction only** | Fast | High (0.9) | Limited to exact matches |
+| **Embedding only** | Fast | N/A | Full semantic similarity |
+| **Pattern + Embedding** | Fast | High (0.9) | Both exact AND semantic |
+
+Pattern extractors (emails, phones, dates) provide **high-confidence structured data** quickly. The embedding layer makes that same data **semantically discoverable**.
+
+Example: "user@example.com" is:
+- Pattern-extracted with 0.9 confidence (deterministic)
+- Embedded so "contact info" query finds it (semantic)
+
+### Semantic Intelligence Features
+
+| Feature | What It Does | Implementation |
+|---------|--------------|----------------|
+| **Semantic recall** | Natural language queries work | All queries embedded, cosine similarity |
+| **Semantic negation filtering** | "I don't use MongoDB" filters related content | Negation patterns embedded, similarity threshold |
+| **Semantic fact deduplication** | Prevents storing duplicate facts | New facts compared to existing via embedding |
+| **Multi-hop reasoning** | Follow related_ids to connected memories | Links discovered via semantic similarity |
+
 ## API
 
 ```python
