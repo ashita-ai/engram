@@ -121,8 +121,10 @@ Memory consolidation in the brain is a slow, offline process:
 > "Sleep plays a critical role in memory consolidation. Slow-wave sleep supports declarative memory consolidation."
 > — [Walker & Stickgold, 2006](https://www.nature.com/articles/nrn1739)
 
-> "Both slow-wave and REM sleep contribute to emotional memory consolidation, with different sleep stages serving different functions."
-> — [Nature Communications Biology, 2025](https://www.nature.com/articles/s42003-025-07868-5)
+> "REM sleep cueing impairs recognition memory for cued memories. Memory benefit was driven by the product of SWS and REM sleep cueing, not independent contributions."
+> — [Yuksel et al., 2025](https://www.nature.com/articles/s42003-025-07868-5)
+
+**Note**: We cite sleep research for context, not because Engram models sleep stages. Our deferred consolidation is an engineering pattern (batch processing is cheaper and allows error correction), not a neuroscience simulation. The sleep literature shows that consolidation is naturally an offline process, which validates our approach of separating fast encoding from slow consolidation.
 
 Recent neuroscience shows multiple consolidation pathways:
 
@@ -155,7 +157,18 @@ The levels of processing framework shows deeper encoding produces stronger memor
 
 ## Known Limitations
 
-We use cognitive science as design inspiration, not strict implementation. These theories have limitations:
+We use cognitive science as design inspiration, not strict implementation.
+
+### What We DON'T Model
+
+| Research Concept | What the Paper Says | What Engram Does Instead |
+|-----------------|---------------------|--------------------------|
+| **Surprise-based encoding** (Nagy et al. 2025) | Episodic memory acts as "life raft" for surprising experiences that don't compress well | Store ALL episodes equally; no surprise detection or variable encoding rate |
+| **SWS×REM interaction** (Yuksel et al. 2025) | Memory benefit comes from product of SWS and REM, not independent contributions | Simple time-based decay; no sleep-stage modeling |
+| **REM as forgetting facilitator** (Yuksel et al. 2025) | REM cueing may actively facilitate forgetting of non-cued memories | RIF is somewhat analogous but not modeled as sleep phase |
+| **Compression-as-learning** (Nagy et al. 2025) | Semantic learning IS learning to compress; measures encoding efficiency | Extract facts but don't model compression ratios |
+
+### Theoretical Limitations
 
 | Theory | Known Issues |
 |--------|--------------|
@@ -191,7 +204,8 @@ We use cognitive science as design inspiration, not strict implementation. These
 ### Recent Research (2024-2025)
 - [HaluMem: Hallucinations in LLM Memory Systems](https://arxiv.org/html/2511.03506)
 - [Constructive Memory](https://onlinelibrary.wiley.com/doi/10.1111/cogs.70113) — Episodic and semantic memory are constructive
-- [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) — Memory as compression under constraints
+- [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) (Nagy et al. 2025) — Memory as compression under constraints. Semantic memory encodes regularities; episodic memory preserves surprising experiences. *Engram is inspired by the episodic/semantic distinction but does not implement surprise detection or variable-rate encoding.*
+- [Sleep and Memory Consolidation](https://www.nature.com/articles/s42003-025-07868-5) (Yuksel et al. 2025) — Memory benefit from SWS×REM product interaction; REM cueing alone impairs memory. *Cited for context; Engram does not model sleep stages.*
 - [Dual Pathways to LTM](https://www.news-medical.net/news/20241206/Researchers-discover-new-pathway-to-forming-long-term-memories-in-the-brain.aspx) — LTM can form independently of STM
 - [Molecular Memory Timers](https://www.sciencedaily.com/releases/2025/11/251130050712.htm) — Importance gating in memory persistence
 - [Testing Effect / Retrieval Practice](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) — Roediger & Karpicke 2006: "Repeated remembering strengthens memories much more so than repeated learning." Considered [one of the most robust phenomena in memory research](https://www.sciencedirect.com/topics/psychology/testing-effect). Engram's `consolidation_strength` field is based on this finding.

@@ -209,5 +209,7 @@ Note: `NegationFact` (which stores semantic negations like "User does NOT use Mo
 - [MemGPT Paper](https://arxiv.org/abs/2310.08560)
 - [A-MEM Paper](https://arxiv.org/abs/2502.12110)
 - [Cognitive Workspace](https://arxiv.org/abs/2508.13171)
+- [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) — Nagy et al. 2025 (episodic/semantic distinction)
+- [Sleep and Memory](https://www.nature.com/articles/s42003-025-07868-5) — Yuksel et al. 2025 (SWS×REM interaction)
 - [Testing Effect](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) — Roediger & Karpicke, 2006
 - [Retrieval-Induced Forgetting](https://pubmed.ncbi.nlm.nih.gov/7931095/) — Anderson, Bjork & Bjork, 1994
