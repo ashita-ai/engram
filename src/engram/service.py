@@ -381,7 +381,8 @@ class EngramService:
                 returns fully consolidated memories.
             competition_strength: Memory competition strength (0.0-1.0). When > 0,
                 overlapping memories compete and losers get score penalties.
-                Based on Tomé et al. research on inhibitory plasticity.
+                Based on: Tomé et al. "Dynamic and selective engrams emerge with
+                memory consolidation" Nature Neuroscience (2024).
 
         Returns:
             List of RecallResult sorted by similarity score, with staleness metadata.
@@ -588,7 +589,7 @@ class EngramService:
         # Sort by score descending
         results.sort(key=lambda r: r.score, reverse=True)
 
-        # Apply memory competition (Tomé et al. inspired inhibitory plasticity)
+        # Apply memory competition (Tomé et al. Nature Neuroscience 2024)
         if competition_strength > 0 and len(results) > 1:
             results = await self._apply_competition(
                 results=results,
@@ -1244,9 +1245,10 @@ class EngramService:
     ) -> list[RecallResult]:
         """Apply memory competition to recall results.
 
-        Implements Tomé et al. inspired inhibitory plasticity: when memories
-        overlap significantly (high mutual similarity), they compete. The
-        winner (higher selectivity) suppresses the loser (lower score).
+        Implements inhibitory plasticity inspired by Tomé et al. "Dynamic and
+        selective engrams emerge with memory consolidation" Nature Neuroscience
+        (2024). When memories overlap significantly (high mutual similarity),
+        they compete. The winner (higher selectivity) suppresses the loser.
 
         Args:
             results: List of recall results to process.
