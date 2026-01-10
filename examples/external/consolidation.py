@@ -187,14 +187,12 @@ async def main() -> None:
 
         # Show consolidation metadata
         for r in semantic_results[:3]:
-            passes = r.metadata.get("consolidation_passes", 0)
-            selectivity = r.metadata.get("selectivity", 0)
+            strength = r.metadata.get("selectivity", 0)
             print(f'  Memory: "{r.content[:40]}..."')
-            print(f"    Consolidation passes: {passes}")
-            print(f"    Selectivity score: {selectivity:.2f}")
+            print(f"    Consolidation strength: {strength:.2f}")
             print()
 
-        print("  Each consolidation pass increases strength.")
+        print("  Each consolidation involvement increases strength by 0.1.")
         print("  Stronger memories are prioritized in recall.")
 
         # =====================================================================

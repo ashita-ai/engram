@@ -115,8 +115,8 @@ class SemanticMemory(MemoryBase):
         description="How well-established via repeated consolidation (0=new, 1=strong)",
     )
     consolidation_passes: int = Field(
-        default=1,
-        ge=1,
+        default=0,
+        ge=0,
         description="Number of consolidation passes",
     )
     archived: bool = Field(
@@ -163,6 +163,10 @@ class SemanticMemory(MemoryBase):
         Based on Testing Effect research: memories repeatedly involved
         in retrieval/consolidation become stronger and more stable.
         See: Roediger & Karpicke (2006), PMC5912918.
+
+        Both consolidation_strength and consolidation_passes are incremented
+        together to keep them in sync. Strength increases by delta (0.1),
+        passes increments by 1.
         """
         self.consolidation_strength = min(1.0, self.consolidation_strength + delta)
         self.consolidation_passes += 1
