@@ -37,6 +37,10 @@ class ExtractedFact(BaseModel):
     confidence: float = Field(
         ge=0.0, le=1.0, default=0.6, description="Confidence in this extraction"
     )
+    source_episode_ids: list[str] = Field(
+        default_factory=list,
+        description="Episode IDs that support this fact (from the episode list provided)",
+    )
     source_context: str = Field(default="", description="Original context this was extracted from")
     # A-MEM inspired fields
     keywords: list[str] = Field(
@@ -344,7 +348,8 @@ async def run_consolidation(
 
 For each semantic fact you extract, provide:
 - content: The knowledge extracted
-- confidence: How certain (0.6-0.9)
+- confidence: How certain (0.6-0.9, use 0.9 for direct statements)
+- source_episode_ids: List of episode IDs that support this fact (from the IDs shown in parentheses)
 - keywords: 3-5 key terms for this fact
 - tags: Category labels like "preference", "technical", "personal", "behavioral", "factual"
 - context: Domain/theme like "programming", "communication", "work habits"
@@ -442,9 +447,11 @@ Focus on quality over quantity."""
         if duplicate_found:
             continue
 
+        # Use LLM-identified source episodes, or fallback to all if not provided
+        fact_sources = fact.source_episode_ids if fact.source_episode_ids else episode_ids
         memory = SemanticMemory(
             content=fact.content,
-            source_episode_ids=episode_ids,
+            source_episode_ids=fact_sources,
             user_id=user_id,
             org_id=org_id,
             embedding=embedding,
@@ -453,10 +460,14 @@ Focus on quality over quantity."""
             tags=fact.tags,
             context=fact.context,
         )
-        # LLM confidence modulates the inferred base (0.6), never exceeds it
-        # An LLM cannot claim 100% certainty for inherently uncertain inferences
-        inferred_base = 0.6
-        memory.confidence.value = inferred_base * fact.confidence
+        # For facts the LLM is very confident about (0.9), they're essentially
+        # extracted from direct statements like "I'm Morgan" - use LLM confidence
+        # For lower confidence, use weighted formula with corroboration bonus
+        memory.confidence.extraction_base = fact.confidence
+        memory.confidence.supporting_episodes = len(fact_sources)
+        memory.confidence.recompute()
+        # Don't let the weighted formula reduce high-confidence extractions
+        memory.confidence.value = max(memory.confidence.value, fact.confidence)
 
         # Give new memories an initial consolidation strength
         # (They've been consolidated once, so strengthen() gives them 0.1)

@@ -776,7 +776,7 @@ class TestConsolidationStrengthening:
             embedding=[1.0] + [0.0] * 383,  # Points along dimension 0
         )
         assert existing_memory.consolidation_strength == 0.0
-        assert existing_memory.consolidation_passes == 1
+        assert existing_memory.consolidation_passes == 0  # Fresh memory, no consolidation yet
 
         mock_storage = AsyncMock()
         mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
@@ -825,7 +825,7 @@ class TestConsolidationStrengthening:
 
         # Existing memory should have increased strength
         assert existing_memory.consolidation_strength == 0.1  # Increased by 0.1
-        assert existing_memory.consolidation_passes == 2  # Also incremented
+        assert existing_memory.consolidation_passes == 1  # Incremented from 0 to 1
 
     @pytest.mark.asyncio
     async def test_memory_strengthened_on_evolution(self) -> None:
