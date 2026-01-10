@@ -186,6 +186,7 @@ class RecallResultResponse(BaseModel):
         confidence: Confidence score for facts/semantic memories.
         memory_id: Unique memory ID.
         source_episode_id: Source episode ID for facts (single source).
+        source_episode_ids: Source episode IDs for memories with multiple sources.
         source_episodes: Source episode details (when include_sources=True).
         related_ids: IDs of related memories (for multi-hop).
         hop_distance: Distance from original query result (0=direct, 1=1-hop, etc.).
@@ -202,6 +203,7 @@ class RecallResultResponse(BaseModel):
     confidence: float | None = None
     memory_id: str
     source_episode_id: str | None = None
+    source_episode_ids: list[str] = Field(default_factory=list)
     source_episodes: list[SourceEpisodeSummary] = Field(default_factory=list)
     related_ids: list[str] = Field(default_factory=list)
     hop_distance: int = Field(default=0, ge=0, description="Distance from original query result")

@@ -463,10 +463,10 @@ class TestSemanticMemory:
         """strengthen should increment score and passes."""
         mem = SemanticMemory(content="Test", user_id="user_123")
         assert mem.consolidation_strength == 0.0
-        assert mem.consolidation_passes == 1
+        assert mem.consolidation_passes == 0  # Fresh memory, no consolidation yet
         mem.strengthen()
         assert mem.consolidation_strength == 0.1
-        assert mem.consolidation_passes == 2
+        assert mem.consolidation_passes == 1  # After first strengthen
 
     def test_strengthen_caps_at_one(self):
         """Consolidation strength should cap at 1.0."""

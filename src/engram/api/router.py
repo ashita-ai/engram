@@ -217,6 +217,7 @@ async def recall(
                 confidence=r.confidence,
                 memory_id=r.memory_id,
                 source_episode_id=r.source_episode_id,
+                source_episode_ids=r.source_episode_ids,
                 source_episodes=[
                     SourceEpisodeSummary(
                         id=s.id,

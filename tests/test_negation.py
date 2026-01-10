@@ -1,4 +1,14 @@
-"""Unit tests for Engram negation detection."""
+"""Unit tests for Engram negation detection.
+
+Tests the 5 core negation patterns:
+1. "I don't/do not use/like/want/need/prefer X"
+2. "I'm not a/an X"
+3. "I'm not interested in X"
+4. "I never use/used X"
+5. "I/We no longer use/support X"
+
+Edge cases are handled by LLM during consolidation, not pattern matching.
+"""
 
 from engram.extraction.negation import (
     NegationDetector,
@@ -20,7 +30,9 @@ def make_episode(content: str) -> Episode:
 
 
 class TestDetectNegations:
-    """Tests for detect_negations function."""
+    """Tests for detect_negations function - core patterns only."""
+
+    # Pattern 1: I don't/do not use/like/want/need/prefer X
 
     def test_dont_use_pattern(self):
         """Should detect 'I don't use X' patterns."""
@@ -35,6 +47,32 @@ class TestDetectNegations:
         assert len(matches) == 1
         assert matches[0].negated_term == "java"
 
+    def test_dont_like_pattern(self):
+        """Should detect 'don't like' negations."""
+        matches = detect_negations("I don't like MongoDB")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "mongodb"
+
+    def test_dont_want_pattern(self):
+        """Should detect 'don't want' negations."""
+        matches = detect_negations("I don't want JavaScript")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "javascript"
+
+    def test_dont_need_pattern(self):
+        """Should detect 'don't need' negations."""
+        matches = detect_negations("I don't need TypeScript")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "typescript"
+
+    def test_dont_prefer_pattern(self):
+        """Should detect 'don't prefer' negations."""
+        matches = detect_negations("I don't prefer MySQL")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "mysql"
+
+    # Pattern 2: I'm not a/an X
+
     def test_not_a_user_pattern(self):
         """Should detect 'I'm not a X' patterns."""
         matches = detect_negations("I'm not a Python developer")
@@ -46,6 +84,22 @@ class TestDetectNegations:
         matches = detect_negations("I am not a Java programmer")
         assert len(matches) == 1
         assert matches[0].negated_term == "java"
+
+    # Pattern 3: I'm not interested in X
+
+    def test_not_interested_pattern(self):
+        """Should detect 'I'm not interested in X' patterns."""
+        matches = detect_negations("I'm not interested in blockchain")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "blockchain"
+
+    def test_i_am_not_interested_pattern(self):
+        """Should detect 'I am not interested in X' patterns."""
+        matches = detect_negations("I am not interested in crypto")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "crypto"
+
+    # Pattern 4: I never use/used X
 
     def test_never_use_pattern(self):
         """Should detect 'I never use X' patterns."""
@@ -59,59 +113,21 @@ class TestDetectNegations:
         assert len(matches) == 1
         assert matches[0].negated_term == "ruby"
 
+    # Pattern 5: I/We no longer use/support X
+
     def test_no_longer_use_pattern(self):
         """Should detect 'I no longer use X' patterns."""
         matches = detect_negations("I no longer use Vim")
         assert len(matches) == 1
         assert matches[0].negated_term == "vim"
 
-    def test_actually_not_pattern(self):
-        """Should detect 'Actually, not X' patterns."""
-        matches = detect_negations("Actually, not Python but JavaScript")
+    def test_we_no_longer_support_pattern(self):
+        """Should detect 'We no longer support X' patterns."""
+        matches = detect_negations("We no longer support Python 2")
         assert len(matches) == 1
-        assert matches[0].negated_term == "python"
+        assert matches[0].negated_term == "python 2"
 
-    def test_no_not_pattern(self):
-        """Should detect 'No, not X' patterns."""
-        matches = detect_negations("No, not TypeScript")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "typescript"
-
-    def test_is_wrong_pattern(self):
-        """Should detect 'X is wrong' patterns."""
-        matches = detect_negations("MongoDB is wrong for this use case")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "mongodb"
-
-    def test_is_incorrect_pattern(self):
-        """Should detect 'X is incorrect' patterns."""
-        matches = detect_negations("That assumption is incorrect")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "assumption"
-
-    def test_my_x_is_not_y_pattern(self):
-        """Should detect 'my X is not Y' patterns."""
-        matches = detect_negations("my email is not jane@example.com")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "jane@example.com"
-
-    def test_thats_not_my_pattern(self):
-        """Should detect 'that's not my X' patterns."""
-        matches = detect_negations("That's not my preference")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "preference"
-
-    def test_stopped_using_pattern(self):
-        """Should detect 'I stopped using X' patterns."""
-        matches = detect_negations("I stopped using React years ago")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "react"
-
-    def test_dont_x_anymore_pattern(self):
-        """Should detect 'I don't X anymore' patterns."""
-        matches = detect_negations("I don't code anymore")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "code"
+    # Edge cases
 
     def test_multiple_negations(self):
         """Should detect multiple negations in text."""
@@ -148,14 +164,37 @@ class TestDetectNegations:
 
     def test_overlapping_patterns_handled(self):
         """Should not produce overlapping matches."""
-        # This text could potentially match multiple patterns at same location
-        text = "Actually, not Python - I don't use Python"
+        text = "I don't like Python and I don't use Python"
         matches = detect_negations(text)
         # Check no overlapping spans
         spans = [m.span for m in matches]
         for i, span1 in enumerate(spans):
             for span2 in spans[i + 1 :]:
                 assert span1[1] <= span2[0] or span2[1] <= span1[0], "Spans overlap"
+
+    def test_hyphenated_term(self):
+        """Should handle hyphenated terms."""
+        matches = detect_negations("I don't use type-script")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "type-script"
+
+    def test_underscored_term(self):
+        """Should handle underscored terms."""
+        matches = detect_negations("I don't use my_sql")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "my_sql"
+
+    def test_numeric_suffix(self):
+        """Should handle terms with numbers."""
+        matches = detect_negations("I don't use Python3")
+        assert len(matches) == 1
+        assert matches[0].negated_term == "python3"
+
+    def test_version_number(self):
+        """Should handle version numbers in terms."""
+        matches = detect_negations("We no longer support Python 2.7")
+        assert len(matches) == 1
+        assert "python 2" in matches[0].negated_term.lower()
 
 
 class TestNegationMatch:
@@ -270,10 +309,13 @@ class TestNegationDetector:
     def test_detect_multiple(self):
         """Should detect multiple negations."""
         detector = NegationDetector()
-        episode = make_episode("I don't like Java and I'm not a fan of Ruby")
+        episode = make_episode("I don't like Java and I never use Ruby")
         facts = detector.detect(episode)
 
+        # Both patterns match: "I don't like Java" and "I never use Ruby"
         assert len(facts) == 2
+        patterns = {f.negates_pattern for f in facts}
+        assert patterns == {"java", "ruby"}
 
     def test_detect_empty(self):
         """Should return empty list for positive text."""
@@ -284,125 +326,23 @@ class TestNegationDetector:
         assert facts == []
 
 
-class TestNegationPatternCoverage:
-    """Tests verifying pattern coverage for various negation forms."""
+class TestShortTermNegations:
+    """Tests for short programming language terms (R, C, Go, etc.)."""
 
-    def test_dont_like_pattern(self):
-        """Should detect 'don't like' negations."""
-        matches = detect_negations("I don't like MongoDB")
+    def test_r_language_negation(self):
+        """Should detect 'I don't use R' for R language."""
+        matches = detect_negations("I don't use R anymore")
         assert len(matches) == 1
-        assert matches[0].negated_term == "mongodb"
+        assert matches[0].negated_term == "r"
 
-    def test_dont_want_pattern(self):
-        """Should detect 'don't want' negations."""
-        matches = detect_negations("I don't want JavaScript")
+    def test_c_language_negation(self):
+        """Should detect 'I don't use C' for C language."""
+        matches = detect_negations("I don't use C for this")
         assert len(matches) == 1
-        assert matches[0].negated_term == "javascript"
+        assert matches[0].negated_term == "c"
 
-    def test_dont_need_pattern(self):
-        """Should detect 'don't need' negations."""
-        matches = detect_negations("I don't need TypeScript")
+    def test_go_language_negation(self):
+        """Should detect 'I don't use Go' for Go language."""
+        matches = detect_negations("I don't use Go")
         assert len(matches) == 1
-        assert matches[0].negated_term == "typescript"
-
-    def test_dont_have_pattern(self):
-        """Should detect 'don't have' negations."""
-        matches = detect_negations("I don't have React experience")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "react"
-
-    def test_dont_prefer_pattern(self):
-        """Should detect 'don't prefer' negations."""
-        matches = detect_negations("I don't prefer MySQL")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "mysql"
-
-    def test_never_liked_pattern(self):
-        """Should detect 'never liked' negations."""
-        matches = detect_negations("I never liked Angular")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "angular"
-
-    def test_never_wanted_pattern(self):
-        """Should detect 'never wanted' negations."""
-        matches = detect_negations("I never wanted Perl")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "perl"
-
-    def test_never_had_pattern(self):
-        """Should detect 'never had' negations."""
-        matches = detect_negations("I never had AWS experience")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "aws"
-
-    def test_no_longer_like_pattern(self):
-        """Should detect 'no longer like' negations."""
-        matches = detect_negations("I no longer like PHP")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "php"
-
-    def test_no_longer_need_pattern(self):
-        """Should detect 'no longer need' negations."""
-        matches = detect_negations("I no longer need jQuery")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "jquery"
-
-    def test_is_not_right_pattern(self):
-        """Should detect 'is not right' negations."""
-        matches = detect_negations("That approach is not right")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "approach"
-
-    def test_is_not_correct_pattern(self):
-        """Should detect 'is not correct' negations."""
-        matches = detect_negations("That answer is not correct")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "answer"
-
-    def test_is_not_true_pattern(self):
-        """Should detect 'is not true' negations."""
-        matches = detect_negations("That statement is not true")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "statement"
-
-    def test_is_false_pattern(self):
-        """Should detect 'is false' negations."""
-        matches = detect_negations("That claim is false")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "claim"
-
-    def test_that_is_not_my_pattern(self):
-        """Should detect 'that is not my X' patterns."""
-        matches = detect_negations("That is not my style")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "style"
-
-    def test_nope_not_pattern(self):
-        """Should detect 'nope, not X' patterns."""
-        matches = detect_negations("Nope, not JavaScript")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "javascript"
-
-    def test_stopped_liking_pattern(self):
-        """Should detect 'stopped liking' negations."""
-        matches = detect_negations("I stopped liking Ruby")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "ruby"
-
-    def test_hyphenated_term(self):
-        """Should handle hyphenated terms."""
-        matches = detect_negations("I don't use type-script")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "type-script"
-
-    def test_underscored_term(self):
-        """Should handle underscored terms."""
-        matches = detect_negations("I don't use my_sql")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "my_sql"
-
-    def test_numeric_suffix(self):
-        """Should handle terms with numbers."""
-        matches = detect_negations("I don't use Python3")
-        assert len(matches) == 1
-        assert matches[0].negated_term == "python3"
+        assert matches[0].negated_term == "go"

@@ -96,6 +96,7 @@ class RecallResult(BaseModel):
         score: Similarity score (0.0-1.0).
         confidence: Confidence score for facts/semantic memories.
         source_episode_id: Source episode ID for facts (single source).
+        source_episode_ids: Source episode IDs for memories with multiple sources.
         source_episodes: Source episode details (when include_sources=True).
         related_ids: IDs of related memories (for multi-hop).
         hop_distance: Distance from original query result (0=direct, 1=1-hop, etc.).
@@ -112,6 +113,7 @@ class RecallResult(BaseModel):
     confidence: float | None = None
     memory_id: str
     source_episode_id: str | None = None
+    source_episode_ids: list[str] = Field(default_factory=list)
     source_episodes: list[SourceEpisodeSummary] = Field(default_factory=list)
     related_ids: list[str] = Field(default_factory=list)
     hop_distance: int = Field(default=0, ge=0)
@@ -544,6 +546,7 @@ class EngramService:
                         score=scored_sem.score,
                         confidence=sem.confidence.value,
                         memory_id=sem.id,
+                        source_episode_ids=sem.source_episode_ids,
                         related_ids=sem.related_ids,
                         staleness=Staleness.FRESH,
                         consolidated_at=sem.derived_at.isoformat(),
@@ -574,6 +577,7 @@ class EngramService:
                         score=scored_proc.score,
                         confidence=proc.confidence.value,
                         memory_id=proc.id,
+                        source_episode_ids=proc.source_episode_ids,
                         related_ids=proc.related_ids,
                         staleness=Staleness.FRESH,
                         consolidated_at=proc.derived_at.isoformat(),
@@ -603,6 +607,7 @@ class EngramService:
                         score=scored_neg.score,
                         confidence=neg.confidence.value,
                         memory_id=neg.id,
+                        source_episode_ids=neg.source_episode_ids,
                         staleness=Staleness.FRESH,
                         consolidated_at=neg.derived_at.isoformat(),
                         metadata={
