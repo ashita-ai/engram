@@ -2,10 +2,10 @@
 """Quickstart demo - core encode/recall workflow with verification.
 
 Demonstrates:
-- encode(): Store episodes and extract facts
-- recall(): Semantic search with confidence filtering
+- encode(): Store episodes and extract facts automatically
+- recall(): Semantic search across memory types
 - verify(): Trace any memory back to its source
-- Multi-tenancy isolation
+- Confidence-based filtering
 
 Prerequisites:
     - Qdrant running: docker run -p 6333:6333 qdrant/qdrant
@@ -59,147 +59,175 @@ async def main() -> None:
         # =====================================================================
         print("\n1. ENCODING MEMORIES")
         print("-" * 70)
+        print("  Episodes are stored verbatim. Facts are auto-extracted.\n")
 
         messages = [
             ("user", "Hi! I'm Jordan, a data scientist at TechFlow Inc."),
-            ("assistant", "Nice to meet you, Jordan! What kind of data science work do you do?"),
+            ("assistant", "Nice to meet you, Jordan! What kind of data science work?"),
             ("user", "I specialize in NLP and work mainly with Python and PyTorch."),
             ("user", "My work email is jordan.ds@techflow.io"),
             ("user", "I prefer dark mode and vim keybindings in all my tools."),
             ("user", "I don't use R anymore - switched completely to Python."),
         ]
 
+        facts_extracted = []
+        negations_extracted = []
+
         for role, content in messages:
             result = await engram.encode(content=content, role=role, user_id=user_id)
-            facts_info = f", {len(result.facts)} facts" if result.facts else ""
-            print(f"  [{role}] {content[:50]}...{facts_info}")
+            extras = []
+            if result.facts:
+                facts_extracted.extend(result.facts)
+                extras.append("+fact")
+            if result.negations:
+                negations_extracted.extend(result.negations)
+                extras.append("+negation")
+            extras_str = f"  [{', '.join(extras)}]" if extras else ""
+            print(f"  [{role:9}] {content[:50]}...{extras_str}")
 
-        print(f"\n  Stored {len(messages)} episodes")
+        print("\n  Results:")
+        print(f"    Episodes stored: {len(messages)}")
+        print(f"    Facts extracted: {len(facts_extracted)} (emails, phones, etc.)")
+        print(f'    Negations found: {len(negations_extracted)} ("I don\'t use...")')
 
         # =====================================================================
         # 2. RECALL: Semantic search
         # =====================================================================
-        print("\n\n2. BASIC RECALL")
+        print("\n\n2. SEMANTIC RECALL")
         print("-" * 70)
+        print("  Natural language queries search across all memory types.\n")
 
-        queries = [
-            "What is Jordan's email?",
-            "What programming languages does Jordan use?",
-            "Where does Jordan work?",
-        ]
+        # Query 1: Email - should find the factual memory
+        print('  Query: "contact information"')
+        results = await engram.recall(query="contact email address", user_id=user_id, limit=3)
+        for r in results[:3]:
+            conf = f" ({r.confidence:.0%})" if r.confidence else ""
+            print(f"    [{r.memory_type:8}] {r.content[:45]}...{conf}")
 
-        for query in queries:
-            print(f'\n  Query: "{query}"')
-            results = await engram.recall(query=query, user_id=user_id, limit=3)
-            for r in results:
-                conf = f" ({r.confidence:.0%})" if r.confidence else ""
-                print(f"    [{r.memory_type}] {r.content[:55]}...{conf}")
+        # Query 2: Programming - should find Python/PyTorch content
+        print('\n  Query: "programming tools and frameworks"')
+        results = await engram.recall(
+            query="programming languages frameworks tools", user_id=user_id, limit=3
+        )
+        for r in results[:3]:
+            conf = f" ({r.confidence:.0%})" if r.confidence else ""
+            print(f"    [{r.memory_type:8}] {r.content[:45]}...{conf}")
+
+        # Query 3: Work - should find TechFlow
+        print('\n  Query: "company employer"')
+        results = await engram.recall(query="company employer workplace", user_id=user_id, limit=3)
+        for r in results[:3]:
+            conf = f" ({r.confidence:.0%})" if r.confidence else ""
+            print(f"    [{r.memory_type:8}] {r.content[:45]}...{conf}")
 
         # =====================================================================
-        # 3. CONFIDENCE FILTERING
+        # 3. MEMORY TYPE FILTERING
         # =====================================================================
-        print("\n\n3. CONFIDENCE-GATED RECALL")
+        print("\n\n3. FILTER BY MEMORY TYPE")
         print("-" * 70)
-        print("  Filter results by minimum confidence level:\n")
+        print("  Search specific memory types for different use cases.\n")
 
-        query = "programming"
+        # Only episodic - raw conversation
+        print("  memory_types=['episodic'] - Raw conversation history:")
+        results = await engram.recall(
+            query="Jordan", user_id=user_id, memory_types=["episodic"], limit=3
+        )
+        for r in results[:2]:
+            print(f'    "{r.content[:55]}..."')
 
-        for min_conf in [0.9, 0.7, 0.5]:
-            results = await engram.recall(
-                query=query,
-                user_id=user_id,
-                min_confidence=min_conf,
-                limit=5,
-            )
-            fact_count = sum(1 for r in results if r.memory_type == "factual")
-            print(f"  min_confidence={min_conf}: {len(results)} results ({fact_count} facts)")
+        # Only factual - extracted facts
+        print("\n  memory_types=['factual'] - Extracted structured data:")
+        results = await engram.recall(
+            query="Jordan", user_id=user_id, memory_types=["factual"], limit=3
+        )
+        for r in results:
+            print(f"    {r.content} (confidence: {r.confidence:.0%})")
+
+        # Only negation - what's NOT true
+        print("\n  memory_types=['negation'] - What the user DOESN'T do:")
+        results = await engram.recall(
+            query="tools", user_id=user_id, memory_types=["negation"], limit=3
+        )
+        for r in results:
+            print(f'    "{r.content}" (confidence: {r.confidence:.0%})')
 
         # =====================================================================
         # 4. VERIFY: Trace back to source
         # =====================================================================
         print("\n\n4. SOURCE VERIFICATION")
         print("-" * 70)
-        print("  Every derived memory traces back to source episodes:\n")
+        print("  Every derived memory traces back to its source episode.\n")
 
         # Find a fact to verify
         results = await engram.recall(
-            query="email",
-            user_id=user_id,
-            memory_types=["factual"],
-            limit=1,
+            query="email", user_id=user_id, memory_types=["factual"], limit=1
         )
 
         if results:
             fact = results[0]
-            print(f'  Memory: "{fact.content}"')
-            print(f"  Type: {fact.memory_type}")
-            print(f"  ID: {fact.memory_id}")
+            print("  Derived Memory:")
+            print(f'    Content: "{fact.content}"')
+            print(f"    Type: {fact.memory_type}")
+            print(f"    Confidence: {fact.confidence:.0%}")
 
             # Verify it
             verification = await engram.verify(fact.memory_id, user_id=user_id)
-            print("\n  Verification:")
+            print("\n  Verification Result:")
             print(f"    Verified: {verification.verified}")
             print(f"    Method: {verification.extraction_method}")
-            print(f"    Confidence: {verification.confidence:.0%}")
-            print(f"    Explanation: {verification.explanation}")
 
             if verification.source_episodes:
-                print("\n  Source Episode:")
                 src = verification.source_episodes[0]
+                print("\n  Source Episode (ground truth):")
                 print(f"    \"{src['content']}\"")
+                print(f"    Role: {src['role']}")
                 print(f"    Timestamp: {src['timestamp']}")
 
         # =====================================================================
-        # 5. INCLUDE SOURCES
+        # 5. CONFIDENCE FILTERING
         # =====================================================================
-        print("\n\n5. RECALL WITH SOURCES")
+        print("\n\n5. CONFIDENCE-GATED RECALL")
         print("-" * 70)
-        print("  Include source episodes directly in recall results:\n")
+        print("  Filter by confidence to control precision vs recall.\n")
 
-        results = await engram.recall(
-            query="Jordan's job",
-            user_id=user_id,
-            include_sources=True,
-            limit=2,
+        # Show how confidence filtering works
+        all_results = await engram.recall(query="Jordan data", user_id=user_id, limit=10)
+
+        print("  All memories with confidence scores:")
+        for r in all_results[:5]:
+            conf = f"{r.confidence:.0%}" if r.confidence else "N/A"
+            print(f"    [{r.memory_type:8}] conf={conf:>4} | {r.content[:40]}...")
+
+        # Only high-confidence
+        high_conf = await engram.recall(
+            query="Jordan data", user_id=user_id, min_confidence=0.85, limit=10
         )
-
-        for r in results:
-            print(f"  [{r.memory_type}] {r.content[:50]}...")
-            if r.source_episodes:
-                for src in r.source_episodes[:1]:
-                    print(f'    Source: "{src.content[:40]}..."')
+        print(f"\n  With min_confidence=0.85: {len(high_conf)} results (facts only)")
 
         # =====================================================================
-        # 6. MEMORY TYPE FILTERING
+        # 6. WORKING MEMORY
         # =====================================================================
-        print("\n\n6. FILTER BY MEMORY TYPE")
-        print("-" * 70)
-
-        for types in [["episodic"], ["factual"], ["episodic", "factual"]]:
-            results = await engram.recall(
-                query="Jordan",
-                user_id=user_id,
-                memory_types=types,
-                limit=10,
-            )
-            type_counts = {}
-            for r in results:
-                type_counts[r.memory_type] = type_counts.get(r.memory_type, 0) + 1
-            print(f"  memory_types={types}: {type_counts}")
-
-        # =====================================================================
-        # 7. WORKING MEMORY
-        # =====================================================================
-        print("\n\n7. WORKING MEMORY")
+        print("\n\n6. WORKING MEMORY")
         print("-" * 70)
 
         working = engram.get_working_memory()
-        print(f"  Current session has {len(working)} episodes in working memory")
-        print("  Working memory is volatile - cleared when session ends")
+        print(f"  Current session: {len(working)} episodes in working memory")
+        print("  Working memory is:")
+        print("    - Volatile (cleared when session ends)")
+        print("    - Instant access (no DB round-trip)")
+        print("    - Included in recall by default")
 
     print("\n" + "=" * 70)
     print("Quickstart complete!")
     print("=" * 70)
+    print("""
+Key Takeaways:
+1. encode() stores episodes AND auto-extracts facts/negations
+2. recall() searches semantically across all memory types
+3. verify() traces any derived memory to its source
+4. Confidence scores distinguish certain from uncertain
+5. Memory types serve different purposes (raw vs derived)
+""")
 
 
 if __name__ == "__main__":
