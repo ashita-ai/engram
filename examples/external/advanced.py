@@ -289,8 +289,9 @@ async def main() -> None:
         print("  suppresses similar non-retrieved memories.\n")
 
         # Get all semantic memories (these have confidence to decay)
+        rif_query = "Alex developer preferences"
         semantic_results = await engram.recall(
-            query="Alex developer preferences",
+            query=rif_query,
             user_id=user_id,
             memory_types=["semantic"],
             limit=10,
@@ -298,6 +299,7 @@ async def main() -> None:
         )
 
         if len(semantic_results) >= 2:
+            print(f'  Query: "{rif_query}"')
             print(f"  BEFORE RIF ({len(semantic_results)} semantic memories):")
             conf_before = {}
             scores_before = {}
@@ -308,19 +310,22 @@ async def main() -> None:
 
             # Use threshold below the scores to ensure suppression happens
             rif_threshold = min(scores_before.values()) - 0.05
+            rif_decay = 0.1
 
             # Retrieve top 1 with RIF enabled - others should be suppressed
-            print("\n  Retrieving top 1 with RIF enabled...")
-            print(f"  (Competitors above threshold {rif_threshold:.2f} get confidence decay)")
+            print("\n  Retrieving top 1 with RIF enabled (limit=1)...")
+            print(
+                f"  Non-retrieved memories with score ≥ {rif_threshold:.2f} lose {rif_decay:.0%} confidence"
+            )
 
             rif_results = await engram.recall(
-                query="Alex developer preferences",
+                query=rif_query,
                 user_id=user_id,
                 memory_types=["semantic"],
                 limit=1,
                 rif_enabled=True,
                 rif_threshold=rif_threshold,
-                rif_decay=0.1,
+                rif_decay=rif_decay,
             )
 
             retrieved_ids = {r.memory_id for r in rif_results}
@@ -330,7 +335,7 @@ async def main() -> None:
 
             # Check if competitors were suppressed
             after_rif = await engram.recall(
-                query="Alex developer preferences",
+                query=rif_query,
                 user_id=user_id,
                 memory_types=["semantic"],
                 limit=10,
