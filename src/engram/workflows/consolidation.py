@@ -331,13 +331,23 @@ async def run_consolidation(
 
     logger.info(f"Processing {len(episodes)} unconsolidated episodes")
 
+    # Filter out system prompts - they are operational metadata, not user content
+    # System prompts should be stored for audit but not used for semantic extraction
+    user_episodes = [ep for ep in episodes if ep.role != "system"]
+    system_episodes = [ep for ep in episodes if ep.role == "system"]
+    if system_episodes:
+        logger.debug(f"Excluding {len(system_episodes)} system prompts from consolidation")
+
+    # Create mapping from episode ID to episode for role lookups
+    episode_by_id = {ep.id: ep for ep in episodes}
+
     # 2. Get existing memories to provide context for linking and evolution
     existing_memories = await storage.list_semantic_memories(user_id, org_id)
     existing_memories_context = _format_existing_memories_for_llm(existing_memories)
     existing_by_content = {m.content: m for m in existing_memories}
 
-    # 3. Format episodes for LLM
-    episode_data = [{"id": ep.id, "role": ep.role, "content": ep.content} for ep in episodes]
+    # 3. Format episodes for LLM - only user/assistant messages, not system prompts
+    episode_data = [{"id": ep.id, "role": ep.role, "content": ep.content} for ep in user_episodes]
     formatted_text = format_episodes_for_llm(episode_data) + existing_memories_context
 
     # 4. Run LLM extraction using the durable agent
@@ -400,7 +410,8 @@ Focus on quality over quantity."""
         extraction = result.output
 
     # 5. Store semantic memories with A-MEM metadata
-    episode_ids = [ep.id for ep in episodes]
+    # Only use user episode IDs (exclude system prompts from source tracking)
+    episode_ids = [ep.id for ep in user_episodes]
     memories_created = 0
     negations_created = 0
     links_created = 0
@@ -430,7 +441,7 @@ Focus on quality over quantity."""
                     if similarity >= 0.92:  # High threshold for semantic duplicates
                         # Strengthen existing memory instead of creating duplicate
                         existing_memory.strengthen(delta=0.1)
-                        # Add new episode IDs to source list
+                        # Add new episode IDs to source list (only user messages)
                         for ep_id in episode_ids:
                             if ep_id not in existing_memory.source_episode_ids:
                                 existing_memory.source_episode_ids.append(ep_id)
@@ -447,11 +458,18 @@ Focus on quality over quantity."""
         if duplicate_found:
             continue
 
-        # Use LLM-identified source episodes, or fallback to all if not provided
+        # Use LLM-identified source episodes, or fallback to user episodes if not provided
         fact_sources = fact.source_episode_ids if fact.source_episode_ids else episode_ids
+        # Filter to only include user messages for confidence calculation
+        # System prompts are metadata, not evidence - they shouldn't boost confidence
+        user_fact_sources = [
+            ep_id
+            for ep_id in fact_sources
+            if ep_id in episode_by_id and episode_by_id[ep_id].role == "user"
+        ]
         memory = SemanticMemory(
             content=fact.content,
-            source_episode_ids=fact_sources,
+            source_episode_ids=fact_sources,  # Store all sources for audit
             user_id=user_id,
             org_id=org_id,
             embedding=embedding,
@@ -464,7 +482,8 @@ Focus on quality over quantity."""
         # extracted from direct statements like "I'm Morgan" - use LLM confidence
         # For lower confidence, use weighted formula with corroboration bonus
         memory.confidence.extraction_base = fact.confidence
-        memory.confidence.supporting_episodes = len(fact_sources)
+        # Only count USER messages as supporting evidence (not system prompts)
+        memory.confidence.supporting_episodes = len(user_fact_sources) if user_fact_sources else 1
         memory.confidence.recompute()
         # Don't let the weighted formula reduce high-confidence extractions
         memory.confidence.value = max(memory.confidence.value, fact.confidence)
@@ -634,8 +653,10 @@ Focus on quality over quantity."""
         negations_created += 1
         logger.info(f"Created negation: {neg_fact.id} negates '{pattern}'")
 
-    # 9. Mark episodes as consolidated
-    await storage.mark_episodes_consolidated(episode_ids, user_id)
+    # 9. Mark ALL episodes as consolidated (including system prompts)
+    # System prompts are excluded from extraction but still need to be marked processed
+    all_episode_ids = [ep.id for ep in episodes]
+    await storage.mark_episodes_consolidated(all_episode_ids, user_id)
 
     logger.info(f"Strengthened {memories_strengthened} memories through consolidation")
 

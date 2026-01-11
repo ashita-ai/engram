@@ -403,6 +403,7 @@ class EngramService:
         rif_decay: float = 0.1,
         apply_negation_filter: bool = True,
         negation_similarity_threshold: float | None = 0.75,
+        include_system_prompts: bool = False,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
@@ -437,6 +438,9 @@ class EngramService:
                 a "competitor" that gets suppressed (default 0.5).
             rif_decay: Amount to decay confidence of suppressed memories (default 0.1).
             apply_negation_filter: Filter out memories that match negated patterns (default True).
+            include_system_prompts: Include system prompt episodes in results (default False).
+                System prompts are operational metadata, not user content, so they're
+                excluded by default to keep results focused on actual conversation.
             negation_similarity_threshold: Semantic similarity threshold for negation filtering.
                 If set (default 0.75), uses embedding similarity to filter semantically related
                 memories. Set to None to use only pattern-based (substring) filtering.
@@ -477,6 +481,10 @@ class EngramService:
             )
             for scored_ep in scored_episodes:
                 ep = scored_ep.memory
+                # Filter out system prompts unless explicitly requested
+                # System prompts are operational metadata, not user content
+                if ep.role == "system" and not include_system_prompts:
+                    continue
                 # Episode staleness: FRESH if consolidated, STALE otherwise
                 ep_staleness = Staleness.FRESH if ep.consolidated else Staleness.STALE
                 results.append(
