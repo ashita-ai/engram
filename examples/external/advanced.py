@@ -17,11 +17,37 @@ import asyncio
 import logging
 
 from engram.service import EngramService
+from engram.storage import EngramStorage
 from engram.workflows import init_workflows, shutdown_workflows
 from engram.workflows.consolidation import run_consolidation
 
 # Suppress INFO logs from DBOS to keep output clean
 logging.getLogger("dbos").setLevel(logging.WARNING)
+
+
+async def cleanup_demo_data(storage: EngramStorage, user_id: str) -> None:
+    """Delete all data for the demo user to ensure clean slate."""
+    from qdrant_client import models
+
+    collections = ["episodic", "semantic", "factual", "negation", "procedural"]
+    for memory_type in collections:
+        collection = f"engram_{memory_type}"
+        try:
+            await storage.client.delete(
+                collection_name=collection,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="user_id",
+                                match=models.MatchValue(value=user_id),
+                            )
+                        ]
+                    )
+                ),
+            )
+        except Exception:
+            pass  # Collection might not exist
 
 
 async def main() -> None:
@@ -39,6 +65,9 @@ async def main() -> None:
     async with EngramService.create() as engram:
         user_id = "advanced_demo"
 
+        # Clean up any existing data from previous runs
+        await cleanup_demo_data(engram.storage, user_id)
+
         # =====================================================================
         # Setup: Create a rich memory landscape
         # =====================================================================
@@ -54,7 +83,9 @@ async def main() -> None:
             ("user", "I prefer PostgreSQL for databases. It's my go-to choice."),
             ("user", "For caching, I always use Redis."),
             ("user", "I use Neovim as my primary editor with a custom config."),
-            # Negations - what is NOT true
+            # Positive statement that will be contradicted by negation
+            ("user", "I used to use MongoDB heavily at my previous job."),
+            # Negations - what is NOT true (contradicts the positive statement)
             ("user", "I don't use MongoDB anymore - too many scaling issues."),
             ("user", "I'm not interested in blockchain or Web3."),
             ("user", "I never use Windows for development, only Linux."),
@@ -117,34 +148,45 @@ async def main() -> None:
         print("-" * 70)
         print("  Negations automatically filter out contradicted information:\n")
 
-        # Search for databases - should NOT return MongoDB
-        print('  Query: "database preferences"')
+        # Query for MongoDB directly - negation filter should remove it
+        print('  Query: "MongoDB database"')
 
-        # With negation filtering (default)
-        results_filtered = await engram.recall(
-            query="database preferences",
-            user_id=user_id,
-            apply_negation_filter=True,
-            limit=5,
-        )
-
-        # Without negation filtering
+        # Without negation filtering - should include MongoDB episode
         results_unfiltered = await engram.recall(
-            query="database preferences",
+            query="MongoDB database",
             user_id=user_id,
             apply_negation_filter=False,
             limit=5,
         )
 
-        print(f"\n  With negation filter: {len(results_filtered)} results")
-        for r in results_filtered[:3]:
-            mongo_flag = " [MONGODB]" if "mongo" in r.content.lower() else ""
-            print(f"    {r.content[:50]}...{mongo_flag}")
+        # With negation filtering - MongoDB should be filtered out
+        results_filtered = await engram.recall(
+            query="MongoDB database",
+            user_id=user_id,
+            apply_negation_filter=True,
+            limit=5,
+        )
 
         print(f"\n  Without negation filter: {len(results_unfiltered)} results")
+        mongo_count_unfiltered = 0
         for r in results_unfiltered[:3]:
-            mongo_flag = " [MONGODB]" if "mongo" in r.content.lower() else ""
+            mongo_flag = " [MONGODB - would be filtered]" if "mongo" in r.content.lower() else ""
+            if "mongo" in r.content.lower():
+                mongo_count_unfiltered += 1
             print(f"    {r.content[:50]}...{mongo_flag}")
+
+        print(f"\n  With negation filter: {len(results_filtered)} results")
+        mongo_count_filtered = 0
+        for r in results_filtered[:3]:
+            mongo_flag = " [MONGODB]" if "mongo" in r.content.lower() else ""
+            if "mongo" in r.content.lower():
+                mongo_count_filtered += 1
+            print(f"    {r.content[:50]}...{mongo_flag}")
+
+        if mongo_count_unfiltered > mongo_count_filtered:
+            print(
+                f"\n  ✓ Negation filter removed {mongo_count_unfiltered - mongo_count_filtered} MongoDB result(s)"
+            )
 
         # Show stored negations
         print("\n  Stored negations:")

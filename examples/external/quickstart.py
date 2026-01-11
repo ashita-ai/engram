@@ -15,6 +15,32 @@ Prerequisites:
 import asyncio
 
 from engram.service import EngramService
+from engram.storage import EngramStorage
+
+
+async def cleanup_demo_data(storage: EngramStorage, user_id: str) -> None:
+    """Delete all data for the demo user to ensure clean slate."""
+    from qdrant_client import models
+
+    collections = ["episodic", "semantic", "factual", "negation", "procedural"]
+    for memory_type in collections:
+        collection = f"engram_{memory_type}"
+        try:
+            await storage.client.delete(
+                collection_name=collection,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="user_id",
+                                match=models.MatchValue(value=user_id),
+                            )
+                        ]
+                    )
+                ),
+            )
+        except Exception:
+            pass  # Collection might not exist
 
 
 async def main() -> None:
@@ -24,6 +50,9 @@ async def main() -> None:
 
     async with EngramService.create() as engram:
         user_id = "quickstart_demo"
+
+        # Clean up any existing data from previous runs
+        await cleanup_demo_data(engram.storage, user_id)
 
         # =====================================================================
         # 1. ENCODE: Store episodes and extract facts
