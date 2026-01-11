@@ -300,13 +300,18 @@ async def main() -> None:
         if len(semantic_results) >= 2:
             print(f"  BEFORE RIF ({len(semantic_results)} semantic memories):")
             conf_before = {}
+            scores_before = {}
             for r in semantic_results:
                 conf_before[r.memory_id] = r.confidence or 0
-                print(f"    [{r.confidence:.0%}] {r.content[:45]}...")
+                scores_before[r.memory_id] = r.score
+                print(f"    [{r.confidence:.0%}] (score={r.score:.2f}) {r.content[:40]}...")
+
+            # Use threshold below the scores to ensure suppression happens
+            rif_threshold = min(scores_before.values()) - 0.05
 
             # Retrieve top 1 with RIF enabled - others should be suppressed
             print("\n  Retrieving top 1 with RIF enabled...")
-            print("  (Competitors above threshold 0.5 get confidence decay)")
+            print(f"  (Competitors above threshold {rif_threshold:.2f} get confidence decay)")
 
             rif_results = await engram.recall(
                 query="Alex developer preferences",
@@ -314,7 +319,7 @@ async def main() -> None:
                 memory_types=["semantic"],
                 limit=1,
                 rif_enabled=True,
-                rif_threshold=0.5,
+                rif_threshold=rif_threshold,
                 rif_decay=0.1,
             )
 
