@@ -240,32 +240,61 @@ async def main() -> None:
         print("  Based on Anderson et al. (1994): retrieving memories")
         print("  suppresses similar non-retrieved memories.\n")
 
-        # First, check current confidence of some memories
-        all_results = await engram.recall(
+        # Get semantic/factual memories only (these have confidence to decay)
+        before_rif = await engram.recall(
             query="Alex coding",
             user_id=user_id,
+            memory_types=["semantic", "factual"],
             limit=10,
-            rif_enabled=False,  # Don't apply RIF yet
+            rif_enabled=False,
         )
 
-        print(f"  Before RIF: {len(all_results)} candidate memories")
-        for r in all_results[:5]:
-            conf = f"{r.confidence:.0%}" if r.confidence else "N/A"
-            print(f"    [{r.memory_type}] conf={conf} | {r.content[:40]}...")
+        # Store confidence before RIF
+        conf_before: dict[str, float] = {}
+        print("  BEFORE RIF (semantic/factual memories):")
+        for r in before_rif[:5]:
+            conf_before[r.memory_id] = r.confidence or 0
+            print(f"    [{r.confidence:.0%}] {r.content[:50]}...")
 
-        # Now do a retrieval with RIF enabled
-        print("\n  Retrieving top 3 with RIF enabled...")
+        # Apply RIF: retrieve top 2, suppress competitors
+        print("\n  Retrieving top 2 with RIF enabled...")
+        print("  (Competitors above threshold 0.5 get confidence decay of 0.1)")
         retrieved = await engram.recall(
             query="Alex coding",
             user_id=user_id,
-            limit=3,
+            memory_types=["semantic", "factual"],
+            limit=2,
             rif_enabled=True,
             rif_threshold=0.5,
             rif_decay=0.1,
         )
 
-        print(f"\n  Retrieved: {len(retrieved)} memories")
-        print("  Competing memories above threshold 0.5 got confidence decay of 0.1")
+        retrieved_ids = {r.memory_id for r in retrieved}
+        print(f"\n  RETRIEVED ({len(retrieved)}):")
+        for r in retrieved:
+            print(f"    ✓ [{r.confidence:.0%}] {r.content[:50]}...")
+
+        # Check confidence after RIF
+        after_rif = await engram.recall(
+            query="Alex coding",
+            user_id=user_id,
+            memory_types=["semantic", "factual"],
+            limit=10,
+            rif_enabled=False,
+        )
+
+        print("\n  SUPPRESSED (competitors not retrieved):")
+        suppressed_count = 0
+        for r in after_rif:
+            if r.memory_id not in retrieved_ids and r.memory_id in conf_before:
+                old_conf = conf_before[r.memory_id]
+                new_conf = r.confidence or 0
+                if new_conf < old_conf:
+                    suppressed_count += 1
+                    print(f"    ✗ [{old_conf:.0%}→{new_conf:.0%}] {r.content[:45]}...")
+        if suppressed_count == 0:
+            print("    (No memories suppressed in this run)")
+
         print("\n  Note: Episodic memories are exempt (immutable ground truth)")
 
         # =====================================================================
