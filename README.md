@@ -82,9 +82,9 @@ flowchart LR
 
     WM ==>|encode| EP
     EP -->|extract| FACT
-    EP -->|negate| NEG
+    EP -->|extract| NEG
     EP -->|consolidate| SEM
-    EP -->|pattern| PROC
+    SEM -->|synthesize| PROC
 
     EP -.->|store| QD
     FACT -.->|store| QD
@@ -112,7 +112,7 @@ flowchart LR
 | **Factual** | High | Pattern extraction | Emails, dates, names |
 | **Semantic** | Variable | LLM inference | Preferences, context |
 | **Procedural** | Variable | LLM inference | Behavioral preferences |
-| **Negation** | Variable | Negation detection | What is NOT true |
+| **Negation** | High | Pattern extraction | What is NOT true |
 
 ## Hierarchical Memory Consolidation
 
