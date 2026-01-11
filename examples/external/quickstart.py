@@ -80,6 +80,8 @@ async def main() -> None:
             ("user", "My work email is jordan.ds@techflow.io"),
             ("user", "I prefer dark mode and vim keybindings in all my tools."),
             ("user", "I don't use R anymore - switched completely to Python."),
+            # Vague statement - should get lower confidence
+            ("user", "I've heard good things about Rust, might try it someday."),
         ]
 
         facts_extracted = []
@@ -102,105 +104,142 @@ async def main() -> None:
         print(f"    Facts extracted: {len(facts_extracted)} (emails, phones, etc.)")
         print(f'    Negations found: {len(negations_extracted)} ("I don\'t use...")')
 
-        # Run consolidation to create semantic memories
-        print("\n  Running LLM consolidation...")
+        # =====================================================================
+        # 2. RECALL BEFORE CONSOLIDATION
+        # =====================================================================
+        print("\n\n2. RECALL BEFORE CONSOLIDATION")
+        print("-" * 70)
+        print("  Episodic and factual memories are available IMMEDIATELY.\n")
+
+        results = await engram.recall(query="Jordan email", user_id=user_id, limit=5)
+        by_type: dict[str, int] = {}
+        for r in results:
+            by_type[r.memory_type] = by_type.get(r.memory_type, 0) + 1
+
+        print(f"  Query: 'Jordan email' → {by_type}")
+        print("  ✓ Episodic (raw) and factual (extracted) available instantly")
+        print("  ✗ Semantic memories require consolidation (LLM processing)")
+
+        # =====================================================================
+        # 3. RUN CONSOLIDATION
+        # =====================================================================
+        print("\n\n3. LLM CONSOLIDATION")
+        print("-" * 70)
+        print("  The LLM reads episodes and extracts semantic knowledge.\n")
+
         consolidation_result = await run_consolidation(
             storage=engram.storage,
             embedder=engram.embedder,
             user_id=user_id,
         )
-        print(f"    Semantic memories created: {consolidation_result.semantic_memories_created}")
+        print(f"  Semantic memories created: {consolidation_result.semantic_memories_created}")
+        print(f"  Links created: {consolidation_result.links_created}")
+
+        # Get memory stats
+        stats = await engram.storage.get_memory_stats(user_id)
+        print("\n  TOTAL MEMORIES STORED:")
+        print(f"    Episodic (ground truth):  {stats.episodes}")
+        print(f"    Factual (pattern-extracted): {stats.facts}")
+        print(f"    Negation (what's NOT true): {stats.negation}")
+        print(f"    Semantic (LLM-inferred):  {stats.semantic}")
+        total = stats.episodes + stats.facts + stats.negation + stats.semantic
+        print("    ─────────────────────────")
+        print(f"    Total:                    {total}")
 
         # =====================================================================
-        # 2. RECALL: Semantic search across memory types
+        # 4. RECALL AFTER CONSOLIDATION
         # =====================================================================
-        print("\n\n2. SEMANTIC RECALL")
+        print("\n\n4. RECALL AFTER CONSOLIDATION")
         print("-" * 70)
-        print("  One query searches across all memory types at once.\n")
+        print("  Now semantic memories are included in results.\n")
 
-        # Query that will hit multiple memory types
-        print('  Query: "contact information email address"')
+        results = await engram.recall(query="Jordan email", user_id=user_id, limit=6)
+        by_type = {}
+        for r in results:
+            by_type[r.memory_type] = by_type.get(r.memory_type, 0) + 1
+
+        print(f"  Same query: 'Jordan email' → {by_type}")
+        print("  ✓ Semantic memories now appear in results!")
+
+        # =====================================================================
+        # 5. MEMORY TYPES WITH CONFIDENCE
+        # =====================================================================
+        print("\n\n5. MEMORY TYPES WITH CONFIDENCE")
+        print("-" * 70)
+        print("  Engram separates ground truth from derived knowledge.\n")
+
+        # Semantic memories with varying confidence
+        print("  SEMANTIC MEMORIES (LLM-Inferred):")
         results = await engram.recall(
-            query="contact information email address",
+            query="Jordan programming preferences",
             user_id=user_id,
+            memory_types=["semantic"],
             limit=5,
         )
-
-        # Group by memory type to show the diversity
-        by_type: dict[str, list[str]] = {}
         for r in results:
-            if r.memory_type not in by_type:
-                by_type[r.memory_type] = []
-            by_type[r.memory_type].append(r.content[:50])
+            conf_bar = "█" * int(r.confidence * 10) + "░" * (10 - int(r.confidence * 10))
+            print(f"    {conf_bar} {r.confidence:.0%} | {r.content}")
 
-        for mem_type, contents in by_type.items():
-            print(f"  [{mem_type.upper()}]")
-            for content in contents[:2]:
-                print(f"    → {content}...")
-            print()
+        print("\n  Higher confidence = direct statement. Lower = inferred/uncertain.")
 
-        # =====================================================================
-        # 3. MEMORY TYPE FILTERING
-        # =====================================================================
-        print("\n\n3. MEMORY TYPES: RAW vs DERIVED")
-        print("-" * 70)
-        print("  Engram separates ground truth (episodic) from derived knowledge.\n")
-
-        # Episodic = Ground Truth
-        print("  EPISODIC (Ground Truth) - Exact user statements:")
-        results = await engram.recall(
-            query="email", user_id=user_id, memory_types=["episodic"], limit=2
-        )
-        for r in results:
-            print(f'    "{r.content}"')
-
-        # Factual = Pattern-Extracted
-        print("\n  FACTUAL (Extracted) - Structured data from patterns:")
-        results = await engram.recall(
-            query="email", user_id=user_id, memory_types=["factual"], limit=2
-        )
-        for r in results:
-            print(f"    {r.content}  ← extracted with {r.confidence:.0%} confidence")
-
-        # Negation = What's NOT true
-        print("\n  NEGATION (Extracted) - What the user explicitly doesn't do:")
+        # Negation
+        print("\n  NEGATION (what the user does NOT do):")
         results = await engram.recall(
             query="programming", user_id=user_id, memory_types=["negation"], limit=2
         )
         for r in results:
-            print(f'    "{r.content}"  ← use to filter contradicted info')
+            print(f'    ✗ "{r.content}"')
 
-        # Semantic = LLM-Inferred
-        print("\n  SEMANTIC (LLM-Inferred) - Knowledge extracted by consolidation:")
-        results = await engram.recall(
-            query="Jordan", user_id=user_id, memory_types=["semantic"], limit=3
+        # =====================================================================
+        # 6. LINKED MEMORIES (Multi-hop)
+        # =====================================================================
+        print("\n\n6. LINKED MEMORIES")
+        print("-" * 70)
+        print("  Consolidation links related memories for multi-hop reasoning.\n")
+
+        # Query with follow_links to show connected memories
+        results_no_links = await engram.recall(
+            query="Python", user_id=user_id, follow_links=False, limit=3
         )
-        for r in results:
-            print(f'    "{r.content}" ({r.confidence:.0%} confidence)')
+        results_with_links = await engram.recall(
+            query="Python", user_id=user_id, follow_links=True, max_hops=2, limit=8
+        )
 
-        print("\n  Key insight: Episodic is immutable. Derived memories trace back to it.")
+        print("  Query: 'Python'")
+        print(f"    Without follow_links: {len(results_no_links)} results")
+        print(f"    With follow_links:    {len(results_with_links)} results")
+
+        # Show memories discovered via links
+        linked = [r for r in results_with_links if r.hop_distance > 0]
+        if linked:
+            print(f"\n  Discovered via links ({len(linked)} memories):")
+            for r in linked[:3]:
+                print(f"    [hop {r.hop_distance}] {r.content[:50]}...")
+        else:
+            print("\n  (Links accumulate over multiple consolidation passes)")
 
         # =====================================================================
-        # 4. VERIFY: Trace back to source
+        # 7. SOURCE VERIFICATION
         # =====================================================================
-        print("\n\n4. SOURCE VERIFICATION")
+        print("\n\n7. SOURCE VERIFICATION")
         print("-" * 70)
         print("  Every derived memory traces back to its source episode.\n")
 
-        # Find a fact to verify
+        # Find a semantic memory to verify
         results = await engram.recall(
-            query="email", user_id=user_id, memory_types=["factual"], limit=1
+            query="Jordan", user_id=user_id, memory_types=["semantic"], limit=1
         )
 
         if results:
-            fact = results[0]
+            sem = results[0]
             print("  Derived Memory:")
-            print(f'    Content: "{fact.content}"')
-            print(f"    Type: {fact.memory_type}")
-            print(f"    Confidence: {fact.confidence:.0%}")
+            print(f'    Content: "{sem.content}"')
+            print(f"    Type: {sem.memory_type}")
+            print(f"    Confidence: {sem.confidence:.0%}")
+            print(f"    Source episode IDs: {sem.source_episode_ids[:2]}...")
 
             # Verify it
-            verification = await engram.verify(fact.memory_id, user_id=user_id)
+            verification = await engram.verify(sem.memory_id, user_id=user_id)
             print("\n  Verification Result:")
             print(f"    Verified: {verification.verified}")
             print(f"    Method: {verification.extraction_method}")
@@ -210,62 +249,18 @@ async def main() -> None:
                 print("\n  Source Episode (ground truth):")
                 print(f"    \"{src['content']}\"")
                 print(f"    Role: {src['role']}")
-                print(f"    Timestamp: {src['timestamp']}")
-
-        # =====================================================================
-        # 5. CONFIDENCE FILTERING
-        # =====================================================================
-        print("\n\n5. CONFIDENCE-BASED FILTERING")
-        print("-" * 70)
-        print("  Control precision vs recall with min_confidence threshold.\n")
-
-        # Show how confidence filtering works
-        all_results = await engram.recall(query="Jordan", user_id=user_id, limit=8)
-
-        print("  All memories (no confidence filter):")
-        for r in all_results[:4]:
-            conf = f"{r.confidence:.0%}" if r.confidence else "---"
-            print(f"    [{r.memory_type:8}] {conf:>4} conf | {r.content[:38]}...")
-
-        # Only high-confidence derived memories (factual, semantic)
-        high_conf = await engram.recall(
-            query="Jordan",
-            user_id=user_id,
-            min_confidence=0.85,
-            memory_types=["factual", "semantic"],  # Only derived types have confidence
-            limit=5,
-        )
-
-        print(f"\n  With min_confidence=0.85 (derived memories only): {len(high_conf)} result(s)")
-        for r in high_conf[:3]:
-            conf = f"{r.confidence:.0%}" if r.confidence else "---"
-            print(f"    [{r.memory_type:8}] {conf} conf | {r.content[:38]}...")
-        print("\n  Note: Episodic memories are ground truth - no confidence needed.")
-        print("  Derived memories (factual, semantic) track extraction certainty.")
-
-        # =====================================================================
-        # 6. WORKING MEMORY
-        # =====================================================================
-        print("\n\n6. WORKING MEMORY")
-        print("-" * 70)
-
-        working = engram.get_working_memory()
-        print(f"  Current session: {len(working)} episodes in working memory")
-        print("  Working memory is:")
-        print("    - Volatile (cleared when session ends)")
-        print("    - Instant access (no DB round-trip)")
-        print("    - Included in recall by default")
 
     print("\n" + "=" * 70)
     print("Quickstart complete!")
     print("=" * 70)
     print("""
 Key Takeaways:
-1. encode() stores episodes AND auto-extracts facts/negations
-2. Consolidation creates semantic memories via LLM
-3. recall() searches semantically across all memory types
-4. verify() traces any derived memory to its source
-5. Confidence scores distinguish certain from uncertain
+1. encode() stores episodes AND extracts facts/negations instantly
+2. Episodic + factual available BEFORE consolidation
+3. Consolidation creates semantic memories via LLM
+4. Confidence scores show extraction certainty (0.6-0.9)
+5. Links enable multi-hop reasoning across memories
+6. Every derived memory traces back to source episodes
 """)
 
     shutdown_workflows()
