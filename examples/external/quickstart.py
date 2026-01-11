@@ -13,9 +13,15 @@ Prerequisites:
 """
 
 import asyncio
+import logging
 
 from engram.service import EngramService
 from engram.storage import EngramStorage
+from engram.workflows import init_workflows, shutdown_workflows
+from engram.workflows.consolidation import run_consolidation
+
+# Suppress INFO logs from DBOS to keep output clean
+logging.getLogger("dbos").setLevel(logging.WARNING)
 
 
 async def cleanup_demo_data(storage: EngramStorage, user_id: str) -> None:
@@ -47,6 +53,12 @@ async def main() -> None:
     print("=" * 70)
     print("Engram Quickstart Demo")
     print("=" * 70)
+
+    # Initialize durable workflows for consolidation
+    try:
+        init_workflows()
+    except Exception:
+        pass  # Workflows may already be initialized
 
     async with EngramService.create() as engram:
         user_id = "quickstart_demo"
@@ -89,6 +101,15 @@ async def main() -> None:
         print(f"    Episodes stored: {len(messages)}")
         print(f"    Facts extracted: {len(facts_extracted)} (emails, phones, etc.)")
         print(f'    Negations found: {len(negations_extracted)} ("I don\'t use...")')
+
+        # Run consolidation to create semantic memories
+        print("\n  Running LLM consolidation...")
+        consolidation_result = await run_consolidation(
+            storage=engram.storage,
+            embedder=engram.embedder,
+            user_id=user_id,
+        )
+        print(f"    Semantic memories created: {consolidation_result.semantic_memories_created}")
 
         # =====================================================================
         # 2. RECALL: Semantic search across memory types
@@ -148,6 +169,14 @@ async def main() -> None:
         )
         for r in results:
             print(f'    "{r.content}"  ← use to filter contradicted info')
+
+        # Semantic = LLM-Inferred
+        print("\n  SEMANTIC (LLM-Inferred) - Knowledge extracted by consolidation:")
+        results = await engram.recall(
+            query="Jordan", user_id=user_id, memory_types=["semantic"], limit=3
+        )
+        for r in results:
+            print(f'    "{r.content}" ({r.confidence:.0%} confidence)')
 
         print("\n  Key insight: Episodic is immutable. Derived memories trace back to it.")
 
@@ -233,11 +262,13 @@ async def main() -> None:
     print("""
 Key Takeaways:
 1. encode() stores episodes AND auto-extracts facts/negations
-2. recall() searches semantically across all memory types
-3. verify() traces any derived memory to its source
-4. Confidence scores distinguish certain from uncertain
-5. Memory types serve different purposes (raw vs derived)
+2. Consolidation creates semantic memories via LLM
+3. recall() searches semantically across all memory types
+4. verify() traces any derived memory to its source
+5. Confidence scores distinguish certain from uncertain
 """)
+
+    shutdown_workflows()
 
 
 if __name__ == "__main__":
