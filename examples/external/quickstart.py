@@ -112,9 +112,12 @@ async def main() -> None:
         print("-" * 70)
         print("  Episodic and factual memories are available IMMEDIATELY.\n")
 
-        results = await engram.recall(query="Jordan email", user_id=user_id, limit=5)
+        results = await engram.recall(query="Jordan email", user_id=user_id, limit=10)
         by_type: dict[str, int] = {}
         for r in results:
+            # Skip working memory (session buffer) to focus on persisted types
+            if r.memory_type == "working":
+                continue
             by_type[r.memory_type] = by_type.get(r.memory_type, 0) + 1
 
         print(f"  Query: 'Jordan email' → {by_type}")
@@ -203,9 +206,12 @@ async def main() -> None:
         print("-" * 70)
         print("  Now semantic memories are included in results.\n")
 
-        results = await engram.recall(query="Jordan email", user_id=user_id, limit=6)
+        results = await engram.recall(query="Jordan email", user_id=user_id, limit=10)
         by_type = {}
         for r in results:
+            # Skip working memory (session buffer) to focus on persisted types
+            if r.memory_type == "working":
+                continue
             by_type[r.memory_type] = by_type.get(r.memory_type, 0) + 1
 
         print(f"  Same query: 'Jordan email' → {by_type}")
