@@ -136,14 +136,24 @@ async def main() -> None:
         print(f"  Semantic memories created: {consolidation_result.semantic_memories_created}")
         print(f"  Links created: {consolidation_result.links_created}")
 
-        # Run a second pass to strengthen and link
-        print("\n  Running second consolidation pass (strengthens + links)...")
+        # Add MORE episodes to enable linking (new memories link to existing)
+        print("\n  Adding related episodes to enable linking...")
+        more_messages = [
+            # These should create memories that link to existing Python/PyTorch memories
+            ("user", "I've been using Python for about 5 years now."),
+            ("user", "PyTorch is essential for my NLP work at TechFlow."),
+        ]
+        for role, content in more_messages:
+            await engram.encode(content=content, role=role, user_id=user_id)
+            print(f"    [{role}] {content[:45]}...")
+
+        print("\n  Running second consolidation (links new → existing)...")
         result2 = await run_consolidation(
             storage=engram.storage,
             embedder=engram.embedder,
             user_id=user_id,
         )
-        print(f"  Memories strengthened: {result2.memories_strengthened}")
+        print(f"  New semantic memories: {result2.semantic_memories_created}")
         print(f"  Links created: {result2.links_created}")
 
         # Get memory stats
