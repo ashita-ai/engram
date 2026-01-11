@@ -41,7 +41,15 @@ class Episode(MemoryBase):
     )
     consolidated: bool = Field(
         default=False,
-        description="Whether this episode has been processed by consolidation",
+        description="Whether facts/negations have been extracted from this episode",
+    )
+    summarized: bool = Field(
+        default=False,
+        description="Whether this episode has been included in a semantic summary",
+    )
+    summarized_into: str | None = Field(
+        default=None,
+        description="ID of the semantic memory that summarizes this episode",
     )
 
     def __str__(self) -> str:

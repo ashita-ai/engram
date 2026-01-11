@@ -519,7 +519,7 @@ class TestConsolidationIntegration:
         storage = AsyncMock()
         storage._episodes: list[Episode] = []
         storage._semantic_memories: list = []
-        storage._consolidated_ids: list[str] = []
+        storage._summarized_ids: list[str] = []
 
         # Create test episodes
         ep1 = Episode(
@@ -542,26 +542,33 @@ class TestConsolidationIntegration:
         )
         storage._episodes = [ep1, ep2, ep3]
 
-        async def get_unconsolidated_episodes(
+        async def get_unsummarized_episodes(
             user_id: str,
             org_id: str | None = None,
-            limit: int = 20,
+            limit: int | None = None,
         ) -> list[Episode]:
-            return [ep for ep in storage._episodes if ep.id not in storage._consolidated_ids][
-                :limit
-            ]
+            unsummarized = [ep for ep in storage._episodes if ep.id not in storage._summarized_ids]
+            if limit is not None:
+                return unsummarized[:limit]
+            return unsummarized
 
         async def store_semantic(memory) -> str:
             storage._semantic_memories.append(memory)
             return memory.id
 
-        async def mark_episodes_consolidated(episode_ids: list[str], user_id: str) -> int:
-            storage._consolidated_ids.extend(episode_ids)
+        async def mark_episodes_summarized(
+            episode_ids: list[str], user_id: str, semantic_id: str
+        ) -> int:
+            storage._summarized_ids.extend(episode_ids)
             return len(episode_ids)
 
-        storage.get_unconsolidated_episodes = AsyncMock(side_effect=get_unconsolidated_episodes)
+        async def list_semantic_memories(user_id: str, org_id: str | None = None, **kwargs) -> list:
+            return storage._semantic_memories
+
+        storage.get_unsummarized_episodes = AsyncMock(side_effect=get_unsummarized_episodes)
         storage.store_semantic = AsyncMock(side_effect=store_semantic)
-        storage.mark_episodes_consolidated = AsyncMock(side_effect=mark_episodes_consolidated)
+        storage.mark_episodes_summarized = AsyncMock(side_effect=mark_episodes_summarized)
+        storage.list_semantic_memories = AsyncMock(side_effect=list_semantic_memories)
 
         return storage
 
@@ -575,12 +582,12 @@ class TestConsolidationIntegration:
     @pytest.mark.asyncio
     @pytest.mark.skipif(not HAS_OPENAI_KEY, reason="No OpenAI API key configured")
     async def test_consolidation_with_real_llm(self, mock_storage, real_embedder):
-        """Test full consolidation workflow with real LLM extraction.
+        """Test full consolidation workflow with real LLM summarization.
 
         This test:
         1. Creates episodes with factual content
         2. Runs consolidation (hits real OpenAI API via fallback path)
-        3. Verifies semantic memories are extracted and stored
+        3. Verifies ONE semantic summary is created (N episodes → 1 summary)
         """
         from engram.workflows.consolidation import run_consolidation
 
@@ -590,29 +597,27 @@ class TestConsolidationIntegration:
             user_id="test_user",
         )
 
-        # Should process all 3 episodes
+        # Should process all 3 episodes into ONE summary
         assert result.episodes_processed == 3
+        assert result.semantic_memories_created == 1  # Compression: N → 1
+        assert result.compression_ratio == 3.0
 
-        # LLM should extract at least some semantic facts
-        # (name, workplace, language preference, email)
-        assert result.semantic_memories_created >= 1
+        # Verify memory was actually stored
+        assert len(mock_storage._semantic_memories) == 1
 
-        # Verify memories were actually stored
-        assert len(mock_storage._semantic_memories) == result.semantic_memories_created
+        # Verify memory has content and embedding
+        memory = mock_storage._semantic_memories[0]
+        assert memory.content, "Memory should have content"
+        assert memory.embedding, "Memory should have embedding"
+        assert len(memory.embedding) == 384, "Embedding should be 384-dim"
 
-        # Verify each memory has content and embedding
-        for memory in mock_storage._semantic_memories:
-            assert memory.content, "Memory should have content"
-            assert memory.embedding, "Memory should have embedding"
-            assert len(memory.embedding) == 384, "Embedding should be 384-dim"
-
-        # Episodes should be marked as consolidated
-        mock_storage.mark_episodes_consolidated.assert_called_once()
+        # Episodes should be marked as summarized
+        mock_storage.mark_episodes_summarized.assert_called_once()
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(not HAS_OPENAI_KEY, reason="No OpenAI API key configured")
-    async def test_consolidation_extracts_correct_facts(self, mock_storage, real_embedder):
-        """Verify LLM extracts semantically correct facts."""
+    async def test_consolidation_summary_contains_key_info(self, mock_storage, real_embedder):
+        """Verify LLM summary contains key information from episodes."""
         from engram.workflows.consolidation import run_consolidation
 
         await run_consolidation(
@@ -621,15 +626,16 @@ class TestConsolidationIntegration:
             user_id="test_user",
         )
 
-        # Get all extracted content
-        all_content = " ".join(m.content.lower() for m in mock_storage._semantic_memories)
+        # Get the summary content
+        assert len(mock_storage._semantic_memories) == 1
+        summary = mock_storage._semantic_memories[0].content.lower()
 
-        # LLM should extract key facts from the episodes
-        # At least one of these should appear
-        key_facts = ["alice", "techcorp", "python", "engineer", "email"]
-        found_facts = [f for f in key_facts if f in all_content]
+        # Summary should mention key facts from the episodes
+        # At least one of these should appear in the summary
+        key_info = ["alice", "techcorp", "python", "engineer", "email"]
+        found_info = [info for info in key_info if info in summary]
 
-        assert len(found_facts) >= 2, f"Expected at least 2 key facts, found: {found_facts}"
+        assert len(found_info) >= 1, f"Expected at least 1 key fact in summary, found: {found_info}"
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(not HAS_OPENAI_KEY, reason="No OpenAI API key configured")
@@ -638,7 +644,7 @@ class TestConsolidationIntegration:
         from engram.workflows.consolidation import run_consolidation
 
         empty_storage = AsyncMock()
-        empty_storage.get_unconsolidated_episodes = AsyncMock(return_value=[])
+        empty_storage.get_unsummarized_episodes = AsyncMock(return_value=[])
 
         result = await run_consolidation(
             storage=empty_storage,

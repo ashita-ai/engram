@@ -660,3 +660,178 @@ class CRUDMixin:
         )
 
         return True
+
+    async def get_unsummarized_episodes(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[Episode]:
+        """Get episodes that haven't been included in a semantic summary.
+
+        Used by consolidation to find episodes that need summarization.
+        The `summarized` field tracks whether an episode has been
+        compressed into a semantic memory.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            limit: Maximum episodes to return. None means all.
+
+        Returns:
+            List of unsummarized Episodes, ordered by timestamp.
+        """
+        from engram.models import Episode
+
+        collection = self._collection_name("episodic")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+            models.FieldCondition(
+                key="summarized",
+                match=models.MatchValue(value=False),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        # Use a high limit if none specified to get all
+        scroll_limit = limit if limit is not None else 10000
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=scroll_limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        episodes: list[Episode] = []
+        for point in results:
+            if point.payload is not None:
+                ep = self._payload_to_memory(point.payload, Episode)
+                # Restore the embedding from the vector
+                if isinstance(point.vector, list):
+                    ep.embedding = point.vector
+                episodes.append(ep)
+
+        # Sort by timestamp for consistent ordering
+        episodes.sort(key=lambda e: e.timestamp)
+
+        return episodes
+
+    async def mark_episodes_summarized(
+        self,
+        episode_ids: list[str],
+        user_id: str,
+        semantic_id: str,
+    ) -> int:
+        """Mark episodes as summarized and link to the semantic memory.
+
+        Called after consolidation creates a semantic summary from
+        a batch of episodes. Sets `summarized=True` and records
+        which semantic memory contains the summary.
+
+        Args:
+            episode_ids: IDs of episodes to mark.
+            user_id: User ID for ownership verification.
+            semantic_id: ID of the semantic memory that summarizes these episodes.
+
+        Returns:
+            Number of episodes updated.
+        """
+        collection = self._collection_name("episodic")
+        updated = 0
+
+        for episode_id in episode_ids:
+            # Find and update each episode
+            results, _ = await self.client.scroll(
+                collection_name=collection,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="id",
+                            match=models.MatchValue(value=episode_id),
+                        ),
+                        models.FieldCondition(
+                            key="user_id",
+                            match=models.MatchValue(value=user_id),
+                        ),
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+            )
+
+            if results:
+                point = results[0]
+                await self.client.set_payload(
+                    collection_name=collection,
+                    payload={
+                        "summarized": True,
+                        "summarized_into": semantic_id,
+                    },
+                    points=[point.id],
+                )
+                updated += 1
+
+        return updated
+
+    async def update_episode(
+        self,
+        episode: Episode,
+    ) -> bool:
+        """Update an episode's mutable fields.
+
+        Note: Episode content is immutable. This only updates metadata
+        fields like `consolidated`, `summarized`, `summarized_into`.
+
+        Args:
+            episode: Episode with updated fields.
+
+        Returns:
+            True if updated, False if not found.
+        """
+        collection = self._collection_name("episodic")
+
+        # Find the point
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchValue(value=episode.id),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=episode.user_id),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+        )
+
+        if not results:
+            return False
+
+        point = results[0]
+        payload = self._memory_to_payload(episode)
+
+        await self.client.set_payload(
+            collection_name=collection,
+            payload=payload,
+            points=[point.id],
+        )
+
+        return True

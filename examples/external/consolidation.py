@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Consolidation workflow demo - LLM-powered semantic extraction.
+"""Consolidation workflow demo - Hierarchical memory compression.
 
 Demonstrates the full consolidation pipeline:
 - Episode storage (ground truth)
-- LLM consolidation (semantic memory extraction)
-- Memory linking (related_ids for multi-hop)
-- Consolidation strength (Testing Effect)
-- Side-by-side view of raw vs derived memories
+- LLM consolidation (N episodes → 1 semantic summary)
+- Procedural synthesis (all semantics → 1 behavioral profile)
+- Bidirectional traceability (episodes ↔ semantics ↔ procedural)
 
 Prerequisites:
     - Qdrant running: docker run -p 6333:6333 qdrant/qdrant
@@ -19,7 +18,6 @@ import logging
 from engram.service import EngramService
 from engram.storage import EngramStorage
 from engram.workflows import init_workflows, shutdown_workflows
-from engram.workflows.consolidation import run_consolidation
 
 # Suppress INFO logs from DBOS to keep output clean
 logging.getLogger("dbos").setLevel(logging.WARNING)
@@ -33,6 +31,7 @@ async def get_memory_counts(storage: EngramStorage, user_id: str) -> dict[str, i
         "factual": stats.facts,
         "semantic": stats.semantic,
         "negation": stats.negation,
+        "procedural": stats.procedural,
     }
 
 
@@ -63,7 +62,7 @@ async def cleanup_demo_data(storage: EngramStorage, user_id: str) -> None:
 
 async def main() -> None:
     print("=" * 70)
-    print("Engram Consolidation Demo")
+    print("Engram Hierarchical Consolidation Demo")
     print("=" * 70)
 
     # Initialize durable workflows (DBOS or Temporal based on config)
@@ -100,158 +99,95 @@ async def main() -> None:
             ("user", "I don't use Keras anymore - too high-level for research."),
         ]
 
-        # Track episode IDs and which ones produced facts/negations
         episode_ids: list[str] = []
-        fact_source_episode: str | None = None
-        negation_source_episode: str | None = None
-
         for role, content in conversations:
             result = await engram.encode(content=content, role=role, user_id=user_id)
             episode_ids.append(result.episode.id)
             extras = []
             if result.facts:
                 extras.append(f"+fact:{result.facts[0].category}")
-                fact_source_episode = result.episode.id
             if result.negations:
-                extras.append(f"+negation:{result.negations[0].negates_pattern}")
-                negation_source_episode = result.episode.id
+                extras.append("+negation")
             extras_str = f"  {' '.join(extras)}" if extras else ""
             print(f"  [{role:9}] {content[:50]}...{extras_str}")
 
         # =====================================================================
-        # 2. CHECK WHAT'S STORED BEFORE CONSOLIDATION
+        # 2. BEFORE CONSOLIDATION
         # =====================================================================
-        print("\n\n2. WHAT'S STORED BEFORE CONSOLIDATION")
+        print("\n\n2. BEFORE CONSOLIDATION")
         print("-" * 70)
+        print("  Episodic + factual/negation available immediately.\n")
 
         counts = await get_memory_counts(engram.storage, user_id)
         print(f"  Episodic (ground truth): {counts['episodic']} episodes")
         print(f"    └─ Factual (extracted): {counts['factual']} (email pattern)")
         print(f"    └─ Negation (extracted): {counts['negation']} (Keras pattern)")
-        print(f"    └─ Semantic (LLM):       {counts['semantic']} <-- Empty! Need consolidation")
-
-        # Show source episode linkage
-        print("\n  SOURCE EPISODE LINKAGE:")
-        print("  Each derived memory links back to its source episode:\n")
-
-        # Get the factual memory and show its source
-        factual_results = await engram.recall(
-            query="email",
-            user_id=user_id,
-            memory_types=["factual"],
-            limit=1,
-        )
-        if factual_results and fact_source_episode:
-            fact = factual_results[0]
-            print(f'    Factual: "{fact.content[:40]}..."')
-            print(f"      → source_episode_id: {fact.source_episode_id}")
-            print(f"      → matches episode #4: {fact.source_episode_id == fact_source_episode}")
-
-        # Get the negation memory and show its source
-        negation_results = await engram.recall(
-            query="Keras",
-            user_id=user_id,
-            memory_types=["negation"],
-            limit=1,
-        )
-        if negation_results and negation_source_episode:
-            neg = negation_results[0]
-            print(f'\n    Negation: "{neg.content[:40]}..."')
-            print(f"      → source_episode_ids: {neg.source_episode_ids}")
-            print(
-                f"      → matches episode #10: {negation_source_episode in neg.source_episode_ids}"
-            )
+        print(f"    └─ Semantic (LLM):       {counts['semantic']} ← Empty!")
+        print(f"    └─ Procedural (LLM):     {counts['procedural']} ← Empty!")
 
         # =====================================================================
-        # 3. RUN LLM CONSOLIDATION
+        # 3. RUN LLM CONSOLIDATION (N episodes → 1 summary)
         # =====================================================================
-        print("\n\n3. RUNNING LLM CONSOLIDATION")
+        print("\n\n3. LLM CONSOLIDATION: N Episodes → 1 Summary")
         print("-" * 70)
-        print("  The LLM reads episodes and extracts semantic knowledge.\n")
+        print("  Hierarchical compression: summarizes episodes into semantic memory.\n")
 
-        result = await run_consolidation(
-            storage=engram.storage,
-            embedder=engram.embedder,
-            user_id=user_id,
-        )
+        result = await engram.consolidate(user_id=user_id)
 
-        print(f"  Episodes processed:       {result.episodes_processed}")
-        print(f"  Semantic memories created:{result.semantic_memories_created}")
-        print(f"  Existing strengthened:    {result.memories_strengthened}")
-        print(f"  Links created:            {result.links_created}")
+        print(f"  Episodes processed:        {result.episodes_processed}")
+        print(f"  Semantic memories created: {result.semantic_memories_created}")
+        print(f"  Compression ratio:         {result.compression_ratio:.1f}:1")
+        print(f"  Links created:             {result.links_created}")
 
         # =====================================================================
-        # 4. WHAT'S STORED AFTER CONSOLIDATION
+        # 4. SOURCE EPISODE LINKAGE
         # =====================================================================
-        print("\n\n4. WHAT'S STORED AFTER CONSOLIDATION")
+        print("\n\n4. SOURCE EPISODE LINKAGE (Bidirectional)")
         print("-" * 70)
+        print("  Every semantic memory links to its source episodes.\n")
 
-        counts = await get_memory_counts(engram.storage, user_id)
-        print(f"  Episodic (ground truth): {counts['episodic']} episodes (unchanged)")
-        print(f"    └─ Factual (extracted): {counts['factual']}")
-        print(f"    └─ Negation (extracted): {counts['negation']}")
-        print(f"    └─ Semantic (LLM):       {counts['semantic']} <-- Created by LLM!")
+        # Get semantic memories directly from storage (more reliable than recall)
+        semantic_memories = await engram.storage.list_semantic_memories(user_id)
+
+        if semantic_memories:
+            sem = semantic_memories[0]  # Most recent
+            print(f"  Semantic Memory: {sem.id}")
+            print(f'    Content: "{sem.content[:60]}..."')
+            print(f"    source_episode_ids: {sem.source_episode_ids[:3]}...")
+            print(f"    ({len(sem.source_episode_ids)} episodes → 1 summary)")
+
+            # Verify one of the source episodes
+            print("\n  Verification (episode → semantic):")
+            ep = await engram.storage.get_episode(sem.source_episode_ids[0], user_id)
+            if ep:
+                print(f"    Episode {ep.id[:20]}...")
+                print(f"      summarized: {ep.summarized}")
+                if ep.summarized_into:
+                    print(f"      summarized_into: {ep.summarized_into[:20]}...")
+                    print(f"      ✓ Links match: {ep.summarized_into == sem.id}")
+                else:
+                    print("      summarized_into: None")
 
         # =====================================================================
-        # 5. RAW vs DERIVED - Side by Side
+        # 5. RAW vs DERIVED
         # =====================================================================
-        print("\n\n5. RAW EPISODES vs DERIVED SEMANTIC MEMORIES")
+        print("\n\n5. RAW EPISODES vs DERIVED SUMMARY")
         print("-" * 70)
-        print("  Semantic memories are extracted from the episode batch.\n")
-
-        # Get all semantic memories
-        semantic_results = await engram.recall(
-            query="Morgan's background",
-            user_id=user_id,
-            memory_types=["semantic"],
-            limit=10,
-        )
 
         print("  RAW EPISODES (ground truth):")
         for i, (role, content) in enumerate(conversations[:5], 1):
-            print(f'    {i}. [{role}] "{content[:55]}..."')
+            print(f'    {i}. [{role}] "{content[:50]}..."')
         print(f"    ... and {len(conversations) - 5} more\n")
 
-        print("  SEMANTIC MEMORIES (LLM-extracted):")
-        for sem in semantic_results[:5]:
-            print(f'    - "{sem.content}" ({sem.confidence:.0%})')
-        if len(semantic_results) > 5:
-            print(f"    ... and {len(semantic_results) - 5} more\n")
-        else:
-            print()
+        print("  DERIVED SEMANTIC SUMMARY:")
+        for sem in semantic_memories:
+            print(f'    "{sem.content}"')
+            print(f"    (confidence: {sem.confidence.value:.0%})")
 
         # =====================================================================
-        # 6. LINKED MEMORIES
+        # 6. ADD MORE DATA AND CONSOLIDATE AGAIN
         # =====================================================================
-        print("\n6. MEMORY LINKING")
-        print("-" * 70)
-        print("  Semantic memories are linked to related memories.\n")
-
-        memories_with_links = [r for r in semantic_results if r.related_ids]
-        if memories_with_links:
-            mem = memories_with_links[0]
-            print(f'  Memory: "{mem.content}"')
-            print(f"  Links to {len(mem.related_ids)} related memories:")
-
-            # Follow links
-            linked_results = await engram.recall(
-                query=mem.content,
-                user_id=user_id,
-                follow_links=True,
-                max_hops=2,
-                limit=10,
-            )
-            for lr in linked_results[:3]:
-                if lr.hop_distance and lr.hop_distance > 0:
-                    print(f"    -> [hop {lr.hop_distance}] {lr.content[:50]}...")
-        else:
-            print("  No links yet (first consolidation run).")
-            print("  Links accumulate over multiple consolidation passes.")
-
-        # =====================================================================
-        # 7. ADD MORE DATA AND CONSOLIDATE AGAIN
-        # =====================================================================
-        print("\n\n7. ADD MORE DATA & CONSOLIDATE AGAIN")
+        print("\n\n6. ADD MORE DATA & CONSOLIDATE AGAIN")
         print("-" * 70)
 
         new_messages = [
@@ -264,51 +200,57 @@ async def main() -> None:
             await engram.encode(content=content, role=role, user_id=user_id)
             print(f"    [{role}] {content}")
 
-        result2 = await run_consolidation(
-            storage=engram.storage,
-            embedder=engram.embedder,
-            user_id=user_id,
-        )
+        result2 = await engram.consolidate(user_id=user_id)
 
         print("\n  Second consolidation:")
         print(f"    New episodes processed:    {result2.episodes_processed}")
         print(f"    New semantic memories:     {result2.semantic_memories_created}")
-        print(f"    Existing memories strengthened: {result2.memories_strengthened}")
+        print(f"    Compression ratio:         {result2.compression_ratio:.1f}:1")
 
         # =====================================================================
-        # 8. CONSOLIDATION STRENGTH (Testing Effect)
+        # 7. PROCEDURAL SYNTHESIS (all semantics → 1 behavioral profile)
         # =====================================================================
-        print("\n\n8. CONSOLIDATION STRENGTH")
+        print("\n\n7. PROCEDURAL SYNTHESIS: All Semantics → 1 Behavioral Profile")
         print("-" * 70)
-        print("  Memories that are repeatedly consolidated become stronger.\n")
+        print("  Creates ONE procedural memory per user from all semantics.\n")
 
-        # Get updated semantic memories
-        updated_semantics = await engram.recall(
-            query="Morgan",
-            user_id=user_id,
-            memory_types=["semantic"],
-            limit=5,
-        )
+        synthesis_result = await engram.create_procedural(user_id=user_id)
 
-        for r in updated_semantics[:3]:
-            strength = r.metadata.get("selectivity", 0)
-            print(f'  "{r.content[:45]}..."')
-            print(f"    Strength: {strength:.2f} (increases by 0.1 per consolidation)")
-            print()
+        print(f"  Semantics analyzed:    {synthesis_result.semantics_analyzed}")
+        print(f"  Procedural created:    {synthesis_result.procedural_created}")
+        print(f"  Procedural ID:         {synthesis_result.procedural_id}")
+
+        # Show the procedural memory (fetch directly for full details)
+        proc_memories = await engram.storage.list_procedural_memories(user_id)
+
+        if proc_memories:
+            proc = proc_memories[0]
+            print("\n  BEHAVIORAL PROFILE:")
+            # Split into lines for readability
+            lines = proc.content.split("\n")
+            for line in lines[:8]:
+                if line.strip():
+                    print(f"    {line.strip()}")
+            print(f"\n    source_semantic_ids: {proc.source_semantic_ids}")
+            print(f"    ({len(proc.source_semantic_ids)} semantics → 1 procedural)")
 
         # =====================================================================
-        # 9. FINAL STATE
+        # 8. FINAL MEMORY STATE
         # =====================================================================
-        print("\n9. FINAL MEMORY STATE")
+        print("\n\n8. FINAL MEMORY STATE")
         print("-" * 70)
 
         final_counts = await get_memory_counts(engram.storage, user_id)
-        print(
-            f"  Episodic (ground truth): {final_counts['episodic']} episodes (10 initial + 2 added)"
-        )
+        print(f"  Episodic (ground truth): {final_counts['episodic']} episodes")
         print(f"    └─ Factual (extracted): {final_counts['factual']}")
         print(f"    └─ Negation (extracted): {final_counts['negation']}")
-        print(f"    └─ Semantic (LLM):       {final_counts['semantic']}")
+        print(f"    └─ Semantic (LLM):       {final_counts['semantic']} summaries")
+        print(f"    └─ Procedural (LLM):     {final_counts['procedural']} behavioral profile")
+
+        print("\n  HIERARCHICAL COMPRESSION:")
+        print(
+            f"    {final_counts['episodic']} episodes → {final_counts['semantic']} semantic summaries → {final_counts['procedural']} procedural"
+        )
 
     print("\n" + "=" * 70)
     print("Demo complete!")
@@ -316,11 +258,11 @@ async def main() -> None:
     print("""
 Key Concepts:
 1. Episodes are RAW ground truth (immutable, never modified)
-2. Facts are pattern-extracted (emails, dates, etc.) with high confidence
-3. Negations detect "I don't use X" patterns
-4. Semantic memories are LLM-inferred knowledge with lower confidence
-5. Every derived memory traces back to source episodes
-6. Consolidation strength tracks how well-established a memory is
+2. Facts/negations are pattern-extracted with high confidence
+3. Consolidation compresses N episodes → 1 semantic summary
+4. Procedural synthesis compresses all semantics → 1 behavioral profile
+5. Bidirectional links: episode.summarized_into ↔ semantic.source_episode_ids
+6. Each layer has source traceability back to ground truth
     """)
 
     shutdown_workflows()

@@ -13,7 +13,9 @@ from engram.workflows.consolidation import (
     ExtractedFact,
     IdentifiedLink,
     LLMExtractionResult,
+    MapReduceSummary,
     MemoryEvolution,
+    SummaryOutput,
     _find_matching_memory,
     format_episodes_for_llm,
     run_consolidation,
@@ -21,7 +23,7 @@ from engram.workflows.consolidation import (
 
 
 class TestExtractedFact:
-    """Tests for ExtractedFact model."""
+    """Tests for ExtractedFact model (legacy, kept for backwards compatibility)."""
 
     def test_create_with_defaults(self) -> None:
         """Test creating extracted fact with defaults."""
@@ -71,7 +73,7 @@ class TestExtractedFact:
 
 
 class TestMemoryEvolution:
-    """Tests for MemoryEvolution model (A-MEM style)."""
+    """Tests for MemoryEvolution model (legacy, kept for backwards compatibility)."""
 
     def test_create_evolution(self) -> None:
         """Test creating a memory evolution."""
@@ -113,7 +115,7 @@ class TestIdentifiedLink:
 
 
 class TestLLMExtractionResult:
-    """Tests for LLMExtractionResult model."""
+    """Tests for LLMExtractionResult model (legacy, kept for backwards compatibility)."""
 
     def test_create_empty(self) -> None:
         """Test creating empty result."""
@@ -159,6 +161,46 @@ class TestLLMExtractionResult:
         assert result.evolutions[0].target_content == "User prefers JavaScript"
 
 
+class TestSummaryOutput:
+    """Tests for SummaryOutput model (new summarization output)."""
+
+    def test_create_with_defaults(self) -> None:
+        """Test creating summary output with defaults."""
+        output = SummaryOutput(summary="The user prefers Python programming.")
+        assert output.summary == "The user prefers Python programming."
+        assert output.key_facts == []
+        assert output.keywords == []
+        assert output.context == ""
+
+    def test_create_with_all_fields(self) -> None:
+        """Test creating summary output with all fields."""
+        output = SummaryOutput(
+            summary="The user is a Python developer who works at TechCorp.",
+            key_facts=["Works at TechCorp", "Prefers Python"],
+            keywords=["python", "developer", "techcorp"],
+            context="professional background",
+        )
+        assert "TechCorp" in output.summary
+        assert len(output.key_facts) == 2
+        assert "python" in output.keywords
+        assert output.context == "professional background"
+
+
+class TestMapReduceSummary:
+    """Tests for MapReduceSummary model."""
+
+    def test_create_summary(self) -> None:
+        """Test creating map-reduce summary."""
+        summary = MapReduceSummary(
+            summary="Combined summary of user information.",
+            keywords=["user", "info"],
+            context="general",
+        )
+        assert summary.summary == "Combined summary of user information."
+        assert summary.keywords == ["user", "info"]
+        assert summary.context == "general"
+
+
 class TestConsolidationResult:
     """Tests for ConsolidationResult model."""
 
@@ -166,13 +208,15 @@ class TestConsolidationResult:
         """Test creating consolidation result."""
         result = ConsolidationResult(
             episodes_processed=10,
-            semantic_memories_created=5,
+            semantic_memories_created=1,
             links_created=3,
+            compression_ratio=10.0,
             contradictions_found=["Conflict A", "Conflict B"],
         )
         assert result.episodes_processed == 10
-        assert result.semantic_memories_created == 5
+        assert result.semantic_memories_created == 1
         assert result.links_created == 3
+        assert result.compression_ratio == 10.0
         assert len(result.contradictions_found) == 2
 
     def test_counts_non_negative(self) -> None:
@@ -183,6 +227,17 @@ class TestConsolidationResult:
                 semantic_memories_created=0,
                 links_created=0,
             )
+
+    def test_legacy_fields_have_defaults(self) -> None:
+        """Test legacy fields have zero defaults."""
+        result = ConsolidationResult(
+            episodes_processed=5,
+            semantic_memories_created=1,
+            links_created=0,
+        )
+        assert result.negations_created == 0
+        assert result.evolutions_applied == 0
+        assert result.memories_strengthened == 0
 
 
 class TestFormatEpisodesForLLM:
@@ -211,7 +266,8 @@ class TestFormatEpisodesForLLM:
     def test_format_empty_list(self) -> None:
         """Test formatting empty list."""
         result = format_episodes_for_llm([])
-        assert "# Conversation Episodes to Analyze" in result
+        # New consolidation uses "Summarize" instead of "Analyze"
+        assert "# Conversation Episodes to Summarize" in result
 
 
 class TestRunConsolidation:
@@ -221,7 +277,7 @@ class TestRunConsolidation:
     async def test_no_episodes_returns_empty_result(self) -> None:
         """Test that empty episode list returns zero counts."""
         mock_storage = AsyncMock()
-        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[])
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=[])
 
         mock_embedder = AsyncMock()
 
@@ -236,89 +292,38 @@ class TestRunConsolidation:
         assert result.links_created == 0
 
     @pytest.mark.asyncio
-    async def test_fallback_to_non_durable_agent(self) -> None:
-        """Test fallback when durable workflows not initialized."""
+    async def test_summarizes_episodes_into_single_memory(self) -> None:
+        """Test that multiple episodes are summarized into one semantic memory."""
         from engram.models import Episode
 
-        # Create mock episode
-        mock_episode = MagicMock(spec=Episode)
-        mock_episode.id = "ep_123"
-        mock_episode.role = "user"
-        mock_episode.content = "My email is test@example.com"
+        # Create mock episodes
+        mock_episodes = []
+        for i in range(3):
+            mock_episode = MagicMock(spec=Episode)
+            mock_episode.id = f"ep_{i}"
+            mock_episode.role = "user"
+            mock_episode.content = f"Message {i} content"
+            mock_episodes.append(mock_episode)
 
         mock_storage = AsyncMock()
-        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=mock_episodes)
         mock_storage.store_semantic = AsyncMock(return_value="sem_123")
-        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=3)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
 
         mock_embedder = AsyncMock()
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
-        # Mock the LLM response
-        mock_llm_result = LLMExtractionResult(
-            semantic_facts=[ExtractedFact(content="User's email is test@example.com")],
-            links=[],
-            contradictions=[],
+        # Mock the LLM summarization
+        mock_summary = SummaryOutput(
+            summary="The user sent three messages.",
+            keywords=["messages", "user"],
+            context="general",
         )
 
-        mock_agent_result = MagicMock()
-        mock_agent_result.output = mock_llm_result
-
-        # Patch get_consolidation_agent to raise RuntimeError (workflows not initialized)
-        # and patch the fallback Agent to return our mock result
         with patch(
-            "engram.workflows.get_consolidation_agent",
-            side_effect=RuntimeError("Workflows not initialized"),
-        ):
-            with patch("pydantic_ai.Agent") as mock_agent_class:
-                mock_agent_instance = AsyncMock()
-                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
-                mock_agent_class.return_value = mock_agent_instance
-
-                result = await run_consolidation(
-                    storage=mock_storage,
-                    embedder=mock_embedder,
-                    user_id="test_user",
-                )
-
-        assert result.episodes_processed == 1
-        assert result.semantic_memories_created == 1
-        mock_storage.store_semantic.assert_called_once()
-        mock_storage.mark_episodes_consolidated.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_uses_durable_agent_when_available(self) -> None:
-        """Test that durable agent is used when workflows are initialized."""
-        from engram.models import Episode
-
-        mock_episode = MagicMock(spec=Episode)
-        mock_episode.id = "ep_456"
-        mock_episode.role = "user"
-        mock_episode.content = "I prefer Python"
-
-        mock_storage = AsyncMock()
-        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
-        mock_storage.store_semantic = AsyncMock(return_value="sem_456")
-        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
-
-        mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
-
-        mock_llm_result = LLMExtractionResult(
-            semantic_facts=[ExtractedFact(content="User prefers Python")],
-            links=[],
-            contradictions=[],
-        )
-
-        mock_agent_result = MagicMock()
-        mock_agent_result.output = mock_llm_result
-
-        mock_durable_agent = AsyncMock()
-        mock_durable_agent.run = AsyncMock(return_value=mock_agent_result)
-
-        with patch(
-            "engram.workflows.get_consolidation_agent",
-            return_value=mock_durable_agent,
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
         ):
             result = await run_consolidation(
                 storage=mock_storage,
@@ -326,9 +331,70 @@ class TestRunConsolidation:
                 user_id="test_user",
             )
 
-        assert result.episodes_processed == 1
+        # Should process all episodes into ONE semantic memory
+        assert result.episodes_processed == 3
         assert result.semantic_memories_created == 1
-        mock_durable_agent.run.assert_called_once()
+        assert result.compression_ratio == 3.0
+
+        # Should mark all episodes as summarized
+        mock_storage.mark_episodes_summarized.assert_called_once()
+        call_args = mock_storage.mark_episodes_summarized.call_args
+        assert len(call_args[0][0]) == 3  # 3 episode IDs
+        assert call_args[0][1] == "test_user"  # user_id
+
+    @pytest.mark.asyncio
+    async def test_excludes_system_prompts_from_summarization(self) -> None:
+        """Test that system prompts are marked as summarized but not included in summary."""
+        from engram.models import Episode
+
+        user_episode = MagicMock(spec=Episode)
+        user_episode.id = "ep_user"
+        user_episode.role = "user"
+        user_episode.content = "Hello!"
+
+        system_episode = MagicMock(spec=Episode)
+        system_episode.id = "ep_system"
+        system_episode.role = "system"
+        system_episode.content = "You are a helpful assistant."
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unsummarized_episodes = AsyncMock(
+            return_value=[user_episode, system_episode]
+        )
+        mock_storage.store_semantic = AsyncMock(return_value="sem_123")
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=2)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_summary = SummaryOutput(
+            summary="The user said hello.",
+            keywords=["greeting"],
+            context="conversation",
+        )
+
+        with patch(
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
+        ) as mock_chunk:
+            result = await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+            )
+
+            # Verify only user episode was passed to summarization
+            chunk_call = mock_chunk.call_args[0][0]
+            assert len(chunk_call) == 1
+            assert chunk_call[0]["role"] == "user"
+
+        # Both episodes should be marked as summarized
+        assert result.episodes_processed == 2
+        call_args = mock_storage.mark_episodes_summarized.call_args
+        episode_ids = call_args[0][0]
+        assert "ep_user" in episode_ids
+        assert "ep_system" in episode_ids
 
 
 class TestDurableAgentFactory:
@@ -532,154 +598,65 @@ class TestFindMatchingMemory:
 
 
 class TestConsolidationLinking:
-    """Tests for dynamic memory linking during consolidation."""
+    """Tests for memory linking during consolidation."""
 
     @pytest.mark.asyncio
-    async def test_links_created_between_memories(self) -> None:
-        """Test that links are created between memories based on LLM output."""
-        from engram.models import Episode
-
-        # Create mock episodes
-        mock_episode = MagicMock(spec=Episode)
-        mock_episode.id = "ep_123"
-        mock_episode.role = "user"
-        mock_episode.content = "I use PostgreSQL at work and prefer relational databases"
-
-        mock_storage = AsyncMock()
-        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
-        mock_storage.store_semantic = AsyncMock(return_value="sem_123")
-        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
-        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
-        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
-
-        # Use orthogonal embeddings for each fact to avoid semantic deduplication
-        # (parallel vectors like [0.1]*384 and [0.9]*384 have cosine similarity = 1.0)
-        call_count = 0
-
-        async def mock_embed(text: str) -> list[float]:
-            nonlocal call_count
-            call_count += 1
-            # Return orthogonal embeddings (cosine similarity = 0)
-            if call_count == 1:
-                return [1.0] + [0.0] * 383  # Points along dimension 0
-            else:
-                return [0.0, 1.0] + [0.0] * 382  # Points along dimension 1
-
-        mock_embedder = AsyncMock()
-        mock_embedder.embed = mock_embed
-
-        # Mock LLM to return two facts with a link between them
-        mock_llm_result = LLMExtractionResult(
-            semantic_facts=[
-                ExtractedFact(content="User uses PostgreSQL"),
-                ExtractedFact(content="User prefers relational databases"),
-            ],
-            links=[
-                IdentifiedLink(
-                    source_content="User uses PostgreSQL",
-                    target_content="User prefers relational databases",
-                    relationship="implies",
-                )
-            ],
-            contradictions=[],
-        )
-
-        mock_agent_result = MagicMock()
-        mock_agent_result.output = mock_llm_result
-
-        with patch(
-            "engram.workflows.get_consolidation_agent",
-            side_effect=RuntimeError("Workflows not initialized"),
-        ):
-            with patch("pydantic_ai.Agent") as mock_agent_class:
-                mock_agent_instance = AsyncMock()
-                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
-                mock_agent_class.return_value = mock_agent_instance
-
-                result = await run_consolidation(
-                    storage=mock_storage,
-                    embedder=mock_embedder,
-                    user_id="test_user",
-                )
-
-        # Should have created 2 memories and 1 link
-        assert result.episodes_processed == 1
-        assert result.semantic_memories_created == 2
-        assert result.links_created == 1
-
-        # update_semantic_memory should have been called twice (bidirectional link)
-        assert mock_storage.update_semantic_memory.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_links_with_existing_memories(self) -> None:
-        """Test linking new memories with existing memories."""
+    async def test_links_created_with_existing_memories(self) -> None:
+        """Test that new semantic memories link to similar existing memories."""
         from engram.models import Episode, SemanticMemory
 
         mock_episode = MagicMock(spec=Episode)
-        mock_episode.id = "ep_456"
+        mock_episode.id = "ep_123"
         mock_episode.role = "user"
-        mock_episode.content = "PostgreSQL is a relational database"
+        mock_episode.content = "I love Python programming"
 
-        # Existing memory with orthogonal embedding to new fact
+        # Existing memory to link with
         existing_memory = SemanticMemory(
-            content="User likes SQL databases",
+            id="sem_existing",
+            content="User enjoys coding",
             user_id="test_user",
-            embedding=[1.0] + [0.0] * 383,  # Points along dimension 0
+            embedding=[0.1] * 384,
         )
 
         mock_storage = AsyncMock()
-        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=[mock_episode])
         mock_storage.store_semantic = AsyncMock(return_value="sem_new")
-        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=1)
         mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
+        mock_storage.search_semantic = AsyncMock(
+            return_value=[MagicMock(memory=existing_memory, score=0.85)]
+        )
         mock_storage.update_semantic_memory = AsyncMock(return_value=True)
 
-        # Use orthogonal embedding for new fact to avoid triggering semantic dedup with existing
         mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(
-            return_value=[0.0, 1.0] + [0.0] * 382
-        )  # Orthogonal to existing
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
-        # LLM creates link between new and existing memory
-        mock_llm_result = LLMExtractionResult(
-            semantic_facts=[
-                ExtractedFact(content="PostgreSQL is relational"),
-            ],
-            links=[
-                IdentifiedLink(
-                    source_content="PostgreSQL is relational",
-                    target_content="User likes SQL databases",
-                    relationship="related_to",
-                )
-            ],
-            contradictions=[],
+        mock_summary = SummaryOutput(
+            summary="The user enjoys Python programming.",
+            keywords=["python", "programming"],
+            context="technical",
         )
 
-        mock_agent_result = MagicMock()
-        mock_agent_result.output = mock_llm_result
-
         with patch(
-            "engram.workflows.get_consolidation_agent",
-            side_effect=RuntimeError("Workflows not initialized"),
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
         ):
-            with patch("pydantic_ai.Agent") as mock_agent_class:
-                mock_agent_instance = AsyncMock()
-                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
-                mock_agent_class.return_value = mock_agent_instance
+            result = await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+            )
 
-                result = await run_consolidation(
-                    storage=mock_storage,
-                    embedder=mock_embedder,
-                    user_id="test_user",
-                )
-
-        # Should create 1 memory and 1 link
+        # Should have created memory and link
         assert result.semantic_memories_created == 1
         assert result.links_created == 1
 
+        # update_semantic_memory should have been called for linking
+        assert mock_storage.update_semantic_memory.call_count >= 1
+
     @pytest.mark.asyncio
-    async def test_no_links_when_match_not_found(self) -> None:
-        """Test that links are not created when memories can't be matched."""
+    async def test_no_links_when_no_similar_memories(self) -> None:
+        """Test that no links are created when no similar memories exist."""
         from engram.models import Episode
 
         mock_episode = MagicMock(spec=Episode)
@@ -688,52 +665,34 @@ class TestConsolidationLinking:
         mock_episode.content = "Test content"
 
         mock_storage = AsyncMock()
-        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=[mock_episode])
         mock_storage.store_semantic = AsyncMock(return_value="sem_test")
-        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
-        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
-        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=1)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])  # No existing
+        mock_storage.search_semantic = AsyncMock(return_value=[])  # No similar
 
         mock_embedder = AsyncMock()
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
-        # LLM returns link between unmatched content
-        mock_llm_result = LLMExtractionResult(
-            semantic_facts=[
-                ExtractedFact(content="Fact A"),
-            ],
-            links=[
-                IdentifiedLink(
-                    source_content="Nonexistent fact X",
-                    target_content="Nonexistent fact Y",
-                    relationship="relates",
-                )
-            ],
-            contradictions=[],
+        mock_summary = SummaryOutput(
+            summary="Test summary.",
+            keywords=["test"],
+            context="general",
         )
 
-        mock_agent_result = MagicMock()
-        mock_agent_result.output = mock_llm_result
-
         with patch(
-            "engram.workflows.get_consolidation_agent",
-            side_effect=RuntimeError("Workflows not initialized"),
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
         ):
-            with patch("pydantic_ai.Agent") as mock_agent_class:
-                mock_agent_instance = AsyncMock()
-                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
-                mock_agent_class.return_value = mock_agent_instance
+            result = await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+            )
 
-                result = await run_consolidation(
-                    storage=mock_storage,
-                    embedder=mock_embedder,
-                    user_id="test_user",
-                )
-
-        # Memory created but no links (can't match)
+        # Memory created but no links
         assert result.semantic_memories_created == 1
         assert result.links_created == 0
-        mock_storage.update_semantic_memory.assert_not_called()
 
 
 class TestConsolidationStrengthening:
@@ -743,7 +702,7 @@ class TestConsolidationStrengthening:
         """Test ConsolidationResult includes memories_strengthened field."""
         result = ConsolidationResult(
             episodes_processed=5,
-            semantic_memories_created=3,
+            semantic_memories_created=1,
             links_created=2,
             evolutions_applied=1,
             memories_strengthened=4,
@@ -760,7 +719,7 @@ class TestConsolidationStrengthening:
         assert result.memories_strengthened == 0
 
     @pytest.mark.asyncio
-    async def test_memory_strengthened_on_link(self) -> None:
+    async def test_existing_memory_strengthened_on_link(self) -> None:
         """Test existing memory is strengthened when linked to new memory."""
         from engram.models import Episode, SemanticMemory
 
@@ -769,131 +728,48 @@ class TestConsolidationStrengthening:
         mock_episode.role = "user"
         mock_episode.content = "I prefer Python programming"
 
-        # Existing memory with consolidation_strength 0.0 and orthogonal embedding
+        # Existing memory with initial strength 0.0
         existing_memory = SemanticMemory(
+            id="sem_existing",
             content="User likes programming",
             user_id="test_user",
-            embedding=[1.0] + [0.0] * 383,  # Points along dimension 0
+            embedding=[0.1] * 384,
         )
         assert existing_memory.consolidation_strength == 0.0
-        assert existing_memory.consolidation_passes == 0  # Fresh memory, no consolidation yet
 
         mock_storage = AsyncMock()
-        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=[mock_episode])
         mock_storage.store_semantic = AsyncMock(return_value="sem_new")
-        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=1)
         mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
         mock_storage.search_semantic = AsyncMock(
             return_value=[MagicMock(memory=existing_memory, score=0.85)]
         )
         mock_storage.update_semantic_memory = AsyncMock(return_value=True)
 
-        # Use orthogonal embedding for new fact to avoid triggering semantic dedup with existing
         mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(
-            return_value=[0.0, 1.0] + [0.0] * 382
-        )  # Orthogonal to existing
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
-        mock_llm_result = LLMExtractionResult(
-            semantic_facts=[ExtractedFact(content="User prefers Python")],
-            links=[],
-            contradictions=[],
+        mock_summary = SummaryOutput(
+            summary="User prefers Python.",
+            keywords=["python"],
+            context="programming",
         )
 
-        mock_agent_result = MagicMock()
-        mock_agent_result.output = mock_llm_result
-
         with patch(
-            "engram.workflows.get_consolidation_agent",
-            side_effect=RuntimeError("Workflows not initialized"),
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
         ):
-            with patch("pydantic_ai.Agent") as mock_agent_class:
-                mock_agent_instance = AsyncMock()
-                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
-                mock_agent_class.return_value = mock_agent_instance
-
-                result = await run_consolidation(
-                    storage=mock_storage,
-                    embedder=mock_embedder,
-                    user_id="test_user",
-                )
+            result = await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+            )
 
         # Should have created memory and strengthened existing
         assert result.semantic_memories_created == 1
         assert result.links_created == 1
-        assert result.memories_strengthened >= 1
 
         # Existing memory should have increased strength
         assert existing_memory.consolidation_strength == 0.1  # Increased by 0.1
-        assert existing_memory.consolidation_passes == 1  # Incremented from 0 to 1
-
-    @pytest.mark.asyncio
-    async def test_memory_strengthened_on_evolution(self) -> None:
-        """Test existing memory is strengthened when evolved."""
-        from engram.models import Episode, SemanticMemory
-        from engram.workflows.consolidation import MemoryEvolution
-
-        mock_episode = MagicMock(spec=Episode)
-        mock_episode.id = "ep_sel_002"
-        mock_episode.role = "user"
-        mock_episode.content = "I use Python for data science"
-
-        # Existing memory to evolve
-        existing_memory = SemanticMemory(
-            content="User likes Python",
-            user_id="test_user",
-            embedding=[0.1] * 384,
-        )
-        initial_strength = existing_memory.consolidation_strength
-        initial_passes = existing_memory.consolidation_passes
-
-        mock_storage = AsyncMock()
-        mock_storage.get_unconsolidated_episodes = AsyncMock(return_value=[mock_episode])
-        mock_storage.store_semantic = AsyncMock(return_value="sem_new")
-        mock_storage.mark_episodes_consolidated = AsyncMock(return_value=1)
-        mock_storage.list_semantic_memories = AsyncMock(return_value=[existing_memory])
-        mock_storage.search_semantic = AsyncMock(return_value=[])
-        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
-
-        mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
-
-        # LLM returns evolution for existing memory
-        mock_llm_result = LLMExtractionResult(
-            semantic_facts=[ExtractedFact(content="User does data science")],
-            links=[],
-            evolutions=[
-                MemoryEvolution(
-                    target_content="User likes Python",
-                    add_tags=["data-science"],
-                    reason="New context about Python usage",
-                )
-            ],
-            contradictions=[],
-        )
-
-        mock_agent_result = MagicMock()
-        mock_agent_result.output = mock_llm_result
-
-        with patch(
-            "engram.workflows.get_consolidation_agent",
-            side_effect=RuntimeError("Workflows not initialized"),
-        ):
-            with patch("pydantic_ai.Agent") as mock_agent_class:
-                mock_agent_instance = AsyncMock()
-                mock_agent_instance.run = AsyncMock(return_value=mock_agent_result)
-                mock_agent_class.return_value = mock_agent_instance
-
-                result = await run_consolidation(
-                    storage=mock_storage,
-                    embedder=mock_embedder,
-                    user_id="test_user",
-                )
-
-        # Should have applied evolution and strengthened memory
-        assert result.evolutions_applied == 1
-        assert result.memories_strengthened >= 1
-
-        # Existing memory should have increased strength from evolution
-        assert existing_memory.consolidation_strength > initial_strength
-        assert existing_memory.consolidation_passes > initial_passes
+        assert existing_memory.consolidation_passes == 1

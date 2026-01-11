@@ -153,20 +153,32 @@ Expensive LLM work is batched and deferred:
 | Consolidation | Scheduled | Medium (LLM, batched) |
 | Decay | Scheduled | Low (math) |
 
-### 8. Buffer Promotion
+### 8. Hierarchical Memory Compression
 
-Memory types form a hierarchy with explicit promotion/demotion:
+Memory types form a compression hierarchy:
 
 ```
-Working (volatile) → Episodic (fast decay) → Semantic (slow decay) → Procedural (very slow)
+Working (volatile) → Episodic (immutable ground truth)
+                         │
+                         ├─→ Factual (pattern-extracted)
+                         ├─→ Negation (contradiction tracking)
+                         │
+                         └─→ Semantic (N episodes → 1 summary via LLM)
+                                   │
+                                   └─→ Procedural (all semantics → 1 behavioral profile)
 ```
 
-**Promotion implementation** (`run_promotion` workflow):
-- Analyzes semantic memories for behavioral patterns (keywords: "prefers", "always", "tends to", etc.)
-- Promotes when: consolidation_strength >= 0.5, consolidation_passes >= 2, confidence >= 0.7
-- Creates ProceduralMemory with trigger_context extracted from content
-- Links procedural back to source semantic memory
-- Deduplicates to prevent creating duplicate procedural memories
+**Consolidation** (`run_consolidation` workflow):
+- Fetches all unsummarized episodes for a user
+- Uses LLM to create ONE semantic summary from N episodes (map-reduce for large batches)
+- Marks episodes as `summarized=True` and links them via `summarized_into`
+- Bidirectional traceability: `episode.summarized_into` ↔ `semantic.source_episode_ids`
+
+**Procedural Synthesis** (`run_synthesis` workflow):
+- Fetches ALL semantic memories for a user
+- Uses LLM to synthesize ONE behavioral profile per user
+- Replaces existing procedural memory (doesn't accumulate)
+- Links to source semantics via `source_semantic_ids`
 
 Demotion triggers:
 - Low access + time → archive via decay workflow
@@ -196,6 +208,8 @@ class Episode(BaseModel):
     user_id: str
     importance: float                    # 0.0 - 1.0
     embedding: list[float]
+    summarized: bool                     # Included in semantic summary?
+    summarized_into: str | None          # ID of semantic memory (bidirectional link)
 ```
 
 ### Fact (Deterministically Extracted)
@@ -233,9 +247,10 @@ class SemanticMemory(BaseModel):
 ```python
 class ProceduralMemory(BaseModel):
     id: str
-    content: str                         # "User prefers concise responses"
+    content: str                         # Behavioral profile description
     trigger_context: str                 # When this applies
-    source_episode_ids: list[str]
+    source_episode_ids: list[str]        # All episodes (via semantics)
+    source_semantic_ids: list[str]       # Semantics synthesized from
     related_ids: list[str]
     confidence: ConfidenceScore          # Composite score with auditability
     access_count: int                    # Reinforcement through use
@@ -271,7 +286,7 @@ Interaction
 └──────────┼────────────────┼────────────────────┼────────────┘
            │                │                    │
            ▼                ▼                    ▼
-      [Episodic]       [Factual]          [Inhibitory]
+      [Episodic]       [Factual]          [Negation]
            │
            └──────────────┬─────────────────────┘
                           │
@@ -419,62 +434,81 @@ async with EngramService.create() as engram:
 
 ## Background Operations
 
-### Consolidation
+### Consolidation (Hierarchical Summarization)
 
-Implemented via `run_consolidation()`. Extracts semantic patterns, builds links, strengthens memories:
+Implemented via `run_consolidation()`. Compresses N episodes into 1 semantic summary:
 
 ```python
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
-class ConsolidationResult(BaseModel):
-    facts: list[str]
-    links: list[tuple[str, str]]       # (memory_id, related_id)
-    pruned: list[str]                  # IDs to weaken (reduce consolidation_strength)
-    confidence: float
-    reasoning: str
+class SummaryOutput(BaseModel):
+    summary: str                       # 3-6 sentence summary
+    keywords: list[str]                # Key terms for retrieval
+    context: str                       # Domain/topic context
 
-consolidation_agent = Agent(
-    "openai:gpt-4o-mini",
-    result_type=ConsolidationResult,
-    system_prompt="""
-    Extract semantic facts from these conversation episodes.
-    Identify relationships between memories.
-    Flag weak or contradicted associations for pruning.
-    Only extract facts with high confidence.
-    Explain your reasoning.
-    """
-)
+# Map-reduce for large episode batches
+async def consolidate(user_id: str):
+    # 1. Fetch ALL unsummarized episodes
+    episodes = await get_unsummarized_episodes(user_id)
 
-async def consolidate():
-    episodes = await get_unconsolidated_episodes()
-    existing = await get_related_memories(episodes)
+    # 2. Map phase: chunk and summarize each chunk
+    chunks = chunk_episodes(episodes, max_per_chunk=20)
+    chunk_summaries = [await summarize_chunk(chunk) for chunk in chunks]
 
-    result = await consolidation_agent.run(
-        format_context(episodes, existing)
+    # 3. Reduce phase: combine chunk summaries
+    if len(chunk_summaries) == 1:
+        final_summary = chunk_summaries[0]
+    else:
+        final_summary = await reduce_summaries(chunk_summaries)
+
+    # 4. Create semantic memory with bidirectional links
+    memory = SemanticMemory(
+        content=final_summary.summary,
+        source_episode_ids=[ep.id for ep in episodes],
+        keywords=final_summary.keywords,
+    )
+    await store_semantic(memory)
+
+    # 5. Mark episodes as summarized (bidirectional link)
+    await mark_episodes_summarized(
+        episode_ids=[ep.id for ep in episodes],
+        semantic_id=memory.id,
     )
 
-    # Store new semantic memories
-    for fact in result.data.facts:
-        await store_semantic(
-            content=fact,
-            source_episode_ids=[e.id for e in episodes],
-            confidence=result.data.confidence,
-            consolidation_strength=0.0,  # Starts weak, strengthens with consolidation
-            consolidation_passes=1,
-        )
+    # 6. Build links to existing similar memories
+    existing = await find_similar_memories(memory.embedding)
+    for similar in existing:
+        memory.add_link(similar.id)
+        similar.add_link(memory.id)
+        similar.strengthen(delta=0.1)  # Testing Effect
+```
 
-    # Build links
-    for memory_id, related_id in result.data.links:
-        await add_link(memory_id, related_id)
+### Procedural Synthesis
 
-    # Update consolidation strength based on survival
-    for memory_id in result.data.pruned:
-        memory.weaken(delta=0.1)  # Weakened if pruned
+Implemented via `run_synthesis()`. Synthesizes all semantics into one behavioral profile:
 
-    for memory in existing:
-        if memory.id not in result.data.pruned:
-            memory.strengthen(delta=0.1)  # Strengthened via Testing Effect
+```python
+async def create_procedural(user_id: str):
+    # 1. Fetch ALL semantic memories
+    semantics = await list_semantic_memories(user_id)
+
+    # 2. LLM synthesis into behavioral profile
+    profile = await synthesize_behavioral_profile(semantics)
+
+    # 3. Create/replace ONE procedural per user
+    procedural = ProceduralMemory(
+        content=profile.content,
+        source_semantic_ids=[s.id for s in semantics],
+        source_episode_ids=deduplicated_episode_ids,
+    )
+
+    # Replace existing if present
+    existing = await list_procedural_memories(user_id)
+    if existing:
+        await update_procedural(procedural)
+    else:
+        await store_procedural(procedural)
 ```
 
 ### Decay

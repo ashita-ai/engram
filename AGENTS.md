@@ -87,7 +87,7 @@ uv run pre-commit run --all-files
 | Fact | Pattern-extracted facts (emails, phones, dates) | 0.9 (extracted) |
 | SemanticMemory | LLM-inferred knowledge | 0.6 (inferred) |
 | ProceduralMemory | Behavioral patterns | 0.6 (inferred) |
-| NegationFact | What is NOT true (negations) | 0.7 (inferred) |
+| NegationFact | What is NOT true (negations) | 0.9 (extracted) |
 
 ### Confidence Scoring
 

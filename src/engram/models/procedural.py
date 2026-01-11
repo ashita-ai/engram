@@ -38,6 +38,10 @@ class ProceduralMemory(MemoryBase):
         default_factory=list,
         description="Episodes where this pattern was observed",
     )
+    source_semantic_ids: list[str] = Field(
+        default_factory=list,
+        description="Semantic memories this was synthesized from",
+    )
     related_ids: list[str] = Field(
         default_factory=list,
         description="Links to related memories",

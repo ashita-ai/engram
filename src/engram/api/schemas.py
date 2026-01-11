@@ -154,6 +154,10 @@ class RecallRequest(BaseModel):
         default=None,
         description="Bi-temporal query: only return memories derived before this time",
     )
+    include_system_prompts: bool = Field(
+        default=False,
+        description="Include system prompt episodes in results (default False)",
+    )
 
 
 class SourceEpisodeSummary(BaseModel):
