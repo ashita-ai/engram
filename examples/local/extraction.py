@@ -48,7 +48,7 @@ def main() -> None:
     for name, extractor, text in extractors:
         print(f"\n  {name}Extractor")
         print(f'  Input: "{text}"')
-        episode = Episode(content=text, role="user", user_id="demo")
+        episode = Episode(content=text, role="user", user_id="demo", org_id="demo_org")
         facts = extractor.extract(episode)
         if facts:
             for fact in facts:
@@ -76,7 +76,7 @@ def main() -> None:
     """
 
     print(f"  Input: {complex_message.strip()}")
-    episode = Episode(content=complex_message, role="user", user_id="demo")
+    episode = Episode(content=complex_message, role="user", user_id="demo", org_id="demo_org")
     all_facts = pipeline.run(episode)
 
     print(f"\n  Extracted {len(all_facts)} facts:")
@@ -102,7 +102,7 @@ def main() -> None:
 
     for text in negation_examples:
         print(f'\n  Input: "{text}"')
-        episode = Episode(content=text, role="user", user_id="demo")
+        episode = Episode(content=text, role="user", user_id="demo", org_id="demo_org")
         negations = detector.detect(episode)
         if negations:
             for neg in negations:

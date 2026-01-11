@@ -92,6 +92,8 @@ def main() -> None:
         content="My email is alice@example.com and I work at Acme Corp.",
         role="user",
         user_id="demo_user",
+        org_id="demo_org",
+        session_id="demo_session",
         importance=0.7,
     )
 
@@ -121,6 +123,7 @@ def main() -> None:
         category="email",
         source_episode_id=episode.id,
         user_id="demo_user",
+        org_id="demo_org",
         confidence=ConfidenceScore.for_extracted(),
     )
 
@@ -150,6 +153,7 @@ def main() -> None:
         content="User prefers Python for backend development and uses FastAPI",
         source_episode_ids=[episode.id],
         user_id="demo_user",
+        org_id="demo_org",
         confidence=ConfidenceScore.for_inferred(supporting_episodes=2),
         related_ids=["sem_abc123", "proc_xyz789"],
         consolidation_strength=0.3,
@@ -184,6 +188,7 @@ def main() -> None:
         "type hints, docstrings, and 88-char line limits",
         source_episode_ids=[episode.id],
         user_id="demo_user",
+        org_id="demo_org",
         confidence=ConfidenceScore.for_inferred(supporting_episodes=3),
         trigger_context="code style, formatting, linting",
         access_count=5,
@@ -215,7 +220,8 @@ def main() -> None:
         negates_pattern="MongoDB",
         source_episode_ids=[episode.id],
         user_id="demo_user",
-        confidence=ConfidenceScore.for_inferred(confidence=0.7),  # Negations use 0.7
+        org_id="demo_org",
+        confidence=ConfidenceScore.for_extracted(),  # Negations are pattern-extracted (0.9)
     )
 
     print("  Example NegationFact:")
@@ -246,7 +252,7 @@ def main() -> None:
   | Factual    | Permanent   | 90%        | Pattern matching | Structured data      |
   | Semantic   | Permanent   | 60%        | LLM consolidation| Knowledge/preferences|
   | Procedural | Permanent   | 60%        | Promotion        | Behavioral patterns  |
-  | Negation   | Permanent   | 70%        | Negation detector| What's NOT true      |
+  | Negation   | Permanent   | 90%        | Pattern matching | What's NOT true      |
     """)
 
     print("=" * 70)

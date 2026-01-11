@@ -63,7 +63,10 @@ async def main() -> None:
         print(f"  [Durable workflows not available: {e}]")
 
     async with EngramService.create() as engram:
+        # Demo identifiers
         user_id = "advanced_demo"
+        org_id = "demo_org"
+        session_id = "advanced_session_001"
 
         # Clean up any existing data from previous runs
         await cleanup_demo_data(engram.storage, user_id)
@@ -93,11 +96,13 @@ async def main() -> None:
 
         print("  Batch 1: Basic profile...")
         for role, content in batch1:
-            await engram.encode(content=content, role=role, user_id=user_id)
+            await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
 
         # Consolidate batch 1 → creates first semantic memory
         result1 = await run_consolidation(
-            storage=engram.storage, embedder=engram.embedder, user_id=user_id
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id, org_id=org_id
         )
         print(f"    → {len(batch1)} episodes → {result1.semantic_memories_created} semantic")
 
@@ -111,11 +116,13 @@ async def main() -> None:
 
         print("  Batch 2: Technical preferences...")
         for role, content in batch2:
-            await engram.encode(content=content, role=role, user_id=user_id)
+            await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
 
         # Consolidate batch 2 → should create links to batch 1's semantic
         result2 = await run_consolidation(
-            storage=engram.storage, embedder=engram.embedder, user_id=user_id
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id, org_id=org_id
         )
         print(f"    → {len(batch2)} episodes → {result2.semantic_memories_created} semantic")
         print(f"    → {result2.links_created} links created to existing memories")
@@ -131,13 +138,15 @@ async def main() -> None:
         print("  Batch 3: Corrections and negations...")
         negations_detected = 0
         for role, content in batch3:
-            result = await engram.encode(content=content, role=role, user_id=user_id)
+            result = await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
             negations_detected += len(result.negations)
         print(f"    → {len(batch3)} episodes, {negations_detected} negations detected")
 
         # Consolidate batch 3
         result3 = await run_consolidation(
-            storage=engram.storage, embedder=engram.embedder, user_id=user_id
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id, org_id=org_id
         )
         print(f"    → {result3.semantic_memories_created} semantic, {result3.links_created} links")
 
@@ -381,11 +390,15 @@ async def main() -> None:
             content="I'm also learning Kubernetes for container orchestration.",
             role="user",
             user_id=user_id,
+            org_id=org_id,
+            session_id=session_id,
         )
         await engram.encode(
             content="My preferred cloud provider is AWS.",
             role="user",
             user_id=user_id,
+            org_id=org_id,
+            session_id=session_id,
         )
 
         # Query including episodic to show summarized vs unsummarized
