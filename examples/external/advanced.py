@@ -319,75 +319,67 @@ async def main() -> None:
         # =====================================================================
         print("\n\n6. FRESHNESS FILTERING")
         print("-" * 70)
-        print("  Filter memories by consolidation recency.\n")
-        print("  'fresh' = recently consolidated, 'stale' = needs re-consolidation\n")
+        print("  Filter by consolidation status.\n")
+        print("  Episodes are 'stale' until consolidated into semantic memories.")
+        print("  Semantic/factual memories are always 'fresh' (derived from consolidation).\n")
 
-        # Get all memories and show their staleness
-        results_all = await engram.recall(
-            query="Alex",
+        # Add new episodes AFTER consolidation to create stale memories
+        print("  Adding new episodes (not yet consolidated)...")
+        await engram.encode(
+            content="I'm also learning Kubernetes for container orchestration.",
+            role="user",
             user_id=user_id,
-            memory_types=["semantic", "factual"],  # These have staleness
+        )
+        await engram.encode(
+            content="My preferred cloud provider is AWS.",
+            role="user",
+            user_id=user_id,
+        )
+
+        # Query including episodic to show stale vs fresh
+        results_all = await engram.recall(
+            query="Alex cloud",
+            user_id=user_id,
+            memory_types=["episodic", "semantic"],
             freshness="best_effort",
             limit=10,
         )
 
-        # Count by staleness
         fresh_mems = [r for r in results_all if r.staleness.value == "fresh"]
         stale_mems = [r for r in results_all if r.staleness.value == "stale"]
 
-        print("  Query: 'Alex' (semantic/factual only)")
-        print(f"  Total: {len(results_all)} | Fresh: {len(fresh_mems)} | Stale: {len(stale_mems)}")
-
-        if fresh_mems:
-            print("\n  FRESH (recently consolidated):")
-            for r in fresh_mems[:2]:
-                print(f"    ✓ {r.content[:50]}...")
+        print(f"\n  Query: 'Alex cloud' → {len(results_all)} total")
+        print(f"    Fresh (consolidated): {len(fresh_mems)}")
+        print(f"    Stale (unconsolidated): {len(stale_mems)}")
 
         if stale_mems:
-            print("\n  STALE (needs re-consolidation):")
+            print("\n  STALE episodes (new, not yet consolidated):")
             for r in stale_mems[:2]:
-                print(f"    ⚠ {r.content[:50]}...")
+                print(f"    ⚠ [{r.memory_type}] {r.content[:45]}...")
 
-        # Show fresh_only filtering
+        if fresh_mems:
+            print("\n  FRESH memories (already consolidated):")
+            for r in fresh_mems[:2]:
+                print(f"    ✓ [{r.memory_type}] {r.content[:45]}...")
+
+        # Show filtering - check if stale memories are excluded
         results_fresh_only = await engram.recall(
-            query="Alex",
+            query="Alex cloud",
             user_id=user_id,
-            memory_types=["semantic", "factual"],
+            memory_types=["episodic", "semantic"],
             freshness="fresh_only",
             limit=10,
         )
+
+        # Check if the stale memories are in fresh_only results
+        stale_ids = {r.memory_id for r in stale_mems}
+        stale_in_fresh = [r for r in results_fresh_only if r.memory_id in stale_ids]
+
         print(f"\n  With freshness='fresh_only': {len(results_fresh_only)} results")
-        print("  (Filters out stale memories that may be outdated)")
-
-        # =====================================================================
-        # 7. SELECTIVITY FILTERING
-        # =====================================================================
-        print("\n\n7. SELECTIVITY FILTERING")
-        print("-" * 70)
-        print("  Selectivity = how context-specific a memory is.")
-        print("  High selectivity = specific to one context (e.g., 'uses PostgreSQL')")
-        print("  Low selectivity = general/applies broadly (e.g., 'is a developer')\n")
-
-        # Get semantic memories and show their selectivity
-        sem_results = await engram.recall(
-            query="Alex preferences",
-            user_id=user_id,
-            memory_types=["semantic"],
-            min_selectivity=0.0,
-            limit=10,
-        )
-
-        print("  Semantic memories with selectivity scores:")
-        for r in sem_results[:4]:
-            sel = r.metadata.get("selectivity", 0.0)
-            print(f"    [{sel:.1f}] {r.content[:50]}...")
-
-        print("\n  Filtering by min_selectivity:")
-        for min_sel in [0.0, 0.2, 0.4]:
-            filtered = [r for r in sem_results if r.metadata.get("selectivity", 0) >= min_sel]
-            print(f"    min_selectivity={min_sel}: {len(filtered)} memories")
-
-        print("\n  Use case: Filter out generic facts when you need specific details.")
+        if len(stale_in_fresh) == 0 and len(stale_mems) > 0:
+            print("  ✓ Stale episodes excluded from results")
+        else:
+            print(f"  Note: {len(stale_in_fresh)} stale memories still in results")
 
     print("\n" + "=" * 70)
     print("Advanced features demo complete!")
