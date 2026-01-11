@@ -146,17 +146,12 @@ async def main() -> None:
         print("-" * 70)
         print("  Every semantic memory links to its source episodes.\n")
 
-        # Get the semantic memory
-        semantic_results = await engram.recall(
-            query="Morgan",
-            user_id=user_id,
-            memory_types=["semantic"],
-            limit=1,
-        )
+        # Get semantic memories directly from storage (more reliable than recall)
+        semantic_memories = await engram.storage.list_semantic_memories(user_id)
 
-        if semantic_results:
-            sem = semantic_results[0]
-            print(f"  Semantic Memory: {sem.memory_id}")
+        if semantic_memories:
+            sem = semantic_memories[0]  # Most recent
+            print(f"  Semantic Memory: {sem.id}")
             print(f'    Content: "{sem.content[:60]}..."')
             print(f"    source_episode_ids: {sem.source_episode_ids[:3]}...")
             print(f"    ({len(sem.source_episode_ids)} episodes → 1 summary)")
@@ -167,8 +162,11 @@ async def main() -> None:
             if ep:
                 print(f"    Episode {ep.id[:20]}...")
                 print(f"      summarized: {ep.summarized}")
-                print(f"      summarized_into: {ep.summarized_into[:20]}...")
-                print(f"      ✓ Links match: {ep.summarized_into == sem.memory_id}")
+                if ep.summarized_into:
+                    print(f"      summarized_into: {ep.summarized_into[:20]}...")
+                    print(f"      ✓ Links match: {ep.summarized_into == sem.id}")
+                else:
+                    print("      summarized_into: None")
 
         # =====================================================================
         # 5. RAW vs DERIVED
@@ -182,9 +180,9 @@ async def main() -> None:
         print(f"    ... and {len(conversations) - 5} more\n")
 
         print("  DERIVED SEMANTIC SUMMARY:")
-        for sem in semantic_results:
+        for sem in semantic_memories:
             print(f'    "{sem.content}"')
-            print(f"    (confidence: {sem.confidence:.0%})")
+            print(f"    (confidence: {sem.confidence.value:.0%})")
 
         # =====================================================================
         # 6. ADD MORE DATA AND CONSOLIDATE AGAIN
@@ -222,25 +220,19 @@ async def main() -> None:
         print(f"  Procedural created:    {synthesis_result.procedural_created}")
         print(f"  Procedural ID:         {synthesis_result.procedural_id}")
 
-        # Show the procedural memory
-        proc_results = await engram.recall(
-            query="Morgan",
-            user_id=user_id,
-            memory_types=["procedural"],
-            limit=1,
-        )
+        # Show the procedural memory (fetch directly for full details)
+        proc_memories = await engram.storage.list_procedural_memories(user_id)
 
-        if proc_results:
-            proc = proc_results[0]
+        if proc_memories:
+            proc = proc_memories[0]
             print("\n  BEHAVIORAL PROFILE:")
             # Split into lines for readability
             lines = proc.content.split("\n")
             for line in lines[:8]:
                 if line.strip():
                     print(f"    {line.strip()}")
-            print(
-                f"\n    source_semantic_ids: {len(proc.source_episode_ids)} semantics → 1 procedural"
-            )
+            print(f"\n    source_semantic_ids: {proc.source_semantic_ids}")
+            print(f"    ({len(proc.source_semantic_ids)} semantics → 1 procedural)")
 
         # =====================================================================
         # 8. FINAL MEMORY STATE

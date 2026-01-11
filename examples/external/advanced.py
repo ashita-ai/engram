@@ -325,16 +325,17 @@ async def main() -> None:
         print("\n  Note: Episodic memories are exempt (immutable ground truth)")
 
         # =====================================================================
-        # 6. FRESHNESS FILTERING
+        # 6. SUMMARIZATION STATUS FILTERING
         # =====================================================================
-        print("\n\n6. FRESHNESS FILTERING")
+        print("\n\n6. SUMMARIZATION STATUS FILTERING")
         print("-" * 70)
         print("  Filter by consolidation status.\n")
-        print("  Episodes are 'stale' until consolidated into semantic memories.")
-        print("  Semantic/factual memories are always 'fresh' (derived from consolidation).\n")
+        print("  Episodes can be 'unsummarized' (not yet included in semantic summaries)")
+        print("  or 'summarized' (already compressed into semantic memory).")
+        print("  This helps prioritize unprocessed content for LLM consolidation.\n")
 
-        # Add new episodes AFTER consolidation to create stale memories
-        print("  Adding new episodes (not yet consolidated)...")
+        # Add new episodes AFTER consolidation to show unsummarized state
+        print("  Adding new episodes (not yet summarized)...")
         await engram.encode(
             content="I'm also learning Kubernetes for container orchestration.",
             role="user",
@@ -355,41 +356,45 @@ async def main() -> None:
             limit=10,
         )
 
-        fresh_mems = [r for r in results_all if r.staleness.value == "fresh"]
-        stale_mems = [r for r in results_all if r.staleness.value == "stale"]
+        summarized_mems = [r for r in results_all if r.staleness.value == "fresh"]
+        unsummarized_mems = [r for r in results_all if r.staleness.value == "stale"]
 
         print(f"\n  Query: 'Alex cloud' → {len(results_all)} total")
-        print(f"    Fresh (consolidated): {len(fresh_mems)}")
-        print(f"    Stale (unconsolidated): {len(stale_mems)}")
+        print(f"    Summarized (in semantic memory): {len(summarized_mems)}")
+        print(f"    Unsummarized (raw episodes): {len(unsummarized_mems)}")
 
-        if stale_mems:
-            print("\n  STALE episodes (new, not yet consolidated):")
-            for r in stale_mems[:2]:
-                print(f"    ⚠ [{r.memory_type}] {r.content[:45]}...")
+        if unsummarized_mems:
+            print("\n  UNSUMMARIZED episodes (new ground truth, pending consolidation):")
+            for r in unsummarized_mems[:2]:
+                print(f"    📝 [{r.memory_type}] {r.content[:45]}...")
 
-        if fresh_mems:
-            print("\n  FRESH memories (already consolidated):")
-            for r in fresh_mems[:2]:
+        if summarized_mems:
+            print("\n  SUMMARIZED memories (already consolidated):")
+            for r in summarized_mems[:2]:
                 print(f"    ✓ [{r.memory_type}] {r.content[:45]}...")
 
-        # Show filtering - check if stale memories are excluded
-        results_fresh_only = await engram.recall(
+        # Show filtering - check if unsummarized episodes are excluded
+        results_summarized_only = await engram.recall(
             query="Alex cloud",
             user_id=user_id,
             memory_types=["episodic", "semantic"],
-            freshness="fresh_only",
+            freshness="fresh_only",  # API uses "fresh_only" to mean summarized
             limit=10,
         )
 
-        # Check if the stale memories are in fresh_only results
-        stale_ids = {r.memory_id for r in stale_mems}
-        stale_in_fresh = [r for r in results_fresh_only if r.memory_id in stale_ids]
+        # Check if unsummarized episodes are in summarized-only results
+        unsummarized_ids = {r.memory_id for r in unsummarized_mems}
+        unsummarized_in_results = [
+            r for r in results_summarized_only if r.memory_id in unsummarized_ids
+        ]
 
-        print(f"\n  With freshness='fresh_only': {len(results_fresh_only)} results")
-        if len(stale_in_fresh) == 0 and len(stale_mems) > 0:
-            print("  ✓ Stale episodes excluded from results")
+        print(
+            f"\n  With freshness='fresh_only' (summarized only): {len(results_summarized_only)} results"
+        )
+        if len(unsummarized_in_results) == 0 and len(unsummarized_mems) > 0:
+            print("  ✓ Unsummarized episodes excluded from results")
         else:
-            print(f"  Note: {len(stale_in_fresh)} stale memories still in results")
+            print(f"  Note: {len(unsummarized_in_results)} unsummarized memories still in results")
 
     print("\n" + "=" * 70)
     print("Advanced features demo complete!")
