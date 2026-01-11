@@ -388,9 +388,7 @@ async def main() -> None:
             r for r in results_summarized_only if r.memory_id in unsummarized_ids
         ]
 
-        print(
-            f"\n  With freshness='fresh_only' (summarized only): {len(results_summarized_only)} results"
-        )
+        print(f"\n  Filtering to summarized-only: {len(results_summarized_only)} results")
         if len(unsummarized_in_results) == 0 and len(unsummarized_mems) > 0:
             print("  ✓ Unsummarized episodes excluded from results")
         else:
