@@ -112,15 +112,14 @@ async def main() -> None:
         print("-" * 70)
         print("  Episodic and factual memories are available IMMEDIATELY.\n")
 
-        results = await engram.recall(query="Jordan email", user_id=user_id, limit=10)
-        by_type: dict[str, int] = {}
-        for r in results:
-            # Skip working memory (session buffer) to focus on persisted types
-            if r.memory_type == "working":
-                continue
-            by_type[r.memory_type] = by_type.get(r.memory_type, 0) + 1
-
-        print(f"  Query: 'Jordan email' → {by_type}")
+        # Get actual counts from storage to show what's available
+        pre_stats = await engram.storage.get_memory_stats(user_id)
+        print("  Available now (before LLM consolidation):")
+        print(f"    Episodic: {pre_stats.episodes}")
+        print(f"    Factual:  {pre_stats.facts}")
+        print(f"    Negation: {pre_stats.negation}")
+        print(f"    Semantic: {pre_stats.semantic} ← Empty! Requires consolidation")
+        print()
         print("  ✓ Episodic (raw) and factual (extracted) available instantly")
         print("  ✗ Semantic memories require consolidation (LLM processing)")
 
@@ -146,9 +145,17 @@ async def main() -> None:
             ("user", "I've been using Python for about 5 years now."),
             ("user", "PyTorch is essential for my NLP work at TechFlow."),
         ]
+        additional_facts = 0
         for role, content in more_messages:
-            await engram.encode(content=content, role=role, user_id=user_id)
-            print(f"    [{role}] {content[:45]}...")
+            result = await engram.encode(content=content, role=role, user_id=user_id)
+            extras = []
+            if result.facts:
+                additional_facts += len(result.facts)
+                extras.append("+fact")
+            extras_str = f"  [{', '.join(extras)}]" if extras else ""
+            print(f"    [{role}] {content[:40]}...{extras_str}")
+        if additional_facts:
+            print(f"    (Extracted {additional_facts} additional fact(s))")
 
         print("\n  Running second consolidation (links new → existing)...")
         result2 = await run_consolidation(
@@ -158,17 +165,6 @@ async def main() -> None:
         )
         print(f"  New semantic memories: {result2.semantic_memories_created}")
         print(f"  Links created: {result2.links_created}")
-
-        # Get memory stats
-        stats = await engram.storage.get_memory_stats(user_id)
-        print("\n  TOTAL MEMORIES STORED:")
-        print(f"    Episodic (ground truth):     {stats.episodes}")
-        print(f"    Factual (pattern-extracted): {stats.facts}")
-        print(f"    Negation (what's NOT true):  {stats.negation}")
-        print(f"    Semantic (LLM-inferred):     {stats.semantic}")
-        total = stats.episodes + stats.facts + stats.negation + stats.semantic
-        print("    ─────────────────────────────")
-        print(f"    Total:                       {total}")
 
         # Show all memories with first 50 chars
         print("\n  ALL MEMORIES (first 50 chars):")
@@ -206,16 +202,15 @@ async def main() -> None:
         print("-" * 70)
         print("  Now semantic memories are included in results.\n")
 
-        results = await engram.recall(query="Jordan email", user_id=user_id, limit=10)
-        by_type = {}
-        for r in results:
-            # Skip working memory (session buffer) to focus on persisted types
-            if r.memory_type == "working":
-                continue
-            by_type[r.memory_type] = by_type.get(r.memory_type, 0) + 1
-
-        print(f"  Same query: 'Jordan email' → {by_type}")
-        print("  ✓ Semantic memories now appear in results!")
+        # Get actual counts from storage after consolidation
+        post_stats = await engram.storage.get_memory_stats(user_id)
+        print("  Available now (after LLM consolidation):")
+        print(f"    Episodic: {post_stats.episodes}")
+        print(f"    Factual:  {post_stats.facts}")
+        print(f"    Negation: {post_stats.negation}")
+        print(f"    Semantic: {post_stats.semantic} ← Created by consolidation!")
+        print()
+        print("  ✓ Semantic memories now available for recall")
 
         # =====================================================================
         # 5. MEMORY TYPES WITH CONFIDENCE
