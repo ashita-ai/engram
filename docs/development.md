@@ -102,7 +102,7 @@ engram_episodic    # Raw interactions, immutable
 engram_factual     # Pattern-extracted facts
 engram_semantic    # LLM-inferred knowledge
 engram_procedural  # Behavioral patterns
-engram_inhibitory  # What is NOT true (negations)
+engram_negation    # What is NOT true (negations)
 ```
 
 ## Configuration
@@ -204,7 +204,7 @@ engram/
 │       │   ├── fact.py         # Factual memory model
 │       │   ├── semantic.py     # Semantic memory model
 │       │   ├── procedural.py   # Procedural memory model
-│       │   └── inhibitory.py   # Inhibitory memory model (negations)
+│       │   └── negation.py      # Negation memory model
 │       ├── extraction/
 │       │   ├── __init__.py
 │       │   ├── patterns.py     # Deterministic extraction (regex)
@@ -271,14 +271,14 @@ mypy src/engram
 ruff check src/engram
 
 # Format
-black src/engram
+ruff format src/engram
 ```
 
 ### Pre-commit Checklist
 
 ```bash
 # Format
-black src/engram tests/
+ruff format src/engram tests/
 
 # Lint
 ruff check src/engram tests/

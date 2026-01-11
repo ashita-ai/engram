@@ -293,7 +293,7 @@ async with EngramService.create() as engram:
         print(verified.explanation)
 ```
 
-> **Coming Soon**: `consolidate()` and `decay()` background operations ([#22](https://github.com/ashita-ai/engram/issues/22))
+See [examples/](examples/) for working demos of consolidation, procedural synthesis, and advanced features.
 
 ## Design Principles
 
