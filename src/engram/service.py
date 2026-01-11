@@ -35,7 +35,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -44,6 +44,10 @@ from engram.embeddings import Embedder, get_embedder
 from engram.extraction import ExtractionPipeline, NegationDetector, default_pipeline
 from engram.models import AuditEntry, Episode, Fact, NegationFact, Staleness
 from engram.storage import EngramStorage
+
+if TYPE_CHECKING:
+    from engram.workflows.consolidation import ConsolidationResult
+    from engram.workflows.promotion import SynthesisResult
 
 
 def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
@@ -1053,6 +1057,101 @@ class EngramService:
             explanation=explanation,
         )
 
+    async def consolidate(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+    ) -> ConsolidationResult:
+        """Consolidate unsummarized episodes into a semantic summary.
+
+        Implements hierarchical compression: N episodes → 1 semantic memory.
+        Uses map-reduce for large batches that exceed token limits.
+
+        This method:
+        1. Fetches ALL unsummarized episodes for the user
+        2. Creates ONE coherent semantic summary via LLM
+        3. Marks episodes as summarized with link to the summary
+        4. Links new summary to similar existing memories
+
+        Based on Complementary Learning Systems (McClelland et al., 1995):
+        hippocampus (episodic) → neocortex (semantic) transfer with compression.
+
+        Args:
+            user_id: User ID for multi-tenancy isolation.
+            org_id: Optional organization ID for further isolation.
+
+        Returns:
+            ConsolidationResult with processing statistics:
+            - episodes_processed: Number of episodes summarized
+            - semantic_memories_created: Number of summaries created (typically 1)
+            - links_created: Number of memory links built
+            - compression_ratio: Ratio of input episodes to output memories
+
+        Example:
+            ```python
+            # Consolidate all unsummarized episodes
+            result = await engram.consolidate(user_id="u1")
+            print(f"{result.episodes_processed} episodes → {result.semantic_memories_created} summary")
+            print(f"Compression ratio: {result.compression_ratio:.1f}:1")
+            ```
+        """
+        from engram.workflows.consolidation import run_consolidation
+
+        return await run_consolidation(
+            storage=self.storage,
+            embedder=self.embedder,
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+    async def create_procedural(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+    ) -> SynthesisResult:
+        """Synthesize a procedural memory from all semantic memories.
+
+        Creates or updates ONE procedural memory that captures the user's
+        behavioral patterns, preferences, and communication style.
+
+        This method:
+        1. Fetches ALL semantic memories for the user
+        2. Uses LLM to synthesize a behavioral profile
+        3. Creates or replaces the user's procedural memory
+        4. Links procedural to all source semantic IDs
+
+        Design decision: ONE procedural per user (replaces existing).
+
+        Args:
+            user_id: User ID for multi-tenancy isolation.
+            org_id: Optional organization ID for further isolation.
+
+        Returns:
+            SynthesisResult with processing statistics:
+            - semantics_analyzed: Number of semantic memories analyzed
+            - procedural_created: True if new procedural was created
+            - procedural_updated: True if existing procedural was updated
+            - procedural_id: ID of the created/updated procedural
+
+        Example:
+            ```python
+            # Create/update the user's behavioral profile
+            result = await engram.create_procedural(user_id="u1")
+            if result.procedural_created:
+                print(f"Created procedural: {result.procedural_id}")
+            elif result.procedural_updated:
+                print(f"Updated procedural: {result.procedural_id}")
+            ```
+        """
+        from engram.workflows.promotion import run_synthesis
+
+        return await run_synthesis(
+            storage=self.storage,
+            embedder=self.embedder,
+            user_id=user_id,
+            org_id=org_id,
+        )
+
     async def _enrich_with_sources(
         self,
         results: list[RecallResult],
@@ -1309,12 +1408,11 @@ class EngramService:
                 embedder=self.embedder,
                 user_id=user_id,
                 org_id=org_id,
-                batch_size=5,  # Small batch for immediate processing
             )
             if result.semantic_memories_created > 0:
                 logger.info(
-                    f"High-importance consolidation: {result.semantic_memories_created} "
-                    f"semantic memories created, {result.links_created} links"
+                    f"High-importance consolidation: {result.episodes_processed} episodes → "
+                    f"{result.semantic_memories_created} summary ({result.compression_ratio:.1f}:1)"
                 )
         except Exception as e:
             # Log but don't fail the encode operation

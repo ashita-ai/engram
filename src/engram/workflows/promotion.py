@@ -1,15 +1,16 @@
-"""Promotion workflow for promoting memories through the hierarchy.
+"""Procedural synthesis workflow for creating behavioral profiles.
 
-This workflow runs during decay to:
-1. Find semantic memories with high consolidation strength
-2. Detect behavioral patterns suitable for procedural memory
-3. Promote patterns to procedural memories
+This workflow synthesizes ALL semantic memories into ONE procedural memory
+per user. The procedural memory captures behavioral patterns and preferences
+that can guide future interactions.
 
-Buffer promotion hierarchy:
-    Working (volatile) → Episodic → Semantic → Procedural
+Based on the hierarchical consolidation model:
+    Episodic → Semantic (summaries) → Procedural (behavioral synthesis)
 
-Inspired by Cognitive Workspace research on hierarchical cognitive buffers
-with selective consolidation (arxiv.org/abs/2508.13171).
+Design decisions (from PLAN-consolidation-redesign.md):
+- ONE procedural memory per user (replaces existing, doesn't accumulate)
+- Synthesized from ALL semantic memories
+- Called explicitly, not automatically
 """
 
 from __future__ import annotations
@@ -21,132 +22,134 @@ from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from engram.embeddings import Embedder
-    from engram.models import SemanticMemory
+    from engram.models import ProceduralMemory, SemanticMemory
     from engram.storage import EngramStorage
 
 logger = logging.getLogger(__name__)
 
 
-# Keywords that indicate behavioral patterns suitable for procedural memory
-BEHAVIORAL_PATTERNS = [
-    "prefers",
-    "preference",
-    "always",
-    "usually",
-    "tends to",
-    "likes to",
-    "wants",
-    "expects",
-    "style",
-    "habit",
-    "pattern",
-]
+class SynthesisOutput(BaseModel):
+    """Structured output from the procedural synthesis LLM agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    behavioral_profile: str = Field(
+        description="Coherent description of behavioral patterns (3-6 sentences)"
+    )
+    communication_style: str = Field(
+        default="",
+        description="How the user prefers to communicate",
+    )
+    technical_preferences: list[str] = Field(
+        default_factory=list,
+        description="Technical tools, languages, frameworks preferred",
+    )
+    work_patterns: list[str] = Field(
+        default_factory=list,
+        description="How the user approaches problems",
+    )
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="Key terms for retrieval (5-10 words)",
+    )
 
 
-class PromotionResult(BaseModel):
-    """Result of a promotion workflow run.
+class SynthesisResult(BaseModel):
+    """Result of a procedural synthesis run.
 
     Attributes:
-        memories_analyzed: Number of semantic memories analyzed.
-        procedural_created: Number of procedural memories created.
-        patterns_detected: List of pattern descriptions that were promoted.
+        semantics_analyzed: Number of semantic memories analyzed.
+        procedural_created: Whether a new procedural memory was created.
+        procedural_updated: Whether an existing procedural was replaced.
+        procedural_id: ID of the created/updated procedural memory.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    memories_analyzed: int = Field(ge=0)
-    procedural_created: int = Field(ge=0)
-    patterns_detected: list[str] = Field(default_factory=list)
+    semantics_analyzed: int = Field(ge=0)
+    procedural_created: bool = Field(default=False)
+    procedural_updated: bool = Field(default=False)
+    procedural_id: str | None = Field(default=None)
 
 
-def _is_behavioral_pattern(content: str) -> bool:
-    """Check if content describes a behavioral pattern.
-
-    Args:
-        content: Memory content to check.
-
-    Returns:
-        True if content appears to describe a behavioral pattern.
-    """
-    content_lower = content.lower()
-    return any(pattern in content_lower for pattern in BEHAVIORAL_PATTERNS)
-
-
-def _should_promote_to_procedural(memory: SemanticMemory) -> bool:
-    """Determine if a semantic memory should be promoted to procedural.
-
-    Promotion criteria:
-    - High consolidation strength (>= 0.5) - well-established
-    - Multiple consolidation passes (>= 2) - stable over time
-    - High confidence (>= 0.7) - reliable information
-    - Contains behavioral pattern keywords
+def _format_semantics_for_llm(semantics: list[SemanticMemory]) -> str:
+    """Format semantic memories for LLM synthesis.
 
     Args:
-        memory: SemanticMemory to evaluate.
+        semantics: List of semantic memories to synthesize.
 
     Returns:
-        True if memory should be promoted.
+        Formatted text for LLM input.
     """
-    # Must have high consolidation strength (repeatedly reinforced)
-    if memory.consolidation_strength < 0.5:
-        return False
-
-    # Must have gone through multiple consolidation passes
-    if memory.consolidation_passes < 2:
-        return False
-
-    # Must have reasonable confidence
-    if memory.confidence.value < 0.7:
-        return False
-
-    # Must describe a behavioral pattern
-    return _is_behavioral_pattern(memory.content)
+    lines = ["# Semantic Memories to Synthesize\n"]
+    for i, sem in enumerate(semantics, 1):
+        lines.append(f"## Memory {i}")
+        lines.append(sem.content)
+        if sem.keywords:
+            lines.append(f"Keywords: {', '.join(sem.keywords)}")
+        if sem.context:
+            lines.append(f"Context: {sem.context}")
+        lines.append("")
+    return "\n".join(lines)
 
 
-def _extract_trigger_context(content: str) -> str:
-    """Extract the trigger context from a behavioral pattern.
+async def _synthesize_behavioral_profile(
+    semantics: list[SemanticMemory],
+) -> SynthesisOutput:
+    """Synthesize behavioral profile from semantic memories using LLM.
 
     Args:
-        content: The behavioral pattern content.
+        semantics: Semantic memories to synthesize.
 
     Returns:
-        A brief trigger context description.
+        SynthesisOutput with behavioral profile.
     """
-    content_lower = content.lower()
+    from pydantic_ai import Agent
 
-    # Try to identify what triggers this pattern
-    if "when" in content_lower:
-        # Extract context after "when"
-        idx = content_lower.find("when")
-        return content[idx:].strip()
+    from engram.config import settings
 
-    if "for" in content_lower:
-        # "prefers X for Y"
-        idx = content_lower.find("for")
-        return content[idx:].strip()
+    formatted_text = _format_semantics_for_llm(semantics)
 
-    if "in" in content_lower:
-        # "always X in Y context"
-        idx = content_lower.find("in")
-        return content[idx:].strip()
+    synthesis_prompt = """You are analyzing semantic memory summaries to create a behavioral profile.
 
-    # Default: general context
-    return "general interaction"
+From these summaries, identify and describe:
+- Communication preferences (tone, detail level, format they prefer)
+- Technical preferences (languages, tools, frameworks they use)
+- Work patterns (how they approach problems, what they prioritize)
+- Personal context (role, goals, constraints)
+
+Create a coherent behavioral profile that can guide future interactions.
+Write in third person ("The user prefers...", "They tend to...").
+
+Format as a description, not a bulleted list.
+Only include patterns that appear across multiple summaries or are explicitly stated."""
+
+    agent: Agent[None, SynthesisOutput] = Agent(
+        settings.consolidation_model,
+        output_type=SynthesisOutput,
+        instructions=synthesis_prompt,
+    )
+
+    result = await agent.run(formatted_text)
+    return result.output
 
 
-async def run_promotion(
+async def run_synthesis(
     storage: EngramStorage,
     embedder: Embedder,
     user_id: str,
     org_id: str | None = None,
-) -> PromotionResult:
-    """Run the promotion workflow.
+) -> SynthesisResult:
+    """Run procedural synthesis workflow.
+
+    Synthesizes ALL semantic memories into ONE procedural memory.
+    If a procedural memory already exists for the user, it is replaced.
 
     This workflow:
-    1. Fetches semantic memories with high consolidation strength
-    2. Identifies behavioral patterns
-    3. Creates procedural memories from patterns
-    4. Links new procedural memories to source semantics
+    1. Fetches ALL semantic memories for the user
+    2. Uses LLM to synthesize behavioral patterns
+    3. Creates/replaces ONE procedural memory
+    4. Links procedural to all source semantic IDs
 
     Args:
         storage: EngramStorage instance.
@@ -155,11 +158,11 @@ async def run_promotion(
         org_id: Optional organization ID.
 
     Returns:
-        PromotionResult with processing statistics.
+        SynthesisResult with processing statistics.
     """
     from engram.models import ProceduralMemory
 
-    # 1. Fetch semantic memories
+    # 1. Fetch ALL semantic memories
     semantics = await storage.list_semantic_memories(
         user_id=user_id,
         org_id=org_id,
@@ -167,110 +170,133 @@ async def run_promotion(
     )
 
     if not semantics:
-        logger.info("No semantic memories found for promotion")
-        return PromotionResult(
-            memories_analyzed=0,
-            procedural_created=0,
+        logger.info("No semantic memories found for synthesis")
+        return SynthesisResult(
+            semantics_analyzed=0,
+            procedural_created=False,
+            procedural_updated=False,
         )
 
-    logger.info(f"Analyzing {len(semantics)} semantic memories for promotion")
+    logger.info(f"Synthesizing behavioral profile from {len(semantics)} semantic memories")
 
-    # 2. Check existing procedural memories to avoid duplicates
-    existing_procedurals = await _get_existing_procedural_contents(storage, user_id, org_id)
+    # 2. Check for existing procedural memory
+    existing_procedurals = await storage.list_procedural_memories(user_id, org_id)
+    existing_procedural: ProceduralMemory | None = None
+    if existing_procedurals:
+        existing_procedural = existing_procedurals[0]  # There should be at most one
+        logger.info(f"Found existing procedural memory: {existing_procedural.id}")
 
-    promoted = 0
-    patterns: list[str] = []
+    # 3. Synthesize behavioral profile via LLM
+    synthesis_output = await _synthesize_behavioral_profile(semantics)
 
-    for memory in semantics:
-        # 3. Check if should be promoted
-        if not _should_promote_to_procedural(memory):
-            continue
+    # 4. Build the procedural content
+    content_parts = [synthesis_output.behavioral_profile]
 
-        # 4. Check for duplicates
-        if _is_duplicate_pattern(memory.content, existing_procedurals):
-            logger.debug(f"Skipping duplicate pattern: {memory.content[:50]}...")
-            continue
+    if synthesis_output.communication_style:
+        content_parts.append(f"\nCommunication style: {synthesis_output.communication_style}")
 
-        # 5. Create procedural memory
-        embedding = await embedder.embed(memory.content)
+    if synthesis_output.technical_preferences:
+        content_parts.append(
+            f"\nTechnical preferences: {', '.join(synthesis_output.technical_preferences)}"
+        )
 
+    if synthesis_output.work_patterns:
+        content_parts.append(f"\nWork patterns: {', '.join(synthesis_output.work_patterns)}")
+
+    full_content = "\n".join(content_parts)
+
+    # 5. Collect all source episode IDs from semantics (deduplicated, order preserved)
+    all_source_episode_ids: list[str] = []
+    for sem in semantics:
+        all_source_episode_ids.extend(sem.source_episode_ids)
+    seen: set[str] = set()
+    unique_episode_ids: list[str] = []
+    for eid in all_source_episode_ids:
+        if eid not in seen:
+            seen.add(eid)
+            unique_episode_ids.append(eid)
+
+    # 6. Create embedding for the behavioral profile
+    embedding = await embedder.embed(full_content)
+
+    # 7. Create or update procedural memory
+    source_semantic_ids = [sem.id for sem in semantics]
+
+    if existing_procedural:
+        # Update existing procedural memory
+        existing_procedural.content = full_content
+        existing_procedural.source_episode_ids = unique_episode_ids
+        existing_procedural.source_semantic_ids = source_semantic_ids
+        existing_procedural.embedding = embedding
+        existing_procedural.reinforce()  # Reinforce through synthesis
+
+        await storage.update_procedural_memory(existing_procedural)
+        procedural_id = existing_procedural.id
+        logger.info(f"Updated procedural memory: {procedural_id}")
+
+        return SynthesisResult(
+            semantics_analyzed=len(semantics),
+            procedural_created=False,
+            procedural_updated=True,
+            procedural_id=procedural_id,
+        )
+    else:
+        # Create new procedural memory
         procedural = ProceduralMemory(
-            content=memory.content,
-            trigger_context=_extract_trigger_context(memory.content),
-            source_episode_ids=memory.source_episode_ids,
-            related_ids=[memory.id],  # Link back to source semantic
+            content=full_content,
+            trigger_context="general interaction",
+            source_episode_ids=unique_episode_ids,
+            source_semantic_ids=source_semantic_ids,
             user_id=user_id,
             org_id=org_id,
             embedding=embedding,
         )
-        procedural.confidence.value = memory.confidence.value
 
         await storage.store_procedural(procedural)
-        promoted += 1
-        patterns.append(memory.content)
-        existing_procedurals.add(memory.content.lower())
+        logger.info(f"Created procedural memory: {procedural.id}")
 
-        logger.info(f"Promoted to procedural: {memory.content[:50]}...")
+        return SynthesisResult(
+            semantics_analyzed=len(semantics),
+            procedural_created=True,
+            procedural_updated=False,
+            procedural_id=procedural.id,
+        )
 
-        # 6. Add link from semantic to procedural
-        memory.add_link(procedural.id)
-        await storage.update_semantic_memory(memory)
 
-    logger.info(
-        f"Promotion complete: {promoted} procedural memories created from {len(semantics)} analyzed"
-    )
+# Legacy exports for backwards compatibility
+class PromotionResult(BaseModel):
+    """Legacy result class for backwards compatibility."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    memories_analyzed: int = Field(ge=0)
+    procedural_created: int = Field(ge=0)
+    patterns_detected: list[str] = Field(default_factory=list)
+
+
+async def run_promotion(
+    storage: EngramStorage,
+    embedder: Embedder,
+    user_id: str,
+    org_id: str | None = None,
+) -> PromotionResult:
+    """Legacy function - calls run_synthesis internally.
+
+    Deprecated: Use run_synthesis() instead.
+    """
+    result = await run_synthesis(storage, embedder, user_id, org_id)
 
     return PromotionResult(
-        memories_analyzed=len(semantics),
-        procedural_created=promoted,
-        patterns_detected=patterns,
+        memories_analyzed=result.semantics_analyzed,
+        procedural_created=1 if result.procedural_created or result.procedural_updated else 0,
+        patterns_detected=[],
     )
-
-
-async def _get_existing_procedural_contents(
-    storage: EngramStorage,
-    user_id: str,
-    org_id: str | None,
-) -> set[str]:
-    """Get content of existing procedural memories for deduplication.
-
-    Args:
-        storage: Storage instance.
-        user_id: User ID.
-        org_id: Optional org ID.
-
-    Returns:
-        Set of lowercase content strings.
-    """
-    procedurals = await storage.list_procedural_memories(user_id, org_id)
-    return {p.content.lower() for p in procedurals}
-
-
-def _is_duplicate_pattern(content: str, existing: set[str]) -> bool:
-    """Check if content is a duplicate of existing patterns.
-
-    Args:
-        content: New pattern content.
-        existing: Set of existing pattern contents (lowercase).
-
-    Returns:
-        True if duplicate found.
-    """
-    content_lower = content.lower()
-
-    # Exact match
-    if content_lower in existing:
-        return True
-
-    # Substring match (new is subset of existing or vice versa)
-    for existing_content in existing:
-        if content_lower in existing_content or existing_content in content_lower:
-            return True
-
-    return False
 
 
 __all__ = [
     "PromotionResult",
+    "SynthesisOutput",
+    "SynthesisResult",
     "run_promotion",
+    "run_synthesis",
 ]

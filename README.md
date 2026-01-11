@@ -114,6 +114,54 @@ flowchart LR
 | **Procedural** | Variable | LLM inference | Behavioral preferences |
 | **Negation** | Variable | Negation detection | What is NOT true |
 
+## Hierarchical Memory Consolidation
+
+Engram implements **hierarchical compression** based on cognitive science research ([Complementary Learning Systems](https://www.sciencedirect.com/science/article/pii/S1364661318302821)):
+
+```
+EPISODIC (raw, immutable, automatic)
+    │
+    ├──→ FACTS/NEGATIONS (pattern-extracted, high confidence)
+    │
+    └──→ SEMANTIC (LLM summary of N episodes → 1 memory)
+              │
+              └──→ PROCEDURAL (LLM synthesis → behavioral patterns)
+```
+
+### The Compression Pipeline
+
+| Stage | Input | Output | Compression |
+|-------|-------|--------|-------------|
+| **Encode** | 1 message | 1 episode + N facts | None (ground truth) |
+| **Consolidate** | N episodes | 1 semantic summary | N:1 |
+| **Synthesize** | All semantics | 1 procedural memory | ∞:1 |
+
+### Bidirectional Traceability
+
+Every derived memory links back to its sources:
+
+```python
+# Semantic memory → source episodes
+semantic.source_episode_ids  # ["ep_001", "ep_002", "ep_003"]
+
+# Episode → semantic memory it was summarized into
+episode.summarized_into  # "sem_abc123"
+
+# Procedural memory → source semantics
+procedural.source_semantic_ids  # ["sem_001", "sem_002"]
+```
+
+This enables full audit trails: any insight can be traced back to the original conversation.
+
+### Why Compression Matters
+
+| Without Compression | With Compression |
+|---------------------|------------------|
+| 1000 episodes = 1000 searches | 1000 episodes → 50 summaries |
+| Retrieval finds noise | Retrieval finds distilled knowledge |
+| Token cost grows linearly | Token cost stays bounded |
+| No cross-session patterns | Procedural captures behavior |
+
 ## Semantic Search Everywhere
 
 **Every memory type is semantically searchable.** When you store or extract anything, Engram:

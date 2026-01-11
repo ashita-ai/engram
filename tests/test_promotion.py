@@ -1,34 +1,34 @@
-"""Tests for promotion workflow."""
+"""Tests for procedural synthesis workflow."""
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from engram.workflows.promotion import (
     PromotionResult,
-    _extract_trigger_context,
-    _is_behavioral_pattern,
-    _is_duplicate_pattern,
-    _should_promote_to_procedural,
+    SynthesisOutput,
+    SynthesisResult,
+    _format_semantics_for_llm,
     run_promotion,
+    run_synthesis,
 )
 
 
 class TestPromotionResult:
-    """Tests for PromotionResult model."""
+    """Tests for PromotionResult model (legacy)."""
 
     def test_create_result(self) -> None:
         """Test creating promotion result."""
         result = PromotionResult(
             memories_analyzed=10,
-            procedural_created=3,
-            patterns_detected=["Pattern A", "Pattern B", "Pattern C"],
+            procedural_created=1,
+            patterns_detected=["Pattern A"],
         )
         assert result.memories_analyzed == 10
-        assert result.procedural_created == 3
-        assert len(result.patterns_detected) == 3
+        assert result.procedural_created == 1
+        assert len(result.patterns_detected) == 1
 
     def test_create_empty_result(self) -> None:
         """Test creating empty result."""
@@ -49,169 +49,285 @@ class TestPromotionResult:
             )
 
 
-class TestIsBehavioralPattern:
-    """Tests for _is_behavioral_pattern function."""
+class TestSynthesisResult:
+    """Tests for SynthesisResult model."""
 
-    def test_detects_prefers(self) -> None:
-        """Test detection of 'prefers' keyword."""
-        assert _is_behavioral_pattern("User prefers Python")
-        assert _is_behavioral_pattern("The user PREFERS dark mode")
+    def test_create_result(self) -> None:
+        """Test creating synthesis result."""
+        result = SynthesisResult(
+            semantics_analyzed=5,
+            procedural_created=True,
+            procedural_updated=False,
+            procedural_id="proc_123",
+        )
+        assert result.semantics_analyzed == 5
+        assert result.procedural_created is True
+        assert result.procedural_updated is False
+        assert result.procedural_id == "proc_123"
 
-    def test_detects_always(self) -> None:
-        """Test detection of 'always' keyword."""
-        assert _is_behavioral_pattern("User always asks for examples")
-
-    def test_detects_tends_to(self) -> None:
-        """Test detection of 'tends to' keyword."""
-        assert _is_behavioral_pattern("User tends to work late")
-
-    def test_detects_likes_to(self) -> None:
-        """Test detection of 'likes to' keyword."""
-        assert _is_behavioral_pattern("User likes to use TypeScript")
-
-    def test_detects_habit(self) -> None:
-        """Test detection of 'habit' keyword."""
-        assert _is_behavioral_pattern("User has a habit of asking follow-up questions")
-
-    def test_non_behavioral_content(self) -> None:
-        """Test non-behavioral content returns False."""
-        assert not _is_behavioral_pattern("User's email is test@example.com")
-        assert not _is_behavioral_pattern("Meeting scheduled for Monday")
-        assert not _is_behavioral_pattern("PostgreSQL is a relational database")
+    def test_create_empty_result(self) -> None:
+        """Test creating empty result."""
+        result = SynthesisResult(
+            semantics_analyzed=0,
+            procedural_created=False,
+            procedural_updated=False,
+        )
+        assert result.semantics_analyzed == 0
+        assert result.procedural_created is False
+        assert result.procedural_id is None
 
 
-class TestShouldPromoteToProcedural:
-    """Tests for _should_promote_to_procedural function."""
+class TestSynthesisOutput:
+    """Tests for SynthesisOutput model."""
 
-    def test_promotes_high_selectivity_behavioral_pattern(self) -> None:
-        """Test promotion of well-consolidated behavioral pattern."""
+    def test_create_output(self) -> None:
+        """Test creating synthesis output."""
+        output = SynthesisOutput(
+            behavioral_profile="The user prefers Python and detailed explanations.",
+            communication_style="Concise and technical",
+            technical_preferences=["Python", "PostgreSQL"],
+            work_patterns=["Asks clarifying questions"],
+            keywords=["python", "technical"],
+        )
+        assert "Python" in output.behavioral_profile
+        assert output.communication_style == "Concise and technical"
+        assert "Python" in output.technical_preferences
+        assert len(output.work_patterns) == 1
+
+    def test_create_minimal_output(self) -> None:
+        """Test creating output with only required field."""
+        output = SynthesisOutput(
+            behavioral_profile="The user is a developer.",
+        )
+        assert output.behavioral_profile == "The user is a developer."
+        assert output.communication_style == ""
+        assert output.technical_preferences == []
+        assert output.work_patterns == []
+
+
+class TestFormatSemanticsForLLM:
+    """Tests for _format_semantics_for_llm function."""
+
+    def test_format_single_memory(self) -> None:
+        """Test formatting a single semantic memory."""
         from engram.models import SemanticMemory
 
         memory = SemanticMemory(
-            content="User prefers concise responses",
+            content="User prefers Python",
             user_id="test_user",
             embedding=[0.1] * 384,
         )
-        memory.consolidation_strength = 0.6
-        memory.consolidation_passes = 3
-        memory.confidence.value = 0.8
+        memory.keywords = ["python", "preference"]
+        memory.context = "programming"
 
-        assert _should_promote_to_procedural(memory)
+        result = _format_semantics_for_llm([memory])
 
-    def test_rejects_low_selectivity(self) -> None:
-        """Test rejection when selectivity too low."""
+        assert "## Memory 1" in result
+        assert "User prefers Python" in result
+        assert "python" in result
+        assert "programming" in result
+
+    def test_format_multiple_memories(self) -> None:
+        """Test formatting multiple semantic memories."""
         from engram.models import SemanticMemory
 
-        memory = SemanticMemory(
-            content="User prefers concise responses",
-            user_id="test_user",
-            embedding=[0.1] * 384,
-        )
-        memory.consolidation_strength = 0.3  # Too low
-        memory.consolidation_passes = 3
-        memory.confidence.value = 0.8
+        memories = [
+            SemanticMemory(
+                content="User prefers Python",
+                user_id="test_user",
+                embedding=[0.1] * 384,
+            ),
+            SemanticMemory(
+                content="User works at TechCorp",
+                user_id="test_user",
+                embedding=[0.2] * 384,
+            ),
+        ]
 
-        assert not _should_promote_to_procedural(memory)
+        result = _format_semantics_for_llm(memories)
 
-    def test_rejects_few_consolidation_passes(self) -> None:
-        """Test rejection when too few consolidation passes."""
-        from engram.models import SemanticMemory
+        assert "## Memory 1" in result
+        assert "## Memory 2" in result
+        assert "User prefers Python" in result
+        assert "User works at TechCorp" in result
 
-        memory = SemanticMemory(
-            content="User prefers concise responses",
-            user_id="test_user",
-            embedding=[0.1] * 384,
-        )
-        memory.consolidation_strength = 0.6
-        memory.consolidation_passes = 1  # Too few
-        memory.confidence.value = 0.8
-
-        assert not _should_promote_to_procedural(memory)
-
-    def test_rejects_low_confidence(self) -> None:
-        """Test rejection when confidence too low."""
-        from engram.models import SemanticMemory
-
-        memory = SemanticMemory(
-            content="User prefers concise responses",
-            user_id="test_user",
-            embedding=[0.1] * 384,
-        )
-        memory.consolidation_strength = 0.6
-        memory.consolidation_passes = 3
-        memory.confidence.value = 0.5  # Too low
-
-        assert not _should_promote_to_procedural(memory)
-
-    def test_rejects_non_behavioral(self) -> None:
-        """Test rejection when content is not behavioral."""
-        from engram.models import SemanticMemory
-
-        memory = SemanticMemory(
-            content="User's email is test@example.com",  # Not behavioral
-            user_id="test_user",
-            embedding=[0.1] * 384,
-        )
-        memory.consolidation_strength = 0.6
-        memory.consolidation_passes = 3
-        memory.confidence.value = 0.8
-
-        assert not _should_promote_to_procedural(memory)
+    def test_format_empty_list(self) -> None:
+        """Test formatting empty list."""
+        result = _format_semantics_for_llm([])
+        assert "# Semantic Memories to Synthesize" in result
 
 
-class TestExtractTriggerContext:
-    """Tests for _extract_trigger_context function."""
-
-    def test_extracts_when_clause(self) -> None:
-        """Test extraction of 'when' context."""
-        result = _extract_trigger_context("User prefers Python when writing scripts")
-        assert "when writing scripts" in result
-
-    def test_extracts_for_clause(self) -> None:
-        """Test extraction of 'for' context."""
-        result = _extract_trigger_context("User prefers TypeScript for frontend")
-        assert "for frontend" in result
-
-    def test_extracts_in_clause(self) -> None:
-        """Test extraction of 'in' context."""
-        result = _extract_trigger_context("User always uses dark mode in the IDE")
-        assert "in the IDE" in result
-
-    def test_default_context(self) -> None:
-        """Test default context when no clause found."""
-        result = _extract_trigger_context("User prefers concise responses")
-        assert result == "general interaction"
-
-
-class TestIsDuplicatePattern:
-    """Tests for _is_duplicate_pattern function."""
-
-    def test_detects_exact_duplicate(self) -> None:
-        """Test detection of exact duplicate."""
-        existing = {"user prefers python"}
-        assert _is_duplicate_pattern("User prefers Python", existing)
-
-    def test_detects_substring_duplicate(self) -> None:
-        """Test detection of substring duplicate."""
-        existing = {"user prefers python for scripting"}
-        assert _is_duplicate_pattern("prefers python", existing)
-
-    def test_no_duplicate(self) -> None:
-        """Test no duplicate found."""
-        existing = {"user prefers java"}
-        assert not _is_duplicate_pattern("User prefers Python", existing)
-
-    def test_empty_existing(self) -> None:
-        """Test empty existing set."""
-        assert not _is_duplicate_pattern("any content", set())
-
-
-class TestRunPromotion:
-    """Tests for run_promotion workflow."""
+class TestRunSynthesis:
+    """Tests for run_synthesis workflow."""
 
     @pytest.mark.asyncio
-    async def test_no_memories_returns_empty_result(self) -> None:
-        """Test that empty memory list returns zero counts."""
+    async def test_no_semantics_returns_empty_result(self) -> None:
+        """Test that empty semantic list returns zero counts."""
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+
+        mock_embedder = AsyncMock()
+
+        result = await run_synthesis(
+            storage=mock_storage,
+            embedder=mock_embedder,
+            user_id="test_user",
+        )
+
+        assert result.semantics_analyzed == 0
+        assert result.procedural_created is False
+        assert result.procedural_updated is False
+
+    @pytest.mark.asyncio
+    async def test_creates_procedural_from_semantics(self) -> None:
+        """Test creation of procedural memory from semantic memories."""
+        from engram.models import SemanticMemory
+
+        memories = [
+            SemanticMemory(
+                content="User prefers Python programming",
+                user_id="test_user",
+                embedding=[0.1] * 384,
+                source_episode_ids=["ep_001"],
+            ),
+            SemanticMemory(
+                content="User works as a backend developer",
+                user_id="test_user",
+                embedding=[0.2] * 384,
+                source_episode_ids=["ep_002"],
+            ),
+        ]
+
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=memories)
+        mock_storage.list_procedural_memories = AsyncMock(return_value=[])  # No existing
+        mock_storage.store_procedural = AsyncMock(return_value="proc_123")
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_synthesis = SynthesisOutput(
+            behavioral_profile="The user is a Python backend developer.",
+            communication_style="Technical",
+            technical_preferences=["Python"],
+        )
+
+        with patch(
+            "engram.workflows.promotion._synthesize_behavioral_profile",
+            return_value=mock_synthesis,
+        ):
+            result = await run_synthesis(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+            )
+
+        assert result.semantics_analyzed == 2
+        assert result.procedural_created is True
+        assert result.procedural_updated is False
+        mock_storage.store_procedural.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_updates_existing_procedural(self) -> None:
+        """Test update of existing procedural memory."""
+        from engram.models import ProceduralMemory, SemanticMemory
+
+        memories = [
+            SemanticMemory(
+                content="User prefers Python programming",
+                user_id="test_user",
+                embedding=[0.1] * 384,
+                source_episode_ids=["ep_001"],
+            ),
+        ]
+
+        existing_procedural = ProceduralMemory(
+            id="proc_existing",
+            content="Old profile",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=memories)
+        mock_storage.list_procedural_memories = AsyncMock(return_value=[existing_procedural])
+        mock_storage.update_procedural_memory = AsyncMock(return_value=True)
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_synthesis = SynthesisOutput(
+            behavioral_profile="Updated profile.",
+        )
+
+        with patch(
+            "engram.workflows.promotion._synthesize_behavioral_profile",
+            return_value=mock_synthesis,
+        ):
+            result = await run_synthesis(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+            )
+
+        assert result.semantics_analyzed == 1
+        assert result.procedural_created is False
+        assert result.procedural_updated is True
+        assert result.procedural_id == "proc_existing"
+        mock_storage.update_procedural_memory.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_collects_source_episode_ids(self) -> None:
+        """Test that source episode IDs are collected from all semantics."""
+        from engram.models import SemanticMemory
+
+        memories = [
+            SemanticMemory(
+                content="Memory 1",
+                user_id="test_user",
+                embedding=[0.1] * 384,
+                source_episode_ids=["ep_001", "ep_002"],
+            ),
+            SemanticMemory(
+                content="Memory 2",
+                user_id="test_user",
+                embedding=[0.2] * 384,
+                source_episode_ids=["ep_002", "ep_003"],  # ep_002 is duplicate
+            ),
+        ]
+
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=memories)
+        mock_storage.list_procedural_memories = AsyncMock(return_value=[])
+        mock_storage.store_procedural = AsyncMock(return_value="proc_123")
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_synthesis = SynthesisOutput(behavioral_profile="Profile.")
+
+        with patch(
+            "engram.workflows.promotion._synthesize_behavioral_profile",
+            return_value=mock_synthesis,
+        ):
+            await run_synthesis(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+            )
+
+        # Check the procedural was created with deduplicated episode IDs
+        call_args = mock_storage.store_procedural.call_args
+        procedural = call_args[0][0]
+        assert set(procedural.source_episode_ids) == {"ep_001", "ep_002", "ep_003"}
+
+
+class TestRunPromotionLegacy:
+    """Tests for legacy run_promotion wrapper."""
+
+    @pytest.mark.asyncio
+    async def test_returns_promotion_result(self) -> None:
+        """Test that run_promotion returns PromotionResult."""
         mock_storage = AsyncMock()
         mock_storage.list_semantic_memories = AsyncMock(return_value=[])
 
@@ -223,117 +339,43 @@ class TestRunPromotion:
             user_id="test_user",
         )
 
+        assert isinstance(result, PromotionResult)
         assert result.memories_analyzed == 0
         assert result.procedural_created == 0
 
     @pytest.mark.asyncio
-    async def test_promotes_behavioral_pattern(self) -> None:
-        """Test promotion of behavioral pattern to procedural memory."""
+    async def test_converts_synthesis_result(self) -> None:
+        """Test conversion from SynthesisResult to PromotionResult."""
         from engram.models import SemanticMemory
 
-        memory = SemanticMemory(
-            content="User prefers detailed code explanations",
-            user_id="test_user",
-            embedding=[0.1] * 384,
-        )
-        memory.consolidation_strength = 0.6
-        memory.consolidation_passes = 3
-        memory.confidence.value = 0.85
-
-        mock_storage = AsyncMock()
-        mock_storage.list_semantic_memories = AsyncMock(return_value=[memory])
-        mock_storage.store_procedural = AsyncMock(return_value="proc_123")
-        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
-
-        mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
-
-        result = await run_promotion(
-            storage=mock_storage,
-            embedder=mock_embedder,
-            user_id="test_user",
-        )
-
-        assert result.memories_analyzed == 1
-        assert result.procedural_created == 1
-        assert len(result.patterns_detected) == 1
-        mock_storage.store_procedural.assert_called_once()
-        mock_storage.update_semantic_memory.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_skips_non_promotable_memories(self) -> None:
-        """Test that non-promotable memories are skipped."""
-        from engram.models import SemanticMemory
-
-        # Non-behavioral memory
-        memory1 = SemanticMemory(
-            content="User's email is test@example.com",
-            user_id="test_user",
-            embedding=[0.1] * 384,
-        )
-        memory1.consolidation_strength = 0.6
-        memory1.consolidation_passes = 3
-        memory1.confidence.value = 0.85
-
-        # Low selectivity
-        memory2 = SemanticMemory(
-            content="User prefers Python",
-            user_id="test_user",
-            embedding=[0.1] * 384,
-        )
-        memory2.consolidation_strength = 0.2  # Too low
-        memory2.consolidation_passes = 3
-        memory2.confidence.value = 0.85
-
-        mock_storage = AsyncMock()
-        mock_storage.list_semantic_memories = AsyncMock(return_value=[memory1, memory2])
-
-        mock_embedder = AsyncMock()
-
-        result = await run_promotion(
-            storage=mock_storage,
-            embedder=mock_embedder,
-            user_id="test_user",
-        )
-
-        assert result.memories_analyzed == 2
-        assert result.procedural_created == 0
-
-    @pytest.mark.asyncio
-    async def test_promotes_multiple_patterns(self) -> None:
-        """Test promotion of multiple behavioral patterns."""
-        from engram.models import SemanticMemory
-
-        memories = []
-        for content in [
-            "User prefers Python for scripting",
-            "User always wants code examples",
-            "User tends to ask clarifying questions",
-        ]:
-            mem = SemanticMemory(
-                content=content,
+        memories = [
+            SemanticMemory(
+                content="User prefers Python",
                 user_id="test_user",
                 embedding=[0.1] * 384,
-            )
-            mem.consolidation_strength = 0.6
-            mem.consolidation_passes = 3
-            mem.confidence.value = 0.85
-            memories.append(mem)
+            ),
+        ]
 
         mock_storage = AsyncMock()
         mock_storage.list_semantic_memories = AsyncMock(return_value=memories)
+        mock_storage.list_procedural_memories = AsyncMock(return_value=[])
         mock_storage.store_procedural = AsyncMock(return_value="proc_123")
-        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
 
         mock_embedder = AsyncMock()
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
-        result = await run_promotion(
-            storage=mock_storage,
-            embedder=mock_embedder,
-            user_id="test_user",
-        )
+        mock_synthesis = SynthesisOutput(behavioral_profile="Profile.")
 
-        assert result.memories_analyzed == 3
-        assert result.procedural_created == 3
-        assert mock_storage.store_procedural.call_count == 3
+        with patch(
+            "engram.workflows.promotion._synthesize_behavioral_profile",
+            return_value=mock_synthesis,
+        ):
+            result = await run_promotion(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+            )
+
+        assert isinstance(result, PromotionResult)
+        assert result.memories_analyzed == 1
+        assert result.procedural_created == 1  # Created = 1
