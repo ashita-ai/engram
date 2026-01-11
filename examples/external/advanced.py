@@ -112,17 +112,19 @@ async def main() -> None:
         print(f"  Created {result.links_created} links")
 
         # =====================================================================
-        # 2. ALL 6 MEMORY TYPES
+        # 2. MEMORY TYPES
         # =====================================================================
-        print("\n\n2. QUERYING ALL MEMORY TYPES")
+        print("\n\n2. MEMORY TYPES")
         print("-" * 70)
+        print("  Engram stores 5 persistent memory types:\n")
 
-        all_types = ["episodic", "factual", "semantic", "procedural", "negation", "working"]
+        # Query persisted types only (skip working - it duplicates episodic)
+        persisted_types = ["episodic", "factual", "semantic", "procedural", "negation"]
 
         results = await engram.recall(
             query="Alex developer",
             user_id=user_id,
-            memory_types=all_types,
+            memory_types=persisted_types,
             limit=20,
         )
 
@@ -130,16 +132,22 @@ async def main() -> None:
         for r in results:
             type_counts[r.memory_type] = type_counts.get(r.memory_type, 0) + 1
 
-        print('  Query: "Alex developer"')
-        print(f"  Results by type: {type_counts}")
+        print(f'  Query: "Alex developer" → {type_counts}')
 
-        for memory_type in all_types:
+        for memory_type in persisted_types:
             type_results = [r for r in results if r.memory_type == memory_type]
             if type_results:
-                print(f"\n  [{memory_type.upper()}]")
+                desc = {
+                    "episodic": "raw conversations",
+                    "factual": "pattern-extracted",
+                    "semantic": "LLM-inferred",
+                    "procedural": "behavioral patterns",
+                    "negation": "what is NOT true",
+                }.get(memory_type, "")
+                print(f"\n  [{memory_type.upper()}] ({desc})")
                 for r in type_results[:2]:
                     conf = f" ({r.confidence:.0%})" if r.confidence else ""
-                    print(f"    {r.content[:60]}...{conf}")
+                    print(f"    {r.content[:55]}...{conf}")
 
         # =====================================================================
         # 3. NEGATION FILTERING
@@ -203,34 +211,43 @@ async def main() -> None:
         # =====================================================================
         print("\n\n4. MULTI-HOP REASONING")
         print("-" * 70)
-        print("  Follow links to discover connected memories:\n")
+        print("  Follow links to discover connected memories.\n")
 
         # Without link following
         results_no_links = await engram.recall(
             query="programming preferences",
             user_id=user_id,
+            memory_types=["semantic", "factual"],  # Types that have links
             follow_links=False,
-            limit=3,
+            limit=5,
         )
 
         # With link following
         results_with_links = await engram.recall(
             query="programming preferences",
             user_id=user_id,
+            memory_types=["semantic", "factual"],
             follow_links=True,
             max_hops=2,
             limit=10,
         )
 
         print(f"  Without follow_links: {len(results_no_links)} results")
-        print(f"  With follow_links (max_hops=2): {len(results_with_links)} results")
+        for r in results_no_links[:3]:
+            links = f" (links to {len(r.related_ids)})" if r.related_ids else ""
+            print(f"    {r.content[:50]}...{links}")
 
-        # Show linked memories
-        linked_results = [r for r in results_with_links if r.hop_distance > 0]
+        print(f"\n  With follow_links (max_hops=2): {len(results_with_links)} results")
+
+        # Show linked memories discovered via traversal
+        linked_results = [r for r in results_with_links if r.hop_distance and r.hop_distance > 0]
         if linked_results:
-            print(f"\n  Discovered via links ({len(linked_results)} memories):")
+            print("\n  Discovered via link traversal:")
             for r in linked_results[:3]:
-                print(f"    [hop={r.hop_distance}] {r.content[:50]}...")
+                print(f"    [hop {r.hop_distance}] {r.content[:50]}...")
+        else:
+            print("\n  (No additional memories discovered via links)")
+            print("  Links are created during consolidation when memories are related.")
 
         # =====================================================================
         # 5. RETRIEVAL-INDUCED FORGETTING (RIF)
@@ -302,48 +319,75 @@ async def main() -> None:
         # =====================================================================
         print("\n\n6. FRESHNESS FILTERING")
         print("-" * 70)
-        print("  Filter by consolidation status:\n")
+        print("  Filter memories by consolidation recency.\n")
+        print("  'fresh' = recently consolidated, 'stale' = needs re-consolidation\n")
 
-        # Best effort (default) - returns all
+        # Get all memories and show their staleness
         results_all = await engram.recall(
             query="Alex",
             user_id=user_id,
+            memory_types=["semantic", "factual"],  # These have staleness
             freshness="best_effort",
             limit=10,
         )
 
-        # Fresh only - only fully consolidated
-        results_fresh = await engram.recall(
+        # Count by staleness
+        fresh_mems = [r for r in results_all if r.staleness.value == "fresh"]
+        stale_mems = [r for r in results_all if r.staleness.value == "stale"]
+
+        print("  Query: 'Alex' (semantic/factual only)")
+        print(f"  Total: {len(results_all)} | Fresh: {len(fresh_mems)} | Stale: {len(stale_mems)}")
+
+        if fresh_mems:
+            print("\n  FRESH (recently consolidated):")
+            for r in fresh_mems[:2]:
+                print(f"    ✓ {r.content[:50]}...")
+
+        if stale_mems:
+            print("\n  STALE (needs re-consolidation):")
+            for r in stale_mems[:2]:
+                print(f"    ⚠ {r.content[:50]}...")
+
+        # Show fresh_only filtering
+        results_fresh_only = await engram.recall(
             query="Alex",
             user_id=user_id,
+            memory_types=["semantic", "factual"],
             freshness="fresh_only",
             limit=10,
         )
-
-        print(f"  freshness='best_effort': {len(results_all)} results")
-        print(f"  freshness='fresh_only': {len(results_fresh)} results")
-
-        # Count staleness
-        stale_count = sum(1 for r in results_all if r.staleness.value == "stale")
-        fresh_count = sum(1 for r in results_all if r.staleness.value == "fresh")
-        print(f"\n  Staleness breakdown: {fresh_count} fresh, {stale_count} stale")
+        print(f"\n  With freshness='fresh_only': {len(results_fresh_only)} results")
+        print("  (Filters out stale memories that may be outdated)")
 
         # =====================================================================
         # 7. SELECTIVITY FILTERING
         # =====================================================================
         print("\n\n7. SELECTIVITY FILTERING")
         print("-" * 70)
-        print("  Filter semantic memories by context-specificity:\n")
+        print("  Selectivity = how context-specific a memory is.")
+        print("  High selectivity = specific to one context (e.g., 'uses PostgreSQL')")
+        print("  Low selectivity = general/applies broadly (e.g., 'is a developer')\n")
 
-        for min_sel in [0.0, 0.3, 0.5]:
-            results = await engram.recall(
-                query="Alex preferences",
-                user_id=user_id,
-                memory_types=["semantic"],
-                min_selectivity=min_sel,
-                limit=10,
-            )
-            print(f"  min_selectivity={min_sel}: {len(results)} semantic memories")
+        # Get semantic memories and show their selectivity
+        sem_results = await engram.recall(
+            query="Alex preferences",
+            user_id=user_id,
+            memory_types=["semantic"],
+            min_selectivity=0.0,
+            limit=10,
+        )
+
+        print("  Semantic memories with selectivity scores:")
+        for r in sem_results[:4]:
+            sel = r.metadata.get("selectivity", 0.0)
+            print(f"    [{sel:.1f}] {r.content[:50]}...")
+
+        print("\n  Filtering by min_selectivity:")
+        for min_sel in [0.0, 0.2, 0.4]:
+            filtered = [r for r in sem_results if r.metadata.get("selectivity", 0) >= min_sel]
+            print(f"    min_selectivity={min_sel}: {len(filtered)} memories")
+
+        print("\n  Use case: Filter out generic facts when you need specific details.")
 
     print("\n" + "=" * 70)
     print("Advanced features demo complete!")
