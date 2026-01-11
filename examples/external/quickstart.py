@@ -238,28 +238,36 @@ async def main() -> None:
         # =====================================================================
         print("\n\n6. LINKED MEMORIES")
         print("-" * 70)
-        print("  Consolidation links related memories for multi-hop reasoning.\n")
+        print("  Consolidation creates links between related memories.\n")
 
-        # Query with follow_links to show connected memories
-        results_no_links = await engram.recall(
-            query="Python", user_id=user_id, follow_links=False, limit=3
+        # Check if any semantic memories have links (from consolidation above)
+        semantic_mems = await engram.recall(
+            query="user", user_id=user_id, memory_types=["semantic"], limit=10
         )
-        results_with_links = await engram.recall(
-            query="Python", user_id=user_id, follow_links=True, max_hops=2, limit=8
-        )
+        mems_with_links = [m for m in semantic_mems if m.related_ids]
 
-        print("  Query: 'Python'")
-        print(f"    Without follow_links: {len(results_no_links)} results")
-        print(f"    With follow_links:    {len(results_with_links)} results")
+        if mems_with_links:
+            print(f"  {len(mems_with_links)} semantic memories have links:")
+            for m in mems_with_links[:3]:
+                print(f"    • {m.content[:45]}...")
+                print(f"      └─ linked to: {m.related_ids[:2]}")
 
-        # Show memories discovered via links
-        linked = [r for r in results_with_links if r.hop_distance > 0]
-        if linked:
-            print(f"\n  Discovered via links ({len(linked)} memories):")
-            for r in linked[:3]:
-                print(f"    [hop {r.hop_distance}] {r.content[:50]}...")
+            # Demonstrate follow_links traversal
+            print("\n  Multi-hop traversal with follow_links=True:")
+            results_with_hops = await engram.recall(
+                query="Jordan", user_id=user_id, follow_links=True, max_hops=2, limit=10
+            )
+            hopped = [r for r in results_with_hops if r.hop_distance > 0]
+            if hopped:
+                print(f"    Found {len(hopped)} memories via link traversal:")
+                for r in hopped[:2]:
+                    print(f"      [hop {r.hop_distance}] {r.content[:45]}...")
+            else:
+                print("    (No additional memories found via traversal)")
         else:
-            print("\n  (Links accumulate over multiple consolidation passes)")
+            print("  No links created in this run.")
+            print("  Links are created when the LLM identifies related facts.")
+            print("  They typically grow over multiple consolidation passes.")
 
         # =====================================================================
         # 7. SOURCE VERIFICATION
