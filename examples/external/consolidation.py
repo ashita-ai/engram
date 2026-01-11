@@ -167,7 +167,8 @@ async def main() -> None:
         # =====================================================================
         print("\n\n3. RUNNING LLM CONSOLIDATION")
         print("-" * 70)
-        print("  The LLM reads episodes and extracts semantic knowledge.\n")
+        print("  The LLM reads episodes and extracts semantic knowledge.")
+        print("  (Conservative extraction - prefers precision over recall)\n")
 
         result = await run_consolidation(
             storage=engram.storage,
@@ -179,6 +180,10 @@ async def main() -> None:
         print(f"  Semantic memories created:{result.semantic_memories_created}")
         print(f"  Existing strengthened:    {result.memories_strengthened}")
         print(f"  Links created:            {result.links_created}")
+
+        if result.semantic_memories_created < 3:
+            print("\n  Note: LLM extraction is intentionally conservative.")
+            print("  Pattern-extracted facts (email) are more reliable than LLM inference.")
 
         # =====================================================================
         # 4. WHAT'S STORED AFTER CONSOLIDATION

@@ -146,58 +146,57 @@ async def main() -> None:
         # =====================================================================
         print("\n\n3. NEGATION FILTERING")
         print("-" * 70)
-        print("  Negations automatically filter out contradicted information:\n")
+        print("  Negations track what is NOT true and filter contradicted info.\n")
 
-        # Query for MongoDB directly - negation filter should remove it
-        print('  Query: "MongoDB database"')
-
-        # Without negation filtering - should include MongoDB episode
-        results_unfiltered = await engram.recall(
-            query="MongoDB database",
-            user_id=user_id,
-            apply_negation_filter=False,
-            limit=5,
-        )
-
-        # With negation filtering - MongoDB should be filtered out
-        results_filtered = await engram.recall(
-            query="MongoDB database",
-            user_id=user_id,
-            apply_negation_filter=True,
-            limit=5,
-        )
-
-        print(f"\n  Without negation filter: {len(results_unfiltered)} results")
-        mongo_count_unfiltered = 0
-        for r in results_unfiltered[:3]:
-            mongo_flag = " [MONGODB - would be filtered]" if "mongo" in r.content.lower() else ""
-            if "mongo" in r.content.lower():
-                mongo_count_unfiltered += 1
-            print(f"    {r.content[:50]}...{mongo_flag}")
-
-        print(f"\n  With negation filter: {len(results_filtered)} results")
-        mongo_count_filtered = 0
-        for r in results_filtered[:3]:
-            mongo_flag = " [MONGODB]" if "mongo" in r.content.lower() else ""
-            if "mongo" in r.content.lower():
-                mongo_count_filtered += 1
-            print(f"    {r.content[:50]}...{mongo_flag}")
-
-        if mongo_count_unfiltered > mongo_count_filtered:
-            print(
-                f"\n  ✓ Negation filter removed {mongo_count_unfiltered - mongo_count_filtered} MongoDB result(s)"
-            )
-
-        # Show stored negations
-        print("\n  Stored negations:")
+        # First, show what negations were detected
+        print("  Stored negations (detected during encode):")
         negation_results = await engram.recall(
-            query="don't use",
+            query="don't use never",
             user_id=user_id,
             memory_types=["negation"],
             limit=5,
         )
         for r in negation_results:
-            print(f"    {r.content}")
+            print(f"    ✗ {r.content}")
+
+        # Query for databases - should show PostgreSQL preference, not MongoDB
+        print('\n  Query: "database preferences" (episodic only)')
+
+        # Without negation filtering - includes the MongoDB statement
+        results_unfiltered = await engram.recall(
+            query="database preferences",
+            user_id=user_id,
+            memory_types=["episodic"],
+            apply_negation_filter=False,
+            limit=4,
+        )
+
+        # With negation filtering - MongoDB should be filtered
+        results_filtered = await engram.recall(
+            query="database preferences",
+            user_id=user_id,
+            memory_types=["episodic"],
+            apply_negation_filter=True,
+            limit=4,
+        )
+
+        # Count MongoDB mentions
+        mongo_unfiltered = [r for r in results_unfiltered if "mongo" in r.content.lower()]
+        mongo_filtered = [r for r in results_filtered if "mongo" in r.content.lower()]
+
+        print(f"\n  WITHOUT negation filter ({len(results_unfiltered)} results):")
+        for r in results_unfiltered[:3]:
+            flag = " ← CONTRADICTED" if "mongo" in r.content.lower() else ""
+            print(f"    {r.content[:55]}...{flag}")
+
+        print(f"\n  WITH negation filter ({len(results_filtered)} results):")
+        for r in results_filtered[:3]:
+            print(f"    {r.content[:55]}...")
+
+        removed = len(mongo_unfiltered) - len(mongo_filtered)
+        if removed > 0:
+            print(f"\n  ✓ Negation filter removed {removed} contradicted MongoDB result(s)")
+        print("\n  Use case: Prevent hallucinating that user still uses MongoDB.")
 
         # =====================================================================
         # 4. MULTI-HOP REASONING

@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from engram.config import Settings
 from engram.embeddings import Embedder, get_embedder
@@ -120,6 +120,12 @@ class RecallResult(BaseModel):
     staleness: Staleness = Field(default=Staleness.FRESH)
     consolidated_at: str | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def clamp_score(cls, v: float) -> float:
+        """Clamp score to [0, 1] to handle floating point precision errors."""
+        return max(0.0, min(1.0, v))
 
 
 class VerificationResult(BaseModel):
