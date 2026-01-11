@@ -213,13 +213,16 @@ async def main() -> None:
         print("-" * 70)
         print("  Follow links to discover connected memories.\n")
 
+        # Use same limit for fair comparison
+        recall_limit = 10
+
         # Without link following
         results_no_links = await engram.recall(
             query="programming preferences",
             user_id=user_id,
-            memory_types=["semantic", "factual"],  # Types that have links
+            memory_types=["semantic", "factual"],
             follow_links=False,
-            limit=5,
+            limit=recall_limit,
         )
 
         # With link following
@@ -229,25 +232,32 @@ async def main() -> None:
             memory_types=["semantic", "factual"],
             follow_links=True,
             max_hops=2,
-            limit=10,
+            limit=recall_limit,
         )
 
+        # Show results with their link counts
         print(f"  Without follow_links: {len(results_no_links)} results")
         for r in results_no_links[:3]:
-            links = f" (links to {len(r.related_ids)})" if r.related_ids else ""
-            print(f"    {r.content[:50]}...{links}")
+            links = f" (has {len(r.related_ids)} links)" if r.related_ids else ""
+            print(f"    {r.content[:45]}...{links}")
 
-        print(f"\n  With follow_links (max_hops=2): {len(results_with_links)} results")
-
-        # Show linked memories discovered via traversal
+        # Check for linked memories discovered via traversal
         linked_results = [r for r in results_with_links if r.hop_distance and r.hop_distance > 0]
+
         if linked_results:
+            extra = len(results_with_links) - len(results_no_links)
+            print(f"\n  With follow_links: {len(results_with_links)} results (+{extra} via links)")
             print("\n  Discovered via link traversal:")
             for r in linked_results[:3]:
-                print(f"    [hop {r.hop_distance}] {r.content[:50]}...")
+                print(f"    [hop {r.hop_distance}] {r.content[:45]}...")
         else:
-            print("\n  (No additional memories discovered via links)")
-            print("  Links are created during consolidation when memories are related.")
+            # Same count means no additional memories discovered
+            print(f"\n  With follow_links: {len(results_with_links)} results (same)")
+            has_links = sum(1 for r in results_no_links if r.related_ids)
+            if has_links == 0:
+                print("  (None of these memories have related_ids to follow)")
+            else:
+                print("  (Links exist but lead to already-included memories)")
 
         # =====================================================================
         # 5. RETRIEVAL-INDUCED FORGETTING (RIF)
