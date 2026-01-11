@@ -479,6 +479,10 @@ class EngramService:
         # Generate query embedding
         query_vector = await self.embedder.embed(query)
 
+        # Use larger search limit when filtering is enabled to ensure enough candidates
+        # after negation/freshness filters remove some results
+        search_limit = limit * 3 if apply_negation_filter else limit
+
         results: list[RecallResult] = []
 
         # Search episodes
@@ -487,7 +491,7 @@ class EngramService:
                 query_vector=query_vector,
                 user_id=user_id,
                 org_id=org_id,
-                limit=limit,
+                limit=search_limit,
             )
             for scored_ep in scored_episodes:
                 ep = scored_ep.memory
@@ -495,8 +499,8 @@ class EngramService:
                 # System prompts are operational metadata, not user content
                 if ep.role == "system" and not include_system_prompts:
                     continue
-                # Episode staleness: FRESH if consolidated, STALE otherwise
-                ep_staleness = Staleness.FRESH if ep.consolidated else Staleness.STALE
+                # Episode staleness: FRESH if summarized into semantic memory, STALE otherwise
+                ep_staleness = Staleness.FRESH if ep.summarized else Staleness.STALE
                 results.append(
                     RecallResult(
                         memory_type="episodic",
@@ -519,7 +523,7 @@ class EngramService:
                 query_vector=query_vector,
                 user_id=user_id,
                 org_id=org_id,
-                limit=limit,
+                limit=search_limit,
                 min_confidence=min_confidence,
             )
             for scored_fact in scored_facts:
@@ -548,7 +552,7 @@ class EngramService:
                 query_vector=query_vector,
                 user_id=user_id,
                 org_id=org_id,
-                limit=limit,
+                limit=search_limit,
                 min_confidence=min_confidence,
             )
             for scored_sem in scored_semantics:
@@ -582,7 +586,7 @@ class EngramService:
                 query_vector=query_vector,
                 user_id=user_id,
                 org_id=org_id,
-                limit=limit,
+                limit=search_limit,
                 min_confidence=min_confidence,
             )
             for scored_proc in scored_procedurals:
@@ -613,7 +617,7 @@ class EngramService:
                 query_vector=query_vector,
                 user_id=user_id,
                 org_id=org_id,
-                limit=limit,
+                limit=search_limit,
             )
             for scored_neg in scored_negations:
                 neg = scored_neg.memory

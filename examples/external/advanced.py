@@ -5,7 +5,7 @@ Demonstrates Engram's advanced recall features:
 - Retrieval-Induced Forgetting (RIF) - suppress competing memories
 - Multi-hop reasoning via follow_links
 - Negation filtering - exclude contradicted information
-- Freshness and selectivity filtering
+- Summarization status filtering
 - All 6 memory types
 
 Prerequisites:
@@ -69,47 +69,71 @@ async def main() -> None:
         await cleanup_demo_data(engram.storage, user_id)
 
         # =====================================================================
-        # Setup: Create a rich memory landscape
+        # Setup: Create memories in batches to demonstrate links
         # =====================================================================
-        print("\n1. CREATING TEST DATA")
+        print("\n1. CREATING TEST DATA (in batches for linking)")
         print("-" * 70)
 
-        conversations = [
-            # Basic info
+        # BATCH 1: Basic info about Alex
+        batch1 = [
             ("user", "I'm Alex, a backend developer at CloudScale."),
             ("user", "My email is alex@cloudscale.io"),
             ("user", "I've been coding for 10 years, mostly in Go and Python."),
-            # Preferences
             ("user", "I prefer PostgreSQL for databases. It's my go-to choice."),
-            ("user", "For caching, I always use Redis."),
+        ]
+
+        print("  Batch 1: Basic profile...")
+        for role, content in batch1:
+            await engram.encode(content=content, role=role, user_id=user_id)
+
+        # Consolidate batch 1 → creates first semantic memory
+        result1 = await run_consolidation(
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id
+        )
+        print(f"    → {len(batch1)} episodes → {result1.semantic_memories_created} semantic")
+
+        # BATCH 2: Technical preferences (will link to batch 1)
+        batch2 = [
+            ("user", "For caching, I always use Redis alongside PostgreSQL."),
             ("user", "I use Neovim as my primary editor with a custom config."),
-            # Positive statement that will be contradicted by negation
-            ("user", "I used to use MongoDB heavily at my previous job."),
-            # Negations - what is NOT true (contradicts the positive statement)
-            ("user", "I don't use MongoDB anymore - too many scaling issues."),
-            ("user", "I'm not interested in blockchain or Web3."),
-            ("user", "I never use Windows for development, only Linux."),
-            # More context
             ("user", "My favorite framework is FastAPI for Python APIs."),
             ("user", "For Go, I prefer using the standard library over frameworks."),
         ]
 
+        print("  Batch 2: Technical preferences...")
+        for role, content in batch2:
+            await engram.encode(content=content, role=role, user_id=user_id)
+
+        # Consolidate batch 2 → should create links to batch 1's semantic
+        result2 = await run_consolidation(
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id
+        )
+        print(f"    → {len(batch2)} episodes → {result2.semantic_memories_created} semantic")
+        print(f"    → {result2.links_created} links created to existing memories")
+
+        # BATCH 3: Negations and corrections
+        batch3 = [
+            ("user", "I used to use MongoDB heavily at my previous job."),
+            ("user", "I don't use MongoDB anymore - too many scaling issues."),
+            ("user", "I'm not interested in blockchain or Web3."),
+            ("user", "I never use Windows for development, only Linux."),
+        ]
+
+        print("  Batch 3: Corrections and negations...")
         negations_detected = 0
-        for role, content in conversations:
+        for role, content in batch3:
             result = await engram.encode(content=content, role=role, user_id=user_id)
             negations_detected += len(result.negations)
-        print(f"  Stored {len(conversations)} episodes")
-        print(f"  Negations detected during encode: {negations_detected}")
+        print(f"    → {len(batch3)} episodes, {negations_detected} negations detected")
 
-        # Run consolidation to create semantic memories
-        print("  Running consolidation...")
-        result = await run_consolidation(
-            storage=engram.storage,
-            embedder=engram.embedder,
-            user_id=user_id,
+        # Consolidate batch 3
+        result3 = await run_consolidation(
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id
         )
-        print(f"  Created {result.semantic_memories_created} semantic memories")
-        print(f"  Created {result.links_created} links")
+        print(f"    → {result3.semantic_memories_created} semantic, {result3.links_created} links")
+
+        total_episodes = len(batch1) + len(batch2) + len(batch3)
+        print(f"\n  TOTAL: {total_episodes} episodes stored")
 
         # =====================================================================
         # 2. MEMORY TYPES
@@ -118,34 +142,29 @@ async def main() -> None:
         print("-" * 70)
         print("  Engram stores 5 persistent memory types:\n")
 
-        # Query persisted types only (skip working - it duplicates episodic)
-        persisted_types = ["episodic", "factual", "semantic", "procedural", "negation"]
-
-        results = await engram.recall(
-            query="Alex developer",
-            user_id=user_id,
-            memory_types=persisted_types,
-            limit=20,
+        # Get actual counts from storage
+        stats = await engram.storage.get_memory_stats(user_id)
+        print(
+            f"  Counts: episodes={stats.episodes}, facts={stats.facts}, "
+            f"semantic={stats.semantic}, negation={stats.negation}"
         )
 
-        type_counts: dict[str, int] = {}
-        for r in results:
-            type_counts[r.memory_type] = type_counts.get(r.memory_type, 0) + 1
-
-        print(f'  Query: "Alex developer" → {type_counts}')
-
-        for memory_type in persisted_types:
-            type_results = [r for r in results if r.memory_type == memory_type]
-            if type_results:
-                desc = {
-                    "episodic": "raw conversations",
-                    "factual": "pattern-extracted",
-                    "semantic": "LLM-inferred",
-                    "procedural": "behavioral patterns",
-                    "negation": "what is NOT true",
-                }.get(memory_type, "")
+        # Show examples of each type
+        for memory_type, desc in [
+            ("episodic", "raw conversations"),
+            ("factual", "pattern-extracted"),
+            ("semantic", "LLM-summarized"),
+            ("negation", "what is NOT true"),
+        ]:
+            results = await engram.recall(
+                query="Alex developer PostgreSQL",
+                user_id=user_id,
+                memory_types=[memory_type],
+                limit=2,
+            )
+            if results:
                 print(f"\n  [{memory_type.upper()}] ({desc})")
-                for r in type_results[:2]:
+                for r in results[:2]:
                     conf = f" ({r.confidence:.0%})" if r.confidence else ""
                     print(f"    {r.content[:55]}...{conf}")
 
@@ -156,8 +175,8 @@ async def main() -> None:
         print("-" * 70)
         print("  Negations track what is NOT true and filter contradicted info.\n")
 
-        # First, show what negations were detected
-        print("  Stored negations (detected during encode):")
+        # Show stored negations
+        print("  Stored negations:")
         negation_results = await engram.recall(
             query="don't use never",
             user_id=user_id,
@@ -168,11 +187,11 @@ async def main() -> None:
             print(f"    ✗ {r.content}")
 
         # Query for databases - should show PostgreSQL preference, not MongoDB
-        print('\n  Query: "database preferences" (episodic only)')
+        print('\n  Query: "database" (episodic only)')
 
         # Without negation filtering - includes the MongoDB statement
         results_unfiltered = await engram.recall(
-            query="database preferences",
+            query="database",
             user_id=user_id,
             memory_types=["episodic"],
             apply_negation_filter=False,
@@ -181,7 +200,7 @@ async def main() -> None:
 
         # With negation filtering - MongoDB should be filtered
         results_filtered = await engram.recall(
-            query="database preferences",
+            query="database",
             user_id=user_id,
             memory_types=["episodic"],
             apply_negation_filter=True,
@@ -193,12 +212,12 @@ async def main() -> None:
         mongo_filtered = [r for r in results_filtered if "mongo" in r.content.lower()]
 
         print(f"\n  WITHOUT negation filter ({len(results_unfiltered)} results):")
-        for r in results_unfiltered[:3]:
+        for r in results_unfiltered[:4]:
             flag = " ← CONTRADICTED" if "mongo" in r.content.lower() else ""
             print(f"    {r.content[:55]}...{flag}")
 
         print(f"\n  WITH negation filter ({len(results_filtered)} results):")
-        for r in results_filtered[:3]:
+        for r in results_filtered[:4]:
             print(f"    {r.content[:55]}...")
 
         removed = len(mongo_unfiltered) - len(mongo_filtered)
@@ -213,51 +232,53 @@ async def main() -> None:
         print("-" * 70)
         print("  Follow links to discover connected memories.\n")
 
-        # Use same limit for fair comparison
-        recall_limit = 10
+        # Check what links exist
+        semantic_mems = await engram.storage.list_semantic_memories(user_id)
+        total_links = sum(len(s.related_ids) for s in semantic_mems)
+        print(f"  Semantic memories: {len(semantic_mems)}")
+        print(f"  Total links between them: {total_links}")
 
-        # Without link following
-        results_no_links = await engram.recall(
-            query="programming preferences",
-            user_id=user_id,
-            memory_types=["semantic", "factual"],
-            follow_links=False,
-            limit=recall_limit,
-        )
+        if total_links > 0:
+            # Show the linked memories
+            for sem in semantic_mems:
+                if sem.related_ids:
+                    print(f"\n  Memory: {sem.content[:50]}...")
+                    print(f"    Links to: {sem.related_ids}")
 
-        # With link following
-        results_with_links = await engram.recall(
-            query="programming preferences",
-            user_id=user_id,
-            memory_types=["semantic", "factual"],
-            follow_links=True,
-            max_hops=2,
-            limit=recall_limit,
-        )
+            # Query with link following
+            results_no_links = await engram.recall(
+                query="PostgreSQL database",
+                user_id=user_id,
+                memory_types=["semantic"],
+                follow_links=False,
+                limit=5,
+            )
 
-        # Show results with their link counts
-        print(f"  Without follow_links: {len(results_no_links)} results")
-        for r in results_no_links[:3]:
-            links = f" (has {len(r.related_ids)} links)" if r.related_ids else ""
-            print(f"    {r.content[:45]}...{links}")
+            results_with_links = await engram.recall(
+                query="PostgreSQL database",
+                user_id=user_id,
+                memory_types=["semantic"],
+                follow_links=True,
+                max_hops=2,
+                limit=5,
+            )
 
-        # Check for linked memories discovered via traversal
-        linked_results = [r for r in results_with_links if r.hop_distance and r.hop_distance > 0]
+            print("\n  Query 'PostgreSQL database':")
+            print(f"    Without follow_links: {len(results_no_links)} results")
+            print(f"    With follow_links: {len(results_with_links)} results")
 
-        if linked_results:
-            extra = len(results_with_links) - len(results_no_links)
-            print(f"\n  With follow_links: {len(results_with_links)} results (+{extra} via links)")
-            print("\n  Discovered via link traversal:")
-            for r in linked_results[:3]:
-                print(f"    [hop {r.hop_distance}] {r.content[:45]}...")
+            # Show hop distances
+            linked_results = [r for r in results_with_links if r.hop_distance > 0]
+            if linked_results:
+                print("\n  Discovered via link traversal:")
+                for r in linked_results:
+                    print(f"    [hop {r.hop_distance}] {r.content[:45]}...")
         else:
-            # Same count means no additional memories discovered
-            print(f"\n  With follow_links: {len(results_with_links)} results (same)")
-            has_links = sum(1 for r in results_no_links if r.related_ids)
-            if has_links == 0:
-                print("  (None of these memories have related_ids to follow)")
-            else:
-                print("  (Links exist but lead to already-included memories)")
+            print("\n  Note: No links created in this run.")
+            print(
+                "  Links are created when LLM identifies relationships between semantic memories."
+            )
+            print("  Try running consolidation multiple times to build more connections.")
 
         # =====================================================================
         # 5. RETRIEVAL-INDUCED FORGETTING (RIF)
@@ -267,60 +288,62 @@ async def main() -> None:
         print("  Based on Anderson et al. (1994): retrieving memories")
         print("  suppresses similar non-retrieved memories.\n")
 
-        # Get semantic/factual memories only (these have confidence to decay)
-        before_rif = await engram.recall(
-            query="Alex coding",
+        # Get all semantic memories (these have confidence to decay)
+        semantic_results = await engram.recall(
+            query="Alex developer preferences",
             user_id=user_id,
-            memory_types=["semantic", "factual"],
+            memory_types=["semantic"],
             limit=10,
             rif_enabled=False,
         )
 
-        # Store confidence before RIF
-        conf_before: dict[str, float] = {}
-        print("  BEFORE RIF (semantic/factual memories):")
-        for r in before_rif[:5]:
-            conf_before[r.memory_id] = r.confidence or 0
-            print(f"    [{r.confidence:.0%}] {r.content[:50]}...")
+        if len(semantic_results) >= 2:
+            print(f"  BEFORE RIF ({len(semantic_results)} semantic memories):")
+            conf_before = {}
+            for r in semantic_results:
+                conf_before[r.memory_id] = r.confidence or 0
+                print(f"    [{r.confidence:.0%}] {r.content[:45]}...")
 
-        # Apply RIF: retrieve top 2, suppress competitors
-        print("\n  Retrieving top 2 with RIF enabled...")
-        print("  (Competitors above threshold 0.5 get confidence decay of 0.1)")
-        retrieved = await engram.recall(
-            query="Alex coding",
-            user_id=user_id,
-            memory_types=["semantic", "factual"],
-            limit=2,
-            rif_enabled=True,
-            rif_threshold=0.5,
-            rif_decay=0.1,
-        )
+            # Retrieve top 1 with RIF enabled - others should be suppressed
+            print("\n  Retrieving top 1 with RIF enabled...")
+            print("  (Competitors above threshold 0.5 get confidence decay)")
 
-        retrieved_ids = {r.memory_id for r in retrieved}
-        print(f"\n  RETRIEVED ({len(retrieved)}):")
-        for r in retrieved:
-            print(f"    ✓ [{r.confidence:.0%}] {r.content[:50]}...")
+            rif_results = await engram.recall(
+                query="Alex developer preferences",
+                user_id=user_id,
+                memory_types=["semantic"],
+                limit=1,
+                rif_enabled=True,
+                rif_threshold=0.5,
+                rif_decay=0.1,
+            )
 
-        # Check confidence after RIF
-        after_rif = await engram.recall(
-            query="Alex coding",
-            user_id=user_id,
-            memory_types=["semantic", "factual"],
-            limit=10,
-            rif_enabled=False,
-        )
+            retrieved_ids = {r.memory_id for r in rif_results}
+            print(f"\n  RETRIEVED ({len(rif_results)}):")
+            for r in rif_results:
+                print(f"    ✓ [{r.confidence:.0%}] {r.content[:45]}...")
 
-        print("\n  SUPPRESSED (competitors not retrieved):")
-        suppressed_count = 0
-        for r in after_rif:
-            if r.memory_id not in retrieved_ids and r.memory_id in conf_before:
-                old_conf = conf_before[r.memory_id]
-                new_conf = r.confidence or 0
-                if new_conf < old_conf:
-                    suppressed_count += 1
-                    print(f"    ✗ [{old_conf:.0%}→{new_conf:.0%}] {r.content[:45]}...")
-        if suppressed_count == 0:
-            print("    (No memories suppressed in this run)")
+            # Check if competitors were suppressed
+            after_rif = await engram.recall(
+                query="Alex developer preferences",
+                user_id=user_id,
+                memory_types=["semantic"],
+                limit=10,
+                rif_enabled=False,
+            )
+
+            print("\n  AFTER RIF (competitors):")
+            for r in after_rif:
+                if r.memory_id not in retrieved_ids:
+                    old = conf_before.get(r.memory_id, 0)
+                    new = r.confidence or 0
+                    if new < old:
+                        print(f"    ✗ [{old:.0%}→{new:.0%}] {r.content[:40]}... SUPPRESSED")
+                    else:
+                        print(f"    • [{new:.0%}] {r.content[:45]}...")
+        else:
+            print("  Not enough semantic memories for RIF demo.")
+            print("  RIF requires multiple similar memories that compete.")
 
         print("\n  Note: Episodic memories are exempt (immutable ground truth)")
 
@@ -331,11 +354,10 @@ async def main() -> None:
         print("-" * 70)
         print("  Filter by consolidation status.\n")
         print("  Episodes can be 'unsummarized' (not yet included in semantic summaries)")
-        print("  or 'summarized' (already compressed into semantic memory).")
-        print("  This helps prioritize unprocessed content for LLM consolidation.\n")
+        print("  or 'summarized' (already compressed into semantic memory).\n")
 
         # Add new episodes AFTER consolidation to show unsummarized state
-        print("  Adding new episodes (not yet summarized)...")
+        print("  Adding 2 new episodes (not yet summarized)...")
         await engram.encode(
             content="I'm also learning Kubernetes for container orchestration.",
             role="user",
@@ -347,52 +369,39 @@ async def main() -> None:
             user_id=user_id,
         )
 
-        # Query including episodic to show stale vs fresh
+        # Query including episodic to show summarized vs unsummarized
         results_all = await engram.recall(
-            query="Alex cloud",
+            query="cloud containers",
             user_id=user_id,
-            memory_types=["episodic", "semantic"],
+            memory_types=["episodic"],
             freshness="best_effort",
             limit=10,
         )
 
-        summarized_mems = [r for r in results_all if r.staleness.value == "fresh"]
-        unsummarized_mems = [r for r in results_all if r.staleness.value == "stale"]
+        summarized = [r for r in results_all if r.staleness.value == "fresh"]
+        unsummarized = [r for r in results_all if r.staleness.value == "stale"]
 
-        print(f"\n  Query: 'Alex cloud' → {len(results_all)} total")
-        print(f"    Summarized (in semantic memory): {len(summarized_mems)}")
-        print(f"    Unsummarized (raw episodes): {len(unsummarized_mems)}")
+        print(f"\n  Query: 'cloud containers' → {len(results_all)} episodes")
+        print(f"    Summarized: {len(summarized)}")
+        print(f"    Unsummarized: {len(unsummarized)}")
 
-        if unsummarized_mems:
-            print("\n  UNSUMMARIZED episodes (new ground truth, pending consolidation):")
-            for r in unsummarized_mems[:2]:
-                print(f"    📝 [{r.memory_type}] {r.content[:45]}...")
+        if unsummarized:
+            print("\n  UNSUMMARIZED (new ground truth, pending consolidation):")
+            for r in unsummarized[:2]:
+                print(f"    📝 {r.content[:55]}...")
 
-        if summarized_mems:
-            print("\n  SUMMARIZED memories (already consolidated):")
-            for r in summarized_mems[:2]:
-                print(f"    ✓ [{r.memory_type}] {r.content[:45]}...")
-
-        # Show filtering - check if unsummarized episodes are excluded
+        # Show filtering
         results_summarized_only = await engram.recall(
-            query="Alex cloud",
+            query="cloud containers",
             user_id=user_id,
-            memory_types=["episodic", "semantic"],
-            freshness="fresh_only",  # API uses "fresh_only" to mean summarized
+            memory_types=["episodic"],
+            freshness="fresh_only",
             limit=10,
         )
 
-        # Check if unsummarized episodes are in summarized-only results
-        unsummarized_ids = {r.memory_id for r in unsummarized_mems}
-        unsummarized_in_results = [
-            r for r in results_summarized_only if r.memory_id in unsummarized_ids
-        ]
-
         print(f"\n  Filtering to summarized-only: {len(results_summarized_only)} results")
-        if len(unsummarized_in_results) == 0 and len(unsummarized_mems) > 0:
-            print("  ✓ Unsummarized episodes excluded from results")
-        else:
-            print(f"  Note: {len(unsummarized_in_results)} unsummarized memories still in results")
+        if len(results_summarized_only) < len(results_all):
+            print("  ✓ Unsummarized episodes excluded")
 
     print("\n" + "=" * 70)
     print("Advanced features demo complete!")

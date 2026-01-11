@@ -346,6 +346,7 @@ class TestEngramServiceRecall:
             org_id="org_456",
             limit=5,
             min_confidence=0.8,
+            apply_negation_filter=False,  # Disable to test direct limit passthrough
         )
 
         mock_service.storage.search_facts.assert_called_once()
