@@ -63,7 +63,22 @@ async def main() -> None:
         print(f"  [Durable workflows not available: {e}]")
 
     async with EngramService.create() as engram:
+        # Demo identifiers
         user_id = "advanced_demo"
+        org_id = "demo_org"
+        session_id = "advanced_session_001"
+
+        # Clean up any existing data from previous runs
+        await cleanup_demo_data(engram.storage, user_id)
+
+        # Verify cleanup worked
+        stats_after_cleanup = await engram.storage.get_memory_stats(user_id)
+        if stats_after_cleanup.episodes > 0 or stats_after_cleanup.negation > 0:
+            print(
+                f"  [WARNING: Cleanup incomplete - episodes={stats_after_cleanup.episodes}, negation={stats_after_cleanup.negation}]"
+            )
+        else:
+            print("  [Previous demo data cleaned up]")
 
         # Clean up any existing data from previous runs
         await cleanup_demo_data(engram.storage, user_id)
@@ -93,11 +108,13 @@ async def main() -> None:
 
         print("  Batch 1: Basic profile...")
         for role, content in batch1:
-            await engram.encode(content=content, role=role, user_id=user_id)
+            await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
 
         # Consolidate batch 1 → creates first semantic memory
         result1 = await run_consolidation(
-            storage=engram.storage, embedder=engram.embedder, user_id=user_id
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id, org_id=org_id
         )
         print(f"    → {len(batch1)} episodes → {result1.semantic_memories_created} semantic")
 
@@ -111,11 +128,13 @@ async def main() -> None:
 
         print("  Batch 2: Technical preferences...")
         for role, content in batch2:
-            await engram.encode(content=content, role=role, user_id=user_id)
+            await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
 
         # Consolidate batch 2 → should create links to batch 1's semantic
         result2 = await run_consolidation(
-            storage=engram.storage, embedder=engram.embedder, user_id=user_id
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id, org_id=org_id
         )
         print(f"    → {len(batch2)} episodes → {result2.semantic_memories_created} semantic")
         print(f"    → {result2.links_created} links created to existing memories")
@@ -131,13 +150,15 @@ async def main() -> None:
         print("  Batch 3: Corrections and negations...")
         negations_detected = 0
         for role, content in batch3:
-            result = await engram.encode(content=content, role=role, user_id=user_id)
+            result = await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
             negations_detected += len(result.negations)
         print(f"    → {len(batch3)} episodes, {negations_detected} negations detected")
 
         # Consolidate batch 3
         result3 = await run_consolidation(
-            storage=engram.storage, embedder=engram.embedder, user_id=user_id
+            storage=engram.storage, embedder=engram.embedder, user_id=user_id, org_id=org_id
         )
         print(f"    → {result3.semantic_memories_created} semantic, {result3.links_created} links")
 
@@ -216,10 +237,6 @@ async def main() -> None:
             limit=4,
         )
 
-        # Count MongoDB mentions
-        mongo_unfiltered = [r for r in results_unfiltered if "mongo" in r.content.lower()]
-        mongo_filtered = [r for r in results_filtered if "mongo" in r.content.lower()]
-
         print(f"\n  WITHOUT negation filter ({len(results_unfiltered)} results):")
         for r in results_unfiltered[:4]:
             flag = " ← CONTRADICTED" if "mongo" in r.content.lower() else ""
@@ -229,10 +246,12 @@ async def main() -> None:
         for r in results_filtered[:4]:
             print(f"    {r.content[:55]}...")
 
-        removed = len(mongo_unfiltered) - len(mongo_filtered)
+        removed = len(results_unfiltered) - len(results_filtered)
         if removed > 0:
-            print(f"\n  ✓ Negation filter removed {removed} contradicted MongoDB result(s)")
-        print("\n  Use case: Prevent hallucinating that user still uses MongoDB.")
+            print(f"\n  ✓ Removed {removed} contradicted result(s) — fewer but accurate")
+        print(
+            "\n  Behavior: Returns fewer results rather than backfilling with irrelevant content."
+        )
 
         # =====================================================================
         # 4. MULTI-HOP REASONING
@@ -335,6 +354,7 @@ async def main() -> None:
                 rif_enabled=True,
                 rif_threshold=rif_threshold,
                 rif_decay=rif_decay,
+                apply_negation_filter=False,  # Disable to isolate RIF behavior
             )
 
             retrieved_ids = {r.memory_id for r in rif_results}
@@ -381,11 +401,15 @@ async def main() -> None:
             content="I'm also learning Kubernetes for container orchestration.",
             role="user",
             user_id=user_id,
+            org_id=org_id,
+            session_id=session_id,
         )
         await engram.encode(
             content="My preferred cloud provider is AWS.",
             role="user",
             user_id=user_id,
+            org_id=org_id,
+            session_id=session_id,
         )
 
         # Query including episodic to show summarized vs unsummarized

@@ -61,7 +61,13 @@ async def main() -> None:
         pass  # Workflows may already be initialized
 
     async with EngramService.create() as engram:
+        # Demo identifiers
         user_id = "quickstart_demo"
+        org_id = "demo_org"
+        session_id = "quickstart_session_001"
+
+        # Clean up any existing data from previous runs
+        await cleanup_demo_data(engram.storage, user_id)
 
         # Clean up any existing data from previous runs
         await cleanup_demo_data(engram.storage, user_id)
@@ -89,7 +95,9 @@ async def main() -> None:
         negations_extracted = []
 
         for role, content in messages:
-            result = await engram.encode(content=content, role=role, user_id=user_id)
+            result = await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
             extras = []
             if result.facts:
                 facts_extracted.extend(result.facts)
@@ -134,6 +142,7 @@ async def main() -> None:
             storage=engram.storage,
             embedder=engram.embedder,
             user_id=user_id,
+            org_id=org_id,
         )
         print(f"  Semantic memories created: {consolidation_result.semantic_memories_created}")
         print(f"  Links created: {consolidation_result.links_created}")
@@ -147,7 +156,9 @@ async def main() -> None:
         ]
         additional_facts = 0
         for role, content in more_messages:
-            result = await engram.encode(content=content, role=role, user_id=user_id)
+            result = await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
             extras = []
             if result.facts:
                 additional_facts += len(result.facts)
@@ -162,6 +173,7 @@ async def main() -> None:
             storage=engram.storage,
             embedder=engram.embedder,
             user_id=user_id,
+            org_id=org_id,
         )
         print(f"  New semantic memories: {result2.semantic_memories_created}")
         print(f"  Links created: {result2.links_created}")

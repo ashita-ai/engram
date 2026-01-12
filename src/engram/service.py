@@ -64,6 +64,81 @@ def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     return max(0.0, min(1.0, dot_product / (norm1 * norm2)))
 
 
+# Keywords that indicate important content worth remembering
+_IMPORTANCE_KEYWORDS = frozenset(
+    [
+        "remember",
+        "important",
+        "don't forget",
+        "always",
+        "never",
+        "critical",
+        "key",
+        "must",
+        "essential",
+        "priority",
+        "urgent",
+        "note that",
+        "keep in mind",
+        "fyi",
+        "heads up",
+    ]
+)
+
+
+def _calculate_importance(
+    content: str,
+    role: str,
+    facts: list[Fact],
+    negations: list[NegationFact],
+    base_importance: float = 0.5,
+) -> float:
+    """Calculate episode importance based on content and extraction results.
+
+    Uses heuristics to determine how important an episode is:
+    - Extracted facts indicate concrete information worth remembering
+    - Negations are corrections, which are very important
+    - Certain keywords suggest the user wants something remembered
+    - User messages are slightly more important than assistant responses
+
+    Args:
+        content: The episode content.
+        role: Role of the speaker (user, assistant, system).
+        facts: Facts extracted from the episode.
+        negations: Negations detected from the episode.
+        base_importance: Starting importance value (default 0.5).
+
+    Returns:
+        Importance score clamped to [0.0, 1.0].
+    """
+    score = base_importance
+
+    # Facts indicate concrete info worth remembering
+    # Each fact adds 0.05, capped at 0.15 (3+ facts)
+    score += min(0.15, len(facts) * 0.05)
+
+    # Negations are corrections - very important for accuracy
+    # Each negation adds 0.1, capped at 0.2 (2+ negations)
+    score += min(0.2, len(negations) * 0.1)
+
+    # Check for importance keywords
+    content_lower = content.lower()
+    keyword_matches = sum(1 for kw in _IMPORTANCE_KEYWORDS if kw in content_lower)
+    # Each keyword match adds 0.05, capped at 0.1 (2+ matches)
+    score += min(0.1, keyword_matches * 0.05)
+
+    # User messages are slightly more important than assistant responses
+    # (user is providing info, assistant is often just responding)
+    if role == "user":
+        score += 0.05
+
+    # System messages are usually setup/instructions, less important for recall
+    if role == "system":
+        score -= 0.1
+
+    return max(0.0, min(1.0, score))
+
+
 class EncodeResult(BaseModel):
     """Result of encoding a memory.
 
@@ -273,7 +348,7 @@ class EngramService:
         user_id: str,
         org_id: str | None = None,
         session_id: str | None = None,
-        importance: float = 0.5,
+        importance: float | None = None,
         run_extraction: bool = True,
         deduplicate_facts: bool = True,
         dedup_threshold: float = 0.95,
@@ -285,6 +360,7 @@ class EngramService:
         2. Creates and stores an Episode
         3. Runs extraction pipeline to find facts (emails, phones, dates, etc.)
         4. Stores extracted facts with links to source episode
+        5. Calculates importance based on extracted content (if not provided)
 
         Args:
             content: The text content to encode.
@@ -292,7 +368,8 @@ class EngramService:
             user_id: User ID for multi-tenancy isolation.
             org_id: Optional organization ID.
             session_id: Optional session ID for grouping.
-            importance: Importance score (0.0-1.0).
+            importance: Importance score (0.0-1.0). If None, automatically
+                calculated based on content and extraction results.
             run_extraction: Whether to run fact extraction.
             deduplicate_facts: Whether to skip storing facts that are semantically
                 similar to existing facts (default True).
@@ -311,12 +388,16 @@ class EngramService:
             )
             # result.episode is the stored Episode
             # result.facts contains the extracted phone number
+            # result.episode.importance is auto-calculated
             ```
         """
         start_time = time.monotonic()
 
         # Generate embedding
         embedding = await self.embedder.embed(content)
+
+        # Use provided importance or default to 0.5 (will be recalculated after extraction)
+        initial_importance = importance if importance is not None else 0.5
 
         # Create episode
         episode = Episode(
@@ -325,7 +406,7 @@ class EngramService:
             user_id=user_id,
             org_id=org_id,
             session_id=session_id,
-            importance=importance,
+            importance=initial_importance,
             embedding=embedding,
         )
 
@@ -377,6 +458,21 @@ class EngramService:
         else:
             negation_facts = []
 
+        # Calculate importance from extraction results (if not explicitly provided)
+        if importance is None:
+            calculated_importance = _calculate_importance(
+                content=content,
+                role=role,
+                facts=facts,
+                negations=negation_facts,
+                base_importance=0.5,
+            )
+            # Update episode with calculated importance
+            episode.importance = calculated_importance
+            await self.storage.update_episode(episode)
+        else:
+            calculated_importance = importance
+
         # Log audit entry
         duration_ms = int((time.monotonic() - start_time) * 1000)
         audit_entry = AuditEntry.for_encode(
@@ -390,7 +486,7 @@ class EngramService:
         await self.storage.log_audit(audit_entry)
 
         # High-importance episodes trigger immediate consolidation (A-MEM style)
-        if importance >= self.settings.high_importance_threshold:
+        if calculated_importance >= self.settings.high_importance_threshold:
             await self._trigger_consolidation(user_id=user_id, org_id=org_id)
 
         return EncodeResult(episode=episode, facts=facts, negations=negation_facts)
@@ -446,7 +542,11 @@ class EngramService:
                 that competed but weren't retrieved get confidence decay.
             rif_threshold: Minimum similarity score for a memory to be considered
                 a "competitor" that gets suppressed (default 0.5).
-            rif_decay: Amount to decay confidence of suppressed memories (default 0.1).
+            rif_decay: Maximum decay at similarity 1.0 (default 0.1). Actual decay
+                is proportional to similarity: memories just above threshold get
+                minimal decay, highly similar memories get maximum decay.
+                Based on Anderson et al. (1994): high-similarity competitors are
+                suppressed more than low-similarity ones.
             apply_negation_filter: Filter out memories that match negated patterns (default True).
             include_system_prompts: Include system prompt episodes in results (default False).
                 System prompts are operational metadata, not user content, so they're
@@ -479,9 +579,10 @@ class EngramService:
         # Generate query embedding
         query_vector = await self.embedder.embed(query)
 
-        # Use larger search limit when filtering is enabled to ensure enough candidates
-        # after negation/freshness filters remove some results
-        search_limit = limit * 3 if apply_negation_filter else limit
+        # Use larger search limit when RIF or negation filtering is enabled:
+        # - RIF needs extra candidates to see competitors for suppression
+        # - Negation filtering may remove some results
+        search_limit = limit * 3 if (rif_enabled or apply_negation_filter) else limit
 
         results: list[RecallResult] = []
 
@@ -1623,6 +1724,35 @@ class EngramService:
 
         return None
 
+    def _calculate_rif_decay(
+        self,
+        score: float,
+        threshold: float,
+        max_decay: float,
+    ) -> float:
+        """Calculate similarity-proportional RIF decay.
+
+        Based on Anderson et al. (1994): high-similarity competitors are
+        suppressed MORE than low-similarity ones. This implements linear
+        interpolation where:
+        - At threshold: decay = 0 (just barely competing)
+        - At score 1.0: decay = max_decay (maximally competing)
+
+        Args:
+            score: Similarity score of the competing memory.
+            threshold: Minimum score to be considered a competitor.
+            max_decay: Maximum decay amount (at similarity 1.0).
+
+        Returns:
+            Calculated decay amount proportional to similarity.
+        """
+        if threshold >= 1.0:
+            return 0.0  # Avoid division by zero
+
+        # Normalize score to 0-1 range above threshold
+        normalized = (score - threshold) / (1.0 - threshold)
+        return max_decay * normalized
+
     async def _apply_rif_suppression(
         self,
         all_results: list[RecallResult],
@@ -1635,13 +1765,18 @@ class EngramService:
 
         Based on Anderson et al. (1994): when memory A is retrieved,
         similar but non-retrieved memories are actively suppressed.
-        This naturally prunes redundant/overlapping memories over time.
+        High-similarity competitors are suppressed MORE than low-similarity
+        ones (linear interpolation from threshold to max similarity).
+
+        This naturally prunes redundant/overlapping memories over time,
+        with stronger suppression for near-duplicates.
 
         Args:
             all_results: All candidate results from search (before limit).
             retrieved_ids: IDs of memories that were actually retrieved.
             rif_threshold: Minimum score for a memory to be considered a competitor.
-            rif_decay: Amount to decay confidence of suppressed memories.
+            rif_decay: Maximum decay at similarity 1.0. Actual decay is proportional
+                to how far above threshold the memory's score is.
             user_id: User ID for multi-tenancy.
 
         Returns:
@@ -1667,53 +1802,72 @@ class EngramService:
             if result.memory_type in ("episodic", "working"):
                 continue
 
+            # Calculate similarity-proportional decay (research-aligned)
+            actual_decay = self._calculate_rif_decay(
+                score=result.score,
+                threshold=rif_threshold,
+                max_decay=rif_decay,
+            )
+
+            # Skip if decay is negligible
+            if actual_decay < 0.001:
+                continue
+
             # Apply suppression based on memory type
             if result.memory_type == "factual":
                 fact = await self.storage.get_fact(result.memory_id, user_id)
-                if fact and fact.confidence.value > rif_decay:
-                    new_confidence = max(0.1, fact.confidence.value - rif_decay)
+                if fact and fact.confidence.value > actual_decay:
+                    old_confidence = fact.confidence.value
+                    new_confidence = max(0.1, old_confidence - actual_decay)
                     fact.confidence.value = new_confidence
                     await self.storage.update_fact(fact)
                     suppressed_count += 1
                     logger.debug(
-                        f"RIF suppressed fact {fact.id}: "
-                        f"confidence {result.confidence:.2f} -> {new_confidence:.2f}"
+                        f"RIF suppressed fact {fact.id} (score={result.score:.2f}): "
+                        f"confidence {old_confidence:.2f} -> {new_confidence:.2f} "
+                        f"(decay={actual_decay:.3f})"
                     )
 
             elif result.memory_type == "semantic":
                 semantic = await self.storage.get_semantic(result.memory_id, user_id)
-                if semantic and semantic.confidence.value > rif_decay:
-                    new_confidence = max(0.1, semantic.confidence.value - rif_decay)
+                if semantic and semantic.confidence.value > actual_decay:
+                    old_confidence = semantic.confidence.value
+                    new_confidence = max(0.1, old_confidence - actual_decay)
                     semantic.confidence.value = new_confidence
                     await self.storage.update_semantic_memory(semantic)
                     suppressed_count += 1
                     logger.debug(
-                        f"RIF suppressed semantic {semantic.id}: "
-                        f"confidence {result.confidence:.2f} -> {new_confidence:.2f}"
+                        f"RIF suppressed semantic {semantic.id} (score={result.score:.2f}): "
+                        f"confidence {old_confidence:.2f} -> {new_confidence:.2f} "
+                        f"(decay={actual_decay:.3f})"
                     )
 
             elif result.memory_type == "procedural":
                 procedural = await self.storage.get_procedural(result.memory_id, user_id)
-                if procedural and procedural.confidence.value > rif_decay:
-                    new_confidence = max(0.1, procedural.confidence.value - rif_decay)
+                if procedural and procedural.confidence.value > actual_decay:
+                    old_confidence = procedural.confidence.value
+                    new_confidence = max(0.1, old_confidence - actual_decay)
                     procedural.confidence.value = new_confidence
                     await self.storage.update_procedural_memory(procedural)
                     suppressed_count += 1
                     logger.debug(
-                        f"RIF suppressed procedural {procedural.id}: "
-                        f"confidence {result.confidence:.2f} -> {new_confidence:.2f}"
+                        f"RIF suppressed procedural {procedural.id} (score={result.score:.2f}): "
+                        f"confidence {old_confidence:.2f} -> {new_confidence:.2f} "
+                        f"(decay={actual_decay:.3f})"
                     )
 
             elif result.memory_type == "negation":
                 negation = await self.storage.get_negation(result.memory_id, user_id)
-                if negation and negation.confidence.value > rif_decay:
-                    new_confidence = max(0.1, negation.confidence.value - rif_decay)
+                if negation and negation.confidence.value > actual_decay:
+                    old_confidence = negation.confidence.value
+                    new_confidence = max(0.1, old_confidence - actual_decay)
                     negation.confidence.value = new_confidence
                     await self.storage.update_negation_fact(negation)
                     suppressed_count += 1
                     logger.debug(
-                        f"RIF suppressed negation {negation.id}: "
-                        f"confidence {result.confidence:.2f} -> {new_confidence:.2f}"
+                        f"RIF suppressed negation {negation.id} (score={result.score:.2f}): "
+                        f"confidence {old_confidence:.2f} -> {new_confidence:.2f} "
+                        f"(decay={actual_decay:.3f})"
                     )
 
         if suppressed_count > 0:

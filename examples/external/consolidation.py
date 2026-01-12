@@ -73,7 +73,10 @@ async def main() -> None:
         print(f"  [Durable workflows not available: {e}]")
 
     async with EngramService.create() as engram:
+        # Demo identifiers
         user_id = "consolidation_demo"
+        org_id = "demo_org"
+        session_id = "consolidation_session_001"
 
         # Clean up any existing data from previous runs
         await cleanup_demo_data(engram.storage, user_id)
@@ -101,7 +104,9 @@ async def main() -> None:
 
         episode_ids: list[str] = []
         for role, content in conversations:
-            result = await engram.encode(content=content, role=role, user_id=user_id)
+            result = await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
             episode_ids.append(result.episode.id)
             extras = []
             if result.facts:
@@ -132,7 +137,7 @@ async def main() -> None:
         print("-" * 70)
         print("  Hierarchical compression: summarizes episodes into semantic memory.\n")
 
-        result = await engram.consolidate(user_id=user_id)
+        result = await engram.consolidate(user_id=user_id, org_id=org_id)
 
         print(f"  Episodes processed:        {result.episodes_processed}")
         print(f"  Semantic memories created: {result.semantic_memories_created}")
@@ -197,10 +202,12 @@ async def main() -> None:
 
         print("  Adding new episodes:")
         for role, content in new_messages:
-            await engram.encode(content=content, role=role, user_id=user_id)
+            await engram.encode(
+                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+            )
             print(f"    [{role}] {content}")
 
-        result2 = await engram.consolidate(user_id=user_id)
+        result2 = await engram.consolidate(user_id=user_id, org_id=org_id)
 
         print("\n  Second consolidation:")
         print(f"    New episodes processed:    {result2.episodes_processed}")
@@ -214,7 +221,7 @@ async def main() -> None:
         print("-" * 70)
         print("  Creates ONE procedural memory per user from all semantics.\n")
 
-        synthesis_result = await engram.create_procedural(user_id=user_id)
+        synthesis_result = await engram.create_procedural(user_id=user_id, org_id=org_id)
 
         print(f"  Semantics analyzed:    {synthesis_result.semantics_analyzed}")
         print(f"  Procedural created:    {synthesis_result.procedural_created}")

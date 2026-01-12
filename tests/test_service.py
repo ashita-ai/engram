@@ -5,8 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from engram.config import Settings
-from engram.models import Episode, Fact, NegationFact, ProceduralMemory, SemanticMemory
-from engram.service import EncodeResult, EngramService, RecallResult
+from engram.models import (
+    Episode,
+    Fact,
+    NegationFact,
+    ProceduralMemory,
+    SemanticMemory,
+)
+from engram.service import EncodeResult, EngramService, RecallResult, _calculate_importance
 from engram.storage import ScoredResult
 
 
@@ -1164,8 +1170,8 @@ class TestRetrievalInducedForgetting:
         fact2.confidence.value = 0.8
 
         mock_service.storage.search_facts.return_value = [
-            ScoredResult(memory=fact1, score=0.9),
-            ScoredResult(memory=fact2, score=0.6),  # Above threshold
+            ScoredResult(memory=fact1, score=0.95),
+            ScoredResult(memory=fact2, score=0.8),  # Above threshold, high similarity
         ]
         mock_service.storage.get_fact.return_value = fact2
 
@@ -1176,7 +1182,7 @@ class TestRetrievalInducedForgetting:
             limit=1,
             memory_types=["factual"],
             rif_enabled=True,
-            rif_threshold=0.5,  # fact2 at 0.6 is above threshold
+            rif_threshold=0.5,  # fact2 at 0.8 is above threshold
             rif_decay=0.1,
         )
 
@@ -1184,9 +1190,12 @@ class TestRetrievalInducedForgetting:
         mock_service.storage.get_fact.assert_called_with("fact_2", "user_123")
         mock_service.storage.update_fact.assert_called_once()
 
-        # Verify the confidence was decayed
+        # Verify the confidence was decayed proportionally
+        # Linear decay: normalized = (0.8 - 0.5) / (1.0 - 0.5) = 0.6
+        # actual_decay = 0.1 * 0.6 = 0.06
+        # new_confidence = 0.8 - 0.06 = 0.74
         updated_fact = mock_service.storage.update_fact.call_args[0][0]
-        assert updated_fact.confidence.value == pytest.approx(0.7, rel=0.01)
+        assert updated_fact.confidence.value == pytest.approx(0.74, rel=0.01)
 
     @pytest.mark.asyncio
     async def test_rif_does_not_suppress_retrieved_memories(self, mock_service):
@@ -1307,8 +1316,8 @@ class TestRetrievalInducedForgetting:
         sem2.confidence.value = 0.7
 
         mock_service.storage.search_semantic.return_value = [
-            ScoredResult(memory=sem1, score=0.9),
-            ScoredResult(memory=sem2, score=0.6),
+            ScoredResult(memory=sem1, score=0.99),  # Retrieved (highest score)
+            ScoredResult(memory=sem2, score=0.95),  # High similarity = high decay
         ]
         mock_service.storage.get_semantic.return_value = sem2
 
@@ -1326,9 +1335,12 @@ class TestRetrievalInducedForgetting:
         mock_service.storage.get_semantic.assert_called_with("sem_2", "user_123")
         mock_service.storage.update_semantic_memory.assert_called_once()
 
-        # Verify the confidence was decayed
+        # Verify the confidence was decayed proportionally
+        # Linear decay at score=0.95, threshold=0.5: normalized = (0.95-0.5)/(1.0-0.5) = 0.9
+        # actual_decay = 0.1 * 0.9 = 0.09
+        # new_confidence = 0.7 - 0.09 = 0.61
         updated_sem = mock_service.storage.update_semantic_memory.call_args[0][0]
-        assert updated_sem.confidence.value == pytest.approx(0.6, rel=0.01)
+        assert updated_sem.confidence.value == pytest.approx(0.61, rel=0.01)
 
     @pytest.mark.asyncio
     async def test_rif_audit_logging(self, mock_service):
@@ -1394,7 +1406,7 @@ class TestRetrievalInducedForgetting:
 
         mock_service.storage.search_facts.return_value = [
             ScoredResult(memory=fact1, score=0.9),
-            ScoredResult(memory=fact2, score=0.6),
+            ScoredResult(memory=fact2, score=1.0),  # Maximum similarity for full decay
         ]
         mock_service.storage.get_fact.return_value = fact2
 
@@ -1405,9 +1417,220 @@ class TestRetrievalInducedForgetting:
             memory_types=["factual"],
             rif_enabled=True,
             rif_threshold=0.5,
-            rif_decay=0.1,  # Would bring to 0.05 without floor
+            rif_decay=0.1,  # Full decay at score=1.0, would bring 0.15 to 0.05 without floor
         )
 
         # Verify confidence floored at 0.1
+        # Linear decay at score=1.0: decay = 0.1, 0.15 - 0.1 = 0.05 -> floored to 0.1
         updated_fact = mock_service.storage.update_fact.call_args[0][0]
         assert updated_fact.confidence.value == 0.1
+
+    def test_rif_decay_calculation_linear(self, mock_service):
+        """RIF decay should be linearly proportional to similarity above threshold."""
+        # At threshold: decay = 0
+        decay = mock_service._calculate_rif_decay(score=0.5, threshold=0.5, max_decay=0.1)
+        assert decay == pytest.approx(0.0)
+
+        # Halfway between threshold and 1.0: decay = max_decay * 0.5
+        decay = mock_service._calculate_rif_decay(score=0.75, threshold=0.5, max_decay=0.1)
+        assert decay == pytest.approx(0.05)
+
+        # At maximum similarity: decay = max_decay
+        decay = mock_service._calculate_rif_decay(score=1.0, threshold=0.5, max_decay=0.1)
+        assert decay == pytest.approx(0.1)
+
+        # Different threshold
+        decay = mock_service._calculate_rif_decay(score=0.9, threshold=0.8, max_decay=0.2)
+        # normalized = (0.9 - 0.8) / (1.0 - 0.8) = 0.1 / 0.2 = 0.5
+        # decay = 0.2 * 0.5 = 0.1
+        assert decay == pytest.approx(0.1)
+
+    def test_rif_decay_edge_cases(self, mock_service):
+        """RIF decay calculation should handle edge cases."""
+        # Threshold at 1.0 should return 0 (avoid division by zero)
+        decay = mock_service._calculate_rif_decay(score=1.0, threshold=1.0, max_decay=0.1)
+        assert decay == 0.0
+
+        # Score below threshold (shouldn't happen in practice, but should be safe)
+        decay = mock_service._calculate_rif_decay(score=0.3, threshold=0.5, max_decay=0.1)
+        assert decay < 0  # Negative, but code filters this out before calling
+
+
+class TestImportanceCalculation:
+    """Tests for automatic importance calculation."""
+
+    def test_baseline_importance(self):
+        """Base importance should be 0.5 with no extra signals."""
+        importance = _calculate_importance(
+            content="Hello world",
+            role="assistant",  # assistant doesn't get bonus
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.5
+
+    def test_user_role_bonus(self):
+        """User messages should get +0.05 bonus."""
+        importance = _calculate_importance(
+            content="Hello world",
+            role="user",
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.55
+
+    def test_system_role_penalty(self):
+        """System messages should get -0.1 penalty."""
+        importance = _calculate_importance(
+            content="You are a helpful assistant",
+            role="system",
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.4
+
+    def test_facts_increase_importance(self):
+        """Each fact should add 0.05 up to 0.15 cap."""
+        facts = [
+            Fact(
+                content="test@example.com",
+                category="email",
+                source_episode_id="ep_1",
+                user_id="u1",
+            )
+        ]
+        importance = _calculate_importance(
+            content="My email is test@example.com",
+            role="assistant",
+            facts=facts,
+            negations=[],
+        )
+        assert importance == 0.55  # 0.5 + 0.05
+
+        # Multiple facts
+        facts = [
+            Fact(content=f"fact{i}", category="test", source_episode_id="ep_1", user_id="u1")
+            for i in range(5)
+        ]
+        importance = _calculate_importance(
+            content="Lots of facts here",
+            role="assistant",
+            facts=facts,
+            negations=[],
+        )
+        assert importance == 0.65  # 0.5 + 0.15 (capped)
+
+    def test_negations_increase_importance(self):
+        """Each negation should add 0.1 up to 0.2 cap."""
+        negations = [
+            NegationFact(
+                content="I don't use MongoDB",
+                negates_pattern="MongoDB",
+                source_episode_ids=["ep_1"],
+                user_id="u1",
+            )
+        ]
+        importance = _calculate_importance(
+            content="I don't use MongoDB",
+            role="assistant",
+            facts=[],
+            negations=negations,
+        )
+        assert importance == 0.6  # 0.5 + 0.1
+
+        # Multiple negations
+        negations = [
+            NegationFact(
+                content=f"I don't use {db}",
+                negates_pattern=db,
+                source_episode_ids=["ep_1"],
+                user_id="u1",
+            )
+            for db in ["MongoDB", "MySQL", "Redis"]
+        ]
+        importance = _calculate_importance(
+            content="I don't use these databases",
+            role="assistant",
+            facts=[],
+            negations=negations,
+        )
+        assert importance == 0.7  # 0.5 + 0.2 (capped)
+
+    def test_importance_keywords_increase_importance(self):
+        """Importance keywords should add 0.05 each up to 0.1 cap."""
+        importance = _calculate_importance(
+            content="Remember this is important",
+            role="assistant",
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.6  # 0.5 + 0.1 (2 keywords: remember, important)
+
+        # Single keyword
+        importance = _calculate_importance(
+            content="This is critical information",
+            role="assistant",
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.55  # 0.5 + 0.05 (1 keyword: critical)
+
+    def test_combined_signals(self):
+        """Multiple signals should combine correctly."""
+        facts = [
+            Fact(
+                content="test@example.com", category="email", source_episode_id="ep_1", user_id="u1"
+            )
+        ]
+        negations = [
+            NegationFact(
+                content="I don't use MongoDB",
+                negates_pattern="MongoDB",
+                source_episode_ids=["ep_1"],
+                user_id="u1",
+            )
+        ]
+        importance = _calculate_importance(
+            content="Remember my email is test@example.com, I don't use MongoDB",
+            role="user",
+            facts=facts,
+            negations=negations,
+        )
+        # 0.5 base + 0.05 (user) + 0.05 (1 fact) + 0.1 (1 negation) + 0.05 (1 keyword: remember) = 0.75
+        assert importance == pytest.approx(0.75)
+
+    def test_importance_capped_at_one(self):
+        """Importance should never exceed 1.0."""
+        # Create many signals
+        facts = [
+            Fact(content=f"fact{i}", category="test", source_episode_id="ep_1", user_id="u1")
+            for i in range(10)
+        ]
+        negations = [
+            NegationFact(
+                content=f"I don't use {db}",
+                negates_pattern=db,
+                source_episode_ids=["ep_1"],
+                user_id="u1",
+            )
+            for db in ["MongoDB", "MySQL", "Redis", "SQLite", "Oracle"]
+        ]
+        importance = _calculate_importance(
+            content="Remember this is important and critical and urgent and essential",
+            role="user",
+            facts=facts,
+            negations=negations,
+        )
+        assert importance == 1.0
+
+    def test_importance_floored_at_zero(self):
+        """Importance should never go below 0.0."""
+        # System role with negative base
+        importance = _calculate_importance(
+            content="You are a helper",
+            role="system",
+            facts=[],
+            negations=[],
+            base_importance=0.0,  # Start at 0
+        )
+        assert importance == 0.0  # 0.0 - 0.1 = -0.1 -> clamped to 0.0
