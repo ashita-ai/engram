@@ -1170,8 +1170,8 @@ class TestRetrievalInducedForgetting:
         fact2.confidence.value = 0.8
 
         mock_service.storage.search_facts.return_value = [
-            ScoredResult(memory=fact1, score=0.9),
-            ScoredResult(memory=fact2, score=0.6),  # Above threshold
+            ScoredResult(memory=fact1, score=0.95),
+            ScoredResult(memory=fact2, score=0.8),  # Above threshold, high similarity
         ]
         mock_service.storage.get_fact.return_value = fact2
 
@@ -1182,7 +1182,7 @@ class TestRetrievalInducedForgetting:
             limit=1,
             memory_types=["factual"],
             rif_enabled=True,
-            rif_threshold=0.5,  # fact2 at 0.6 is above threshold
+            rif_threshold=0.5,  # fact2 at 0.8 is above threshold
             rif_decay=0.1,
         )
 
@@ -1190,9 +1190,12 @@ class TestRetrievalInducedForgetting:
         mock_service.storage.get_fact.assert_called_with("fact_2", "user_123")
         mock_service.storage.update_fact.assert_called_once()
 
-        # Verify the confidence was decayed
+        # Verify the confidence was decayed proportionally
+        # Linear decay: normalized = (0.8 - 0.5) / (1.0 - 0.5) = 0.6
+        # actual_decay = 0.1 * 0.6 = 0.06
+        # new_confidence = 0.8 - 0.06 = 0.74
         updated_fact = mock_service.storage.update_fact.call_args[0][0]
-        assert updated_fact.confidence.value == pytest.approx(0.7, rel=0.01)
+        assert updated_fact.confidence.value == pytest.approx(0.74, rel=0.01)
 
     @pytest.mark.asyncio
     async def test_rif_does_not_suppress_retrieved_memories(self, mock_service):
@@ -1313,8 +1316,8 @@ class TestRetrievalInducedForgetting:
         sem2.confidence.value = 0.7
 
         mock_service.storage.search_semantic.return_value = [
-            ScoredResult(memory=sem1, score=0.9),
-            ScoredResult(memory=sem2, score=0.6),
+            ScoredResult(memory=sem1, score=0.99),  # Retrieved (highest score)
+            ScoredResult(memory=sem2, score=0.95),  # High similarity = high decay
         ]
         mock_service.storage.get_semantic.return_value = sem2
 
@@ -1332,9 +1335,12 @@ class TestRetrievalInducedForgetting:
         mock_service.storage.get_semantic.assert_called_with("sem_2", "user_123")
         mock_service.storage.update_semantic_memory.assert_called_once()
 
-        # Verify the confidence was decayed
+        # Verify the confidence was decayed proportionally
+        # Linear decay at score=0.95, threshold=0.5: normalized = (0.95-0.5)/(1.0-0.5) = 0.9
+        # actual_decay = 0.1 * 0.9 = 0.09
+        # new_confidence = 0.7 - 0.09 = 0.61
         updated_sem = mock_service.storage.update_semantic_memory.call_args[0][0]
-        assert updated_sem.confidence.value == pytest.approx(0.6, rel=0.01)
+        assert updated_sem.confidence.value == pytest.approx(0.61, rel=0.01)
 
     @pytest.mark.asyncio
     async def test_rif_audit_logging(self, mock_service):
@@ -1400,7 +1406,7 @@ class TestRetrievalInducedForgetting:
 
         mock_service.storage.search_facts.return_value = [
             ScoredResult(memory=fact1, score=0.9),
-            ScoredResult(memory=fact2, score=0.6),
+            ScoredResult(memory=fact2, score=1.0),  # Maximum similarity for full decay
         ]
         mock_service.storage.get_fact.return_value = fact2
 
@@ -1411,12 +1417,43 @@ class TestRetrievalInducedForgetting:
             memory_types=["factual"],
             rif_enabled=True,
             rif_threshold=0.5,
-            rif_decay=0.1,  # Would bring to 0.05 without floor
+            rif_decay=0.1,  # Full decay at score=1.0, would bring 0.15 to 0.05 without floor
         )
 
         # Verify confidence floored at 0.1
+        # Linear decay at score=1.0: decay = 0.1, 0.15 - 0.1 = 0.05 -> floored to 0.1
         updated_fact = mock_service.storage.update_fact.call_args[0][0]
         assert updated_fact.confidence.value == 0.1
+
+    def test_rif_decay_calculation_linear(self, mock_service):
+        """RIF decay should be linearly proportional to similarity above threshold."""
+        # At threshold: decay = 0
+        decay = mock_service._calculate_rif_decay(score=0.5, threshold=0.5, max_decay=0.1)
+        assert decay == pytest.approx(0.0)
+
+        # Halfway between threshold and 1.0: decay = max_decay * 0.5
+        decay = mock_service._calculate_rif_decay(score=0.75, threshold=0.5, max_decay=0.1)
+        assert decay == pytest.approx(0.05)
+
+        # At maximum similarity: decay = max_decay
+        decay = mock_service._calculate_rif_decay(score=1.0, threshold=0.5, max_decay=0.1)
+        assert decay == pytest.approx(0.1)
+
+        # Different threshold
+        decay = mock_service._calculate_rif_decay(score=0.9, threshold=0.8, max_decay=0.2)
+        # normalized = (0.9 - 0.8) / (1.0 - 0.8) = 0.1 / 0.2 = 0.5
+        # decay = 0.2 * 0.5 = 0.1
+        assert decay == pytest.approx(0.1)
+
+    def test_rif_decay_edge_cases(self, mock_service):
+        """RIF decay calculation should handle edge cases."""
+        # Threshold at 1.0 should return 0 (avoid division by zero)
+        decay = mock_service._calculate_rif_decay(score=1.0, threshold=1.0, max_decay=0.1)
+        assert decay == 0.0
+
+        # Score below threshold (shouldn't happen in practice, but should be safe)
+        decay = mock_service._calculate_rif_decay(score=0.3, threshold=0.5, max_decay=0.1)
+        assert decay < 0  # Negative, but code filters this out before calling
 
 
 class TestImportanceCalculation:
