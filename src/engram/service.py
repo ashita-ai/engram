@@ -479,9 +479,9 @@ class EngramService:
         # Generate query embedding
         query_vector = await self.embedder.embed(query)
 
-        # Use larger search limit when filtering is enabled to ensure enough candidates
-        # after negation/freshness filters remove some results
-        search_limit = limit * 3 if apply_negation_filter else limit
+        # Don't over-fetch to backfill filtered results - that returns irrelevant content.
+        # If negation/freshness filtering removes results, return fewer but relevant results.
+        search_limit = limit
 
         results: list[RecallResult] = []
 

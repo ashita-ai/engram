@@ -225,10 +225,6 @@ async def main() -> None:
             limit=4,
         )
 
-        # Count MongoDB mentions
-        mongo_unfiltered = [r for r in results_unfiltered if "mongo" in r.content.lower()]
-        mongo_filtered = [r for r in results_filtered if "mongo" in r.content.lower()]
-
         print(f"\n  WITHOUT negation filter ({len(results_unfiltered)} results):")
         for r in results_unfiltered[:4]:
             flag = " ← CONTRADICTED" if "mongo" in r.content.lower() else ""
@@ -238,10 +234,12 @@ async def main() -> None:
         for r in results_filtered[:4]:
             print(f"    {r.content[:55]}...")
 
-        removed = len(mongo_unfiltered) - len(mongo_filtered)
+        removed = len(results_unfiltered) - len(results_filtered)
         if removed > 0:
-            print(f"\n  ✓ Negation filter removed {removed} contradicted MongoDB result(s)")
-        print("\n  Use case: Prevent hallucinating that user still uses MongoDB.")
+            print(f"\n  ✓ Removed {removed} contradicted result(s) — fewer but accurate")
+        print(
+            "\n  Behavior: Returns fewer results rather than backfilling with irrelevant content."
+        )
 
         # =====================================================================
         # 4. MULTI-HOP REASONING
