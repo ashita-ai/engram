@@ -481,7 +481,8 @@ class EngramService:
 
         # Don't over-fetch to backfill filtered results - that returns irrelevant content.
         # If negation/freshness filtering removes results, return fewer but relevant results.
-        search_limit = limit
+        # Exception: RIF needs extra candidates to see competitors for suppression.
+        search_limit = limit * 3 if rif_enabled else limit
 
         results: list[RecallResult] = []
 

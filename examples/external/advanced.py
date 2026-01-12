@@ -342,6 +342,7 @@ async def main() -> None:
                 rif_enabled=True,
                 rif_threshold=rif_threshold,
                 rif_decay=rif_decay,
+                apply_negation_filter=False,  # Disable to isolate RIF behavior
             )
 
             retrieved_ids = {r.memory_id for r in rif_results}
