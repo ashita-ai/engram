@@ -579,10 +579,10 @@ class EngramService:
         # Generate query embedding
         query_vector = await self.embedder.embed(query)
 
-        # Don't over-fetch to backfill filtered results - that returns irrelevant content.
-        # If negation/freshness filtering removes results, return fewer but relevant results.
-        # Exception: RIF needs extra candidates to see competitors for suppression.
-        search_limit = limit * 3 if rif_enabled else limit
+        # Use larger search limit when RIF or negation filtering is enabled:
+        # - RIF needs extra candidates to see competitors for suppression
+        # - Negation filtering may remove some results
+        search_limit = limit * 3 if (rif_enabled or apply_negation_filter) else limit
 
         results: list[RecallResult] = []
 

@@ -69,6 +69,9 @@ async def main() -> None:
         # Clean up any existing data from previous runs
         await cleanup_demo_data(engram.storage, user_id)
 
+        # Clean up any existing data from previous runs
+        await cleanup_demo_data(engram.storage, user_id)
+
         # =====================================================================
         # 1. ENCODE: Store episodes and extract facts
         # =====================================================================

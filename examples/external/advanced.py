@@ -80,6 +80,18 @@ async def main() -> None:
         else:
             print("  [Previous demo data cleaned up]")
 
+        # Clean up any existing data from previous runs
+        await cleanup_demo_data(engram.storage, user_id)
+
+        # Verify cleanup worked
+        stats_after_cleanup = await engram.storage.get_memory_stats(user_id)
+        if stats_after_cleanup.episodes > 0 or stats_after_cleanup.negation > 0:
+            print(
+                f"  [WARNING: Cleanup incomplete - episodes={stats_after_cleanup.episodes}, negation={stats_after_cleanup.negation}]"
+            )
+        else:
+            print("  [Previous demo data cleaned up]")
+
         # =====================================================================
         # Setup: Create memories in batches to demonstrate links
         # =====================================================================
