@@ -315,7 +315,7 @@ class TestSchemas:
         )
         assert request.content == "Hello world"
         assert request.role == "user"
-        assert request.importance == 0.5  # Default
+        assert request.importance is None  # Default (auto-calculated)
         assert request.run_extraction is True  # Default
 
     def test_encode_request_invalid_role(self):

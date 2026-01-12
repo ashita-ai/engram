@@ -64,6 +64,81 @@ def _cosine_similarity(vec1: list[float], vec2: list[float]) -> float:
     return max(0.0, min(1.0, dot_product / (norm1 * norm2)))
 
 
+# Keywords that indicate important content worth remembering
+_IMPORTANCE_KEYWORDS = frozenset(
+    [
+        "remember",
+        "important",
+        "don't forget",
+        "always",
+        "never",
+        "critical",
+        "key",
+        "must",
+        "essential",
+        "priority",
+        "urgent",
+        "note that",
+        "keep in mind",
+        "fyi",
+        "heads up",
+    ]
+)
+
+
+def _calculate_importance(
+    content: str,
+    role: str,
+    facts: list[Fact],
+    negations: list[NegationFact],
+    base_importance: float = 0.5,
+) -> float:
+    """Calculate episode importance based on content and extraction results.
+
+    Uses heuristics to determine how important an episode is:
+    - Extracted facts indicate concrete information worth remembering
+    - Negations are corrections, which are very important
+    - Certain keywords suggest the user wants something remembered
+    - User messages are slightly more important than assistant responses
+
+    Args:
+        content: The episode content.
+        role: Role of the speaker (user, assistant, system).
+        facts: Facts extracted from the episode.
+        negations: Negations detected from the episode.
+        base_importance: Starting importance value (default 0.5).
+
+    Returns:
+        Importance score clamped to [0.0, 1.0].
+    """
+    score = base_importance
+
+    # Facts indicate concrete info worth remembering
+    # Each fact adds 0.05, capped at 0.15 (3+ facts)
+    score += min(0.15, len(facts) * 0.05)
+
+    # Negations are corrections - very important for accuracy
+    # Each negation adds 0.1, capped at 0.2 (2+ negations)
+    score += min(0.2, len(negations) * 0.1)
+
+    # Check for importance keywords
+    content_lower = content.lower()
+    keyword_matches = sum(1 for kw in _IMPORTANCE_KEYWORDS if kw in content_lower)
+    # Each keyword match adds 0.05, capped at 0.1 (2+ matches)
+    score += min(0.1, keyword_matches * 0.05)
+
+    # User messages are slightly more important than assistant responses
+    # (user is providing info, assistant is often just responding)
+    if role == "user":
+        score += 0.05
+
+    # System messages are usually setup/instructions, less important for recall
+    if role == "system":
+        score -= 0.1
+
+    return max(0.0, min(1.0, score))
+
+
 class EncodeResult(BaseModel):
     """Result of encoding a memory.
 
@@ -273,7 +348,7 @@ class EngramService:
         user_id: str,
         org_id: str | None = None,
         session_id: str | None = None,
-        importance: float = 0.5,
+        importance: float | None = None,
         run_extraction: bool = True,
         deduplicate_facts: bool = True,
         dedup_threshold: float = 0.95,
@@ -285,6 +360,7 @@ class EngramService:
         2. Creates and stores an Episode
         3. Runs extraction pipeline to find facts (emails, phones, dates, etc.)
         4. Stores extracted facts with links to source episode
+        5. Calculates importance based on extracted content (if not provided)
 
         Args:
             content: The text content to encode.
@@ -292,7 +368,8 @@ class EngramService:
             user_id: User ID for multi-tenancy isolation.
             org_id: Optional organization ID.
             session_id: Optional session ID for grouping.
-            importance: Importance score (0.0-1.0).
+            importance: Importance score (0.0-1.0). If None, automatically
+                calculated based on content and extraction results.
             run_extraction: Whether to run fact extraction.
             deduplicate_facts: Whether to skip storing facts that are semantically
                 similar to existing facts (default True).
@@ -311,12 +388,16 @@ class EngramService:
             )
             # result.episode is the stored Episode
             # result.facts contains the extracted phone number
+            # result.episode.importance is auto-calculated
             ```
         """
         start_time = time.monotonic()
 
         # Generate embedding
         embedding = await self.embedder.embed(content)
+
+        # Use provided importance or default to 0.5 (will be recalculated after extraction)
+        initial_importance = importance if importance is not None else 0.5
 
         # Create episode
         episode = Episode(
@@ -325,7 +406,7 @@ class EngramService:
             user_id=user_id,
             org_id=org_id,
             session_id=session_id,
-            importance=importance,
+            importance=initial_importance,
             embedding=embedding,
         )
 
@@ -377,6 +458,21 @@ class EngramService:
         else:
             negation_facts = []
 
+        # Calculate importance from extraction results (if not explicitly provided)
+        if importance is None:
+            calculated_importance = _calculate_importance(
+                content=content,
+                role=role,
+                facts=facts,
+                negations=negation_facts,
+                base_importance=0.5,
+            )
+            # Update episode with calculated importance
+            episode.importance = calculated_importance
+            await self.storage.update_episode(episode)
+        else:
+            calculated_importance = importance
+
         # Log audit entry
         duration_ms = int((time.monotonic() - start_time) * 1000)
         audit_entry = AuditEntry.for_encode(
@@ -390,7 +486,7 @@ class EngramService:
         await self.storage.log_audit(audit_entry)
 
         # High-importance episodes trigger immediate consolidation (A-MEM style)
-        if importance >= self.settings.high_importance_threshold:
+        if calculated_importance >= self.settings.high_importance_threshold:
             await self._trigger_consolidation(user_id=user_id, org_id=org_id)
 
         return EncodeResult(episode=episode, facts=facts, negations=negation_facts)

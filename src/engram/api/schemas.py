@@ -43,7 +43,12 @@ class EncodeRequest(BaseModel):
     user_id: str = Field(min_length=1, description="User ID for isolation")
     org_id: str | None = Field(default=None, description="Optional org ID")
     session_id: str | None = Field(default=None, description="Optional session ID")
-    importance: float = Field(default=0.5, ge=0.0, le=1.0, description="Importance score")
+    importance: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Importance score (auto-calculated if not provided)",
+    )
     run_extraction: bool = Field(default=True, description="Whether to run fact extraction")
 
 

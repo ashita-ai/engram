@@ -5,8 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from engram.config import Settings
-from engram.models import Episode, Fact, NegationFact, ProceduralMemory, SemanticMemory
-from engram.service import EncodeResult, EngramService, RecallResult
+from engram.models import (
+    Episode,
+    Fact,
+    NegationFact,
+    ProceduralMemory,
+    SemanticMemory,
+)
+from engram.service import EncodeResult, EngramService, RecallResult, _calculate_importance
 from engram.storage import ScoredResult
 
 
@@ -1411,3 +1417,183 @@ class TestRetrievalInducedForgetting:
         # Verify confidence floored at 0.1
         updated_fact = mock_service.storage.update_fact.call_args[0][0]
         assert updated_fact.confidence.value == 0.1
+
+
+class TestImportanceCalculation:
+    """Tests for automatic importance calculation."""
+
+    def test_baseline_importance(self):
+        """Base importance should be 0.5 with no extra signals."""
+        importance = _calculate_importance(
+            content="Hello world",
+            role="assistant",  # assistant doesn't get bonus
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.5
+
+    def test_user_role_bonus(self):
+        """User messages should get +0.05 bonus."""
+        importance = _calculate_importance(
+            content="Hello world",
+            role="user",
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.55
+
+    def test_system_role_penalty(self):
+        """System messages should get -0.1 penalty."""
+        importance = _calculate_importance(
+            content="You are a helpful assistant",
+            role="system",
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.4
+
+    def test_facts_increase_importance(self):
+        """Each fact should add 0.05 up to 0.15 cap."""
+        facts = [
+            Fact(
+                content="test@example.com",
+                category="email",
+                source_episode_id="ep_1",
+                user_id="u1",
+            )
+        ]
+        importance = _calculate_importance(
+            content="My email is test@example.com",
+            role="assistant",
+            facts=facts,
+            negations=[],
+        )
+        assert importance == 0.55  # 0.5 + 0.05
+
+        # Multiple facts
+        facts = [
+            Fact(content=f"fact{i}", category="test", source_episode_id="ep_1", user_id="u1")
+            for i in range(5)
+        ]
+        importance = _calculate_importance(
+            content="Lots of facts here",
+            role="assistant",
+            facts=facts,
+            negations=[],
+        )
+        assert importance == 0.65  # 0.5 + 0.15 (capped)
+
+    def test_negations_increase_importance(self):
+        """Each negation should add 0.1 up to 0.2 cap."""
+        negations = [
+            NegationFact(
+                content="I don't use MongoDB",
+                negates_pattern="MongoDB",
+                source_episode_ids=["ep_1"],
+                user_id="u1",
+            )
+        ]
+        importance = _calculate_importance(
+            content="I don't use MongoDB",
+            role="assistant",
+            facts=[],
+            negations=negations,
+        )
+        assert importance == 0.6  # 0.5 + 0.1
+
+        # Multiple negations
+        negations = [
+            NegationFact(
+                content=f"I don't use {db}",
+                negates_pattern=db,
+                source_episode_ids=["ep_1"],
+                user_id="u1",
+            )
+            for db in ["MongoDB", "MySQL", "Redis"]
+        ]
+        importance = _calculate_importance(
+            content="I don't use these databases",
+            role="assistant",
+            facts=[],
+            negations=negations,
+        )
+        assert importance == 0.7  # 0.5 + 0.2 (capped)
+
+    def test_importance_keywords_increase_importance(self):
+        """Importance keywords should add 0.05 each up to 0.1 cap."""
+        importance = _calculate_importance(
+            content="Remember this is important",
+            role="assistant",
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.6  # 0.5 + 0.1 (2 keywords: remember, important)
+
+        # Single keyword
+        importance = _calculate_importance(
+            content="This is critical information",
+            role="assistant",
+            facts=[],
+            negations=[],
+        )
+        assert importance == 0.55  # 0.5 + 0.05 (1 keyword: critical)
+
+    def test_combined_signals(self):
+        """Multiple signals should combine correctly."""
+        facts = [
+            Fact(
+                content="test@example.com", category="email", source_episode_id="ep_1", user_id="u1"
+            )
+        ]
+        negations = [
+            NegationFact(
+                content="I don't use MongoDB",
+                negates_pattern="MongoDB",
+                source_episode_ids=["ep_1"],
+                user_id="u1",
+            )
+        ]
+        importance = _calculate_importance(
+            content="Remember my email is test@example.com, I don't use MongoDB",
+            role="user",
+            facts=facts,
+            negations=negations,
+        )
+        # 0.5 base + 0.05 (user) + 0.05 (1 fact) + 0.1 (1 negation) + 0.05 (1 keyword: remember) = 0.75
+        assert importance == pytest.approx(0.75)
+
+    def test_importance_capped_at_one(self):
+        """Importance should never exceed 1.0."""
+        # Create many signals
+        facts = [
+            Fact(content=f"fact{i}", category="test", source_episode_id="ep_1", user_id="u1")
+            for i in range(10)
+        ]
+        negations = [
+            NegationFact(
+                content=f"I don't use {db}",
+                negates_pattern=db,
+                source_episode_ids=["ep_1"],
+                user_id="u1",
+            )
+            for db in ["MongoDB", "MySQL", "Redis", "SQLite", "Oracle"]
+        ]
+        importance = _calculate_importance(
+            content="Remember this is important and critical and urgent and essential",
+            role="user",
+            facts=facts,
+            negations=negations,
+        )
+        assert importance == 1.0
+
+    def test_importance_floored_at_zero(self):
+        """Importance should never go below 0.0."""
+        # System role with negative base
+        importance = _calculate_importance(
+            content="You are a helper",
+            role="system",
+            facts=[],
+            negations=[],
+            base_importance=0.0,  # Start at 0
+        )
+        assert importance == 0.0  # 0.0 - 0.1 = -0.1 -> clamped to 0.0
