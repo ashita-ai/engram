@@ -12,7 +12,7 @@ examples/
 │   └── memory_types.py # All 6 memory types explained
 └── external/           # Requires Qdrant + API keys
     ├── quickstart.py   # Core encode/recall/verify workflow
-    ├── advanced.py     # RIF, multi-hop, negation filtering
+    ├── advanced.py     # Multi-hop, negation filtering
     └── consolidation.py # LLM consolidation + linking
 ```
 
@@ -53,7 +53,7 @@ ENGRAM_QDRANT_URL=http://localhost:6333
 # Core workflow: encode, recall, verify
 uv run python examples/external/quickstart.py
 
-# Advanced: RIF, multi-hop, negation filtering
+# Advanced: multi-hop, negation filtering
 uv run python examples/external/advanced.py
 
 # LLM consolidation + semantic memories
@@ -115,7 +115,6 @@ Advanced recall features:
 - **All 6 memory types** - Query across episodic, factual, semantic, procedural, negation, working
 - **Negation filtering** - Automatically exclude contradicted information
 - **Multi-hop reasoning** - `follow_links=True` traverses related_ids
-- **RIF (Retrieval-Induced Forgetting)** - Suppress competing memories
 - **Freshness filtering** - Only return consolidated memories
 - **Selectivity filtering** - Filter semantic memories by context-specificity
 
@@ -146,7 +145,6 @@ LLM-powered semantic extraction:
 | min_confidence | - | `quickstart.py` |
 | include_sources | - | `quickstart.py` |
 | Multi-hop (follow_links) | - | `advanced.py` |
-| RIF suppression | - | `advanced.py` |
 | Negation filtering | - | `advanced.py` |
 | Freshness filtering | - | `advanced.py` |
 | Selectivity filtering | - | `advanced.py` |
