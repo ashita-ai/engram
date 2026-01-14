@@ -1,4 +1,14 @@
-"""NegationFact model - tracking what is NOT true."""
+"""NegationFact model - tracking what is NOT true.
+
+DEPRECATED: Use StructuredMemory.negations instead. NegationFact will be
+removed in a future version. StructuredMemory provides per-episode negation
+extraction with better context and pattern handling.
+
+Migration:
+- NegationFact.content -> StructuredMemory.Negation.content
+- NegationFact.negates_pattern -> StructuredMemory.Negation.pattern
+- NegationFact.source_episode_ids -> StructuredMemory.source_episode_id
+"""
 
 from datetime import UTC, datetime
 
@@ -9,6 +19,9 @@ from .base import ConfidenceScore, MemoryBase, generate_id
 
 class NegationFact(MemoryBase):
     """Negation memory - tracking what is explicitly NOT true.
+
+    DEPRECATED: Use StructuredMemory.negations instead. This class will
+    be removed in a future version.
 
     NegationFacts prevent false matches by recording explicit negations.
     When a user corrects a misunderstanding or explicitly negates

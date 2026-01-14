@@ -1,4 +1,14 @@
-"""Fact model - deterministically extracted factual information."""
+"""Fact model - deterministically extracted factual information.
+
+DEPRECATED: Use StructuredMemory instead. Facts will be removed in a future
+version. StructuredMemory provides per-episode LLM extraction with better
+entity resolution and negation handling.
+
+Migration:
+- Fact.content -> StructuredMemory.summary (or specific fields like emails, phones)
+- Fact.category -> Use typed fields in StructuredMemory (emails, phones, urls)
+- Fact.source_episode_id -> StructuredMemory.source_episode_id
+"""
 
 from datetime import UTC, datetime
 
@@ -9,6 +19,9 @@ from .base import ConfidenceScore, ExtractionMethod, MemoryBase, generate_id
 
 class Fact(MemoryBase):
     """Factual memory extracted via deterministic pattern matching.
+
+    DEPRECATED: Use StructuredMemory instead. This class will be removed
+    in a future version.
 
     Facts are extracted from Episodes using pattern matchers (regex, validators)
     rather than LLM inference. This makes them highly reliable with confidence
