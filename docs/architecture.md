@@ -639,4 +639,3 @@ This architecture is informed by recent research (2024-2025):
 | Buffer promotion | [Cognitive Workspace](https://arxiv.org/abs/2508.13171) | 58.6% memory reuse vs 0% for naive RAG |
 | Consolidation strength | [Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) | Repeated retrieval strengthens memories (Testing Effect) |
 | Ground truth | [HaluMem](https://arxiv.org/html/2511.03506) | <56% accuracy without source preservation |
-| RIF suppression | [Anderson et al. (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/) | Retrieval actively suppresses similar non-retrieved items (implemented) |

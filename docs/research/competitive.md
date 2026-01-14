@@ -4,12 +4,12 @@ Technical comparison of AI memory systems. Based on published papers and documen
 
 ## Summary
 
-| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Strength Tracking | RIF |
-|--------|--------------|------------|------------|-------------|-----------------|-------------------|-----|
-| **Engram** | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| **Mem0** | No | No | Partial | No | Yes (Mem0ᵍ) | No | No |
-| **Zep/Graphiti** | Yes | No | No | Yes | Partial | No | No |
-| **Letta/MemGPT** | Partial | No | No | No | No | No | No |
+| System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Strength Tracking |
+|--------|--------------|------------|------------|-------------|-----------------|-------------------|
+| **Engram** | Yes | Yes | Yes | Yes | Yes | Yes |
+| **Mem0** | No | No | Partial | No | Yes (Mem0ᵍ) | No |
+| **Zep/Graphiti** | Yes | No | No | Yes | Partial | No |
+| **Letta/MemGPT** | Partial | No | No | No | No | No |
 
 **Notes**:
 - **Strength Tracking**: Whether memories get *stronger* through repeated consolidation (Testing Effect). No system except Engram tracks consolidation_strength or passes.
@@ -136,7 +136,6 @@ Message → Embed → Store Episode (immutable)
 - Composite confidence scores (auditable)
 - Principled forgetting (access + importance + time)
 - Consolidation strength (Testing Effect)
-- Retrieval-induced forgetting (RIF)
 - Semantic search across all memory types
 
 **Source**: [Architecture](../architecture.md), [GitHub](https://github.com/ashita-ai/engram)
@@ -231,19 +230,6 @@ Novel approaches from recent literature:
 **Engram**: The `consolidation_strength` (0.0-1.0) field on SemanticMemory tracks how well-established a memory is. During consolidation, `strengthen()` is called when existing memories get linked to new memories (via semantic similarity or LLM identification) or receive evolution updates. Each call increases consolidation_strength by 0.1 and increments `consolidation_passes`.
 
 Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct.
-
-### Retrieval-Induced Forgetting (RIF)
-
-**What**: Retrieving a subset of items causes active suppression of related non-retrieved items. This is an inhibitory process, not just competition from strengthened items.
-
-**Source**: [Anderson, Bjork & Bjork (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/) — "Remembering can cause forgetting: Retrieval dynamics in long-term memory." *Journal of Experimental Psychology: Learning, Memory, and Cognition*, 20(5), 1063-1087.
-
-**Key findings**:
-- Suppression is strongest for high-similarity items (not dissimilar ones)
-- The effect is inhibitory (active suppression), not just competition from strengthening
-- Suppression endures 20+ minutes in human experiments
-
-**Engram**: Implements RIF as opt-in via `rif_enabled=True` on recall. After retrieval, memories that scored above `rif_threshold` but weren't returned get confidence decay (`rif_decay`, default 0.1). Episodic memories are exempt (immutable ground truth). Confidence floors at 0.1 to prevent total forgetting.
 
 ---
 

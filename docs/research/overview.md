@@ -199,7 +199,7 @@ Engram uses cognitive science as design inspiration, not strict implementation.
 |-----------------|---------------------|--------------------------|
 | **Surprise-based encoding** (Nagy et al. 2025) | Episodic memory acts as "life raft" for surprising experiences that don't compress well | Store ALL episodes equally; no surprise detection or variable encoding rate |
 | **SWS×REM interaction** (Yuksel et al. 2025) | Memory benefit comes from product of SWS and REM, not independent contributions | Simple time-based decay; no sleep-stage modeling |
-| **REM as forgetting facilitator** (Yuksel et al. 2025) | REM cueing may actively facilitate forgetting of non-cued memories | RIF is somewhat analogous but not modeled as sleep phase |
+| **REM as forgetting facilitator** (Yuksel et al. 2025) | REM cueing may actively facilitate forgetting of non-cued memories | Time-based decay; no sleep-phase forgetting modeling |
 | **Compression-as-learning** (Nagy et al. 2025) | Semantic learning IS learning to compress; measures encoding efficiency | Extract facts but don't model compression ratios |
 
 ### Theoretical Limitations
@@ -242,4 +242,3 @@ Engram uses cognitive science as design inspiration, not strict implementation.
 - [Dual Pathways to LTM](https://www.news-medical.net/news/20241206/Researchers-discover-new-pathway-to-forming-long-term-memories-in-the-brain.aspx) — LTM can form independently of STM
 - [Molecular Memory Timers](https://www.sciencedaily.com/releases/2025/11/251130050712.htm) — Importance gating in memory persistence
 - [Testing Effect / Retrieval Practice](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) — Roediger & Karpicke 2006: "Repeated remembering strengthens memories much more so than repeated learning." Considered [one of the most robust phenomena in memory research](https://www.sciencedirect.com/topics/psychology/testing-effect). Engram's `consolidation_strength` field is based on this finding.
-- [Retrieval-Induced Forgetting](https://pubmed.ncbi.nlm.nih.gov/7931095/) — Anderson, Bjork & Bjork, 1994: Retrieving a subset of items causes active suppression of related non-retrieved items. Engram implements this via opt-in RIF (`rif_enabled=True` on recall) to naturally prune redundant memories.

@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Advanced features demo - RIF, multi-hop, negation filtering.
+"""Advanced features demo - multi-hop reasoning, negation filtering.
 
 Demonstrates Engram's advanced recall features:
-- Retrieval-Induced Forgetting (RIF) - suppress competing memories
 - Multi-hop reasoning via follow_links
 - Negation filtering - exclude contradicted information
 - Summarization status filtering
@@ -309,87 +308,9 @@ async def main() -> None:
             print("  Try running consolidation multiple times to build more connections.")
 
         # =====================================================================
-        # 5. RETRIEVAL-INDUCED FORGETTING (RIF)
+        # 5. SUMMARIZATION STATUS FILTERING
         # =====================================================================
-        print("\n\n5. RETRIEVAL-INDUCED FORGETTING (RIF)")
-        print("-" * 70)
-        print("  Based on Anderson et al. (1994): retrieving memories")
-        print("  suppresses similar non-retrieved memories.\n")
-
-        # Get all semantic memories (these have confidence to decay)
-        rif_query = "Alex developer preferences"
-        semantic_results = await engram.recall(
-            query=rif_query,
-            user_id=user_id,
-            memory_types=["semantic"],
-            limit=10,
-            rif_enabled=False,
-        )
-
-        if len(semantic_results) >= 2:
-            print(f'  Query: "{rif_query}"')
-            print(f"  BEFORE RIF ({len(semantic_results)} semantic memories):")
-            conf_before = {}
-            scores_before = {}
-            for r in semantic_results:
-                conf_before[r.memory_id] = r.confidence or 0
-                scores_before[r.memory_id] = r.score
-                print(f"    [{r.confidence:.0%}] (score={r.score:.2f}) {r.content[:40]}...")
-
-            # Use threshold below the scores to ensure suppression happens
-            rif_threshold = min(scores_before.values()) - 0.05
-            rif_decay = 0.1
-
-            # Retrieve top 1 with RIF enabled - others should be suppressed
-            print("\n  Retrieving top 1 with RIF enabled (limit=1)...")
-            print(
-                f"  Non-retrieved memories with score ≥ {rif_threshold:.2f} lose {rif_decay:.0%} confidence"
-            )
-
-            rif_results = await engram.recall(
-                query=rif_query,
-                user_id=user_id,
-                memory_types=["semantic"],
-                limit=1,
-                rif_enabled=True,
-                rif_threshold=rif_threshold,
-                rif_decay=rif_decay,
-                apply_negation_filter=False,  # Disable to isolate RIF behavior
-            )
-
-            retrieved_ids = {r.memory_id for r in rif_results}
-            print(f"\n  RETRIEVED ({len(rif_results)}):")
-            for r in rif_results:
-                print(f"    ✓ [{r.confidence:.0%}] {r.content[:45]}...")
-
-            # Check if competitors were suppressed
-            after_rif = await engram.recall(
-                query=rif_query,
-                user_id=user_id,
-                memory_types=["semantic"],
-                limit=10,
-                rif_enabled=False,
-            )
-
-            print("\n  AFTER RIF (competitors):")
-            for r in after_rif:
-                if r.memory_id not in retrieved_ids:
-                    old = conf_before.get(r.memory_id, 0)
-                    new = r.confidence or 0
-                    if new < old:
-                        print(f"    ✗ [{old:.0%}→{new:.0%}] {r.content[:40]}... SUPPRESSED")
-                    else:
-                        print(f"    • [{new:.0%}] {r.content[:45]}...")
-        else:
-            print("  Not enough semantic memories for RIF demo.")
-            print("  RIF requires multiple similar memories that compete.")
-
-        print("\n  Note: Episodic memories are exempt (immutable ground truth)")
-
-        # =====================================================================
-        # 6. SUMMARIZATION STATUS FILTERING
-        # =====================================================================
-        print("\n\n6. SUMMARIZATION STATUS FILTERING")
+        print("\n\n5. SUMMARIZATION STATUS FILTERING")
         print("-" * 70)
         print("  Filter by consolidation status.\n")
         print("  Episodes can be 'unsummarized' (not yet included in semantic summaries)")

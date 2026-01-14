@@ -279,41 +279,6 @@ Be explicit about which are science-inspired and which are engineering additions
 
 ## Scientific Foundations
 
-### Retrieval-Induced Forgetting (RIF)
-
-**What it is**: Retrieving a subset of items causes forgetting of related non-retrieved items. This is an active inhibitory process, not just competition from strengthened items.
-
-**Primary Research**:
-> Anderson, M.C., Bjork, R.A., & Bjork, E.L. (1994). "Remembering can cause forgetting: Retrieval dynamics in long-term memory." *Journal of Experimental Psychology: Learning, Memory, and Cognition*, 20(5), 1063-1087. https://pubmed.ncbi.nlm.nih.gov/7931095/
-
-**Key findings from the paper**:
-1. Retrieving some items from a category suppresses related non-retrieved items
-2. Suppression is strongest for high-similarity items (not dissimilar ones)
-3. The effect is inhibitory (active suppression), not just competition from strengthening
-4. Suppression endures 20+ minutes in human experiments
-
-**How we implement it** (opt-in via `rif_enabled=True`):
-- After recall, we identify memories that scored above `rif_threshold` but weren't returned
-- These "competitors" get confidence decay (`rif_decay`, default 0.1)
-- Episodic memories are exempt (immutable ground truth)
-- Confidence floors at 0.1 to prevent total forgetting
-
-```python
-# RIF in action
-results = await recall(
-    query="user preferences",
-    user_id="u1",
-    limit=5,
-    rif_enabled=True,     # Enable suppression
-    rif_threshold=0.5,    # Min similarity to be a "competitor"
-    rif_decay=0.1,        # Confidence decay amount
-)
-# Behind the scenes: similar memories that scored 0.5+ but weren't
-# in top 5 get confidence reduced by 0.1
-```
-
-**What we DON'T claim**: Our confidence decay is an engineering approximation of inhibitory suppression. The original research studied human memory with specific experimental paradigms (category-cued recall). We adapt the core principle for AI memory systems.
-
 ### Consolidation Strength (Testing Effect)
 
 **What it is**: Memories that are repeatedly involved in retrieval and consolidation become stronger and more stable.

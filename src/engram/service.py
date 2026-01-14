@@ -504,9 +504,6 @@ class EngramService:
         follow_links: bool = False,
         max_hops: int = 2,
         freshness: str = "best_effort",
-        rif_enabled: bool = False,
-        rif_threshold: float = 0.5,
-        rif_decay: float = 0.1,
         apply_negation_filter: bool = True,
         negation_similarity_threshold: float | None = 0.75,
         include_system_prompts: bool = False,
@@ -515,10 +512,6 @@ class EngramService:
 
         Searches across memory types and returns unified results
         sorted by similarity score.
-
-        Supports Retrieval-Induced Forgetting (RIF) based on Anderson et al. (1994):
-        when memories are retrieved, similar but non-retrieved memories are suppressed.
-        This naturally prunes redundant/overlapping memories over time.
 
         Supports negation filtering: when enabled, memories that match negated
         patterns (e.g., "I don't use MongoDB") are filtered out to prevent
@@ -538,15 +531,6 @@ class EngramService:
             max_hops: Maximum link traversal depth when follow_links=True.
             freshness: Freshness mode - "best_effort" returns all, "fresh_only" only
                 returns fully consolidated memories.
-            rif_enabled: Enable Retrieval-Induced Forgetting. When True, memories
-                that competed but weren't retrieved get confidence decay.
-            rif_threshold: Minimum similarity score for a memory to be considered
-                a "competitor" that gets suppressed (default 0.5).
-            rif_decay: Maximum decay at similarity 1.0 (default 0.1). Actual decay
-                is proportional to similarity: memories just above threshold get
-                minimal decay, highly similar memories get maximum decay.
-                Based on Anderson et al. (1994): high-similarity competitors are
-                suppressed more than low-similarity ones.
             apply_negation_filter: Filter out memories that match negated patterns (default True).
             include_system_prompts: Include system prompt episodes in results (default False).
                 System prompts are operational metadata, not user content, so they're
@@ -579,10 +563,9 @@ class EngramService:
         # Generate query embedding
         query_vector = await self.embedder.embed(query)
 
-        # Use larger search limit when RIF or negation filtering is enabled:
-        # - RIF needs extra candidates to see competitors for suppression
-        # - Negation filtering may remove some results
-        search_limit = limit * 3 if (rif_enabled or apply_negation_filter) else limit
+        # Use larger search limit when negation filtering is enabled
+        # since filtering may remove some results
+        search_limit = limit * 3 if apply_negation_filter else limit
 
         results: list[RecallResult] = []
 
@@ -797,19 +780,6 @@ class EngramService:
         if include_sources:
             final_results = await self._enrich_with_sources(final_results, user_id)
 
-        # Retrieval-Induced Forgetting (RIF): suppress competing memories
-        # Based on Anderson et al. (1994) - retrieved memories suppress similar non-retrieved ones
-        suppressed_count = 0
-        if rif_enabled:
-            retrieved_ids = {r.memory_id for r in final_results}
-            suppressed_count = await self._apply_rif_suppression(
-                all_results=results,
-                retrieved_ids=retrieved_ids,
-                rif_threshold=rif_threshold,
-                rif_decay=rif_decay,
-                user_id=user_id,
-            )
-
         # Log audit entry (hash query to avoid PII in logs)
         duration_ms = int((time.monotonic() - start_time) * 1000)
         query_hash = hashlib.sha256(query.encode()).hexdigest()[:16]
@@ -821,7 +791,6 @@ class EngramService:
             memory_types=result_memory_types,
             org_id=org_id,
             duration_ms=duration_ms,
-            rif_suppressed=suppressed_count if rif_enabled else None,
         )
         await self.storage.log_audit(audit_entry)
 
@@ -1723,154 +1692,3 @@ class EngramService:
             return None
 
         return None
-
-    def _calculate_rif_decay(
-        self,
-        score: float,
-        threshold: float,
-        max_decay: float,
-    ) -> float:
-        """Calculate similarity-proportional RIF decay.
-
-        Based on Anderson et al. (1994): high-similarity competitors are
-        suppressed MORE than low-similarity ones. This implements linear
-        interpolation where:
-        - At threshold: decay = 0 (just barely competing)
-        - At score 1.0: decay = max_decay (maximally competing)
-
-        Args:
-            score: Similarity score of the competing memory.
-            threshold: Minimum score to be considered a competitor.
-            max_decay: Maximum decay amount (at similarity 1.0).
-
-        Returns:
-            Calculated decay amount proportional to similarity.
-        """
-        if threshold >= 1.0:
-            return 0.0  # Avoid division by zero
-
-        # Normalize score to 0-1 range above threshold
-        normalized = (score - threshold) / (1.0 - threshold)
-        return max_decay * normalized
-
-    async def _apply_rif_suppression(
-        self,
-        all_results: list[RecallResult],
-        retrieved_ids: set[str],
-        rif_threshold: float,
-        rif_decay: float,
-        user_id: str,
-    ) -> int:
-        """Apply Retrieval-Induced Forgetting to competing memories.
-
-        Based on Anderson et al. (1994): when memory A is retrieved,
-        similar but non-retrieved memories are actively suppressed.
-        High-similarity competitors are suppressed MORE than low-similarity
-        ones (linear interpolation from threshold to max similarity).
-
-        This naturally prunes redundant/overlapping memories over time,
-        with stronger suppression for near-duplicates.
-
-        Args:
-            all_results: All candidate results from search (before limit).
-            retrieved_ids: IDs of memories that were actually retrieved.
-            rif_threshold: Minimum score for a memory to be considered a competitor.
-            rif_decay: Maximum decay at similarity 1.0. Actual decay is proportional
-                to how far above threshold the memory's score is.
-            user_id: User ID for multi-tenancy.
-
-        Returns:
-            Number of memories that were suppressed.
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        suppressed_count = 0
-
-        for result in all_results:
-            # Skip if this memory was retrieved
-            if result.memory_id in retrieved_ids:
-                continue
-
-            # Skip if below competition threshold (not similar enough to compete)
-            if result.score < rif_threshold:
-                continue
-
-            # Skip episodic memories and working memory (immutable ground truth)
-            # RIF only applies to derived memories with confidence scores
-            if result.memory_type in ("episodic", "working"):
-                continue
-
-            # Calculate similarity-proportional decay (research-aligned)
-            actual_decay = self._calculate_rif_decay(
-                score=result.score,
-                threshold=rif_threshold,
-                max_decay=rif_decay,
-            )
-
-            # Skip if decay is negligible
-            if actual_decay < 0.001:
-                continue
-
-            # Apply suppression based on memory type
-            if result.memory_type == "factual":
-                fact = await self.storage.get_fact(result.memory_id, user_id)
-                if fact and fact.confidence.value > actual_decay:
-                    old_confidence = fact.confidence.value
-                    new_confidence = max(0.1, old_confidence - actual_decay)
-                    fact.confidence.value = new_confidence
-                    await self.storage.update_fact(fact)
-                    suppressed_count += 1
-                    logger.debug(
-                        f"RIF suppressed fact {fact.id} (score={result.score:.2f}): "
-                        f"confidence {old_confidence:.2f} -> {new_confidence:.2f} "
-                        f"(decay={actual_decay:.3f})"
-                    )
-
-            elif result.memory_type == "semantic":
-                semantic = await self.storage.get_semantic(result.memory_id, user_id)
-                if semantic and semantic.confidence.value > actual_decay:
-                    old_confidence = semantic.confidence.value
-                    new_confidence = max(0.1, old_confidence - actual_decay)
-                    semantic.confidence.value = new_confidence
-                    await self.storage.update_semantic_memory(semantic)
-                    suppressed_count += 1
-                    logger.debug(
-                        f"RIF suppressed semantic {semantic.id} (score={result.score:.2f}): "
-                        f"confidence {old_confidence:.2f} -> {new_confidence:.2f} "
-                        f"(decay={actual_decay:.3f})"
-                    )
-
-            elif result.memory_type == "procedural":
-                procedural = await self.storage.get_procedural(result.memory_id, user_id)
-                if procedural and procedural.confidence.value > actual_decay:
-                    old_confidence = procedural.confidence.value
-                    new_confidence = max(0.1, old_confidence - actual_decay)
-                    procedural.confidence.value = new_confidence
-                    await self.storage.update_procedural_memory(procedural)
-                    suppressed_count += 1
-                    logger.debug(
-                        f"RIF suppressed procedural {procedural.id} (score={result.score:.2f}): "
-                        f"confidence {old_confidence:.2f} -> {new_confidence:.2f} "
-                        f"(decay={actual_decay:.3f})"
-                    )
-
-            elif result.memory_type == "negation":
-                negation = await self.storage.get_negation(result.memory_id, user_id)
-                if negation and negation.confidence.value > actual_decay:
-                    old_confidence = negation.confidence.value
-                    new_confidence = max(0.1, old_confidence - actual_decay)
-                    negation.confidence.value = new_confidence
-                    await self.storage.update_negation_fact(negation)
-                    suppressed_count += 1
-                    logger.debug(
-                        f"RIF suppressed negation {negation.id} (score={result.score:.2f}): "
-                        f"confidence {old_confidence:.2f} -> {new_confidence:.2f} "
-                        f"(decay={actual_decay:.3f})"
-                    )
-
-        if suppressed_count > 0:
-            logger.info(f"RIF: suppressed {suppressed_count} competing memories")
-
-        return suppressed_count

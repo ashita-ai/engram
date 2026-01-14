@@ -78,7 +78,6 @@ class AuditEntry(BaseModel):
         org_id: str | None = None,
         session_id: str | None = None,
         duration_ms: int | None = None,
-        rif_suppressed: int | None = None,
     ) -> "AuditEntry":
         """Create audit entry for a recall operation.
 
@@ -90,21 +89,17 @@ class AuditEntry(BaseModel):
             org_id: Organization (optional).
             session_id: Session context (optional).
             duration_ms: Operation duration.
-            rif_suppressed: Number of memories suppressed by RIF (optional).
         """
-        details: dict[str, Any] = {
-            "query_hash": query_hash,
-            "results_count": results_count,
-            "memory_types": memory_types,
-        }
-        if rif_suppressed is not None:
-            details["rif_suppressed"] = rif_suppressed
         return cls(
             event="recall",
             user_id=user_id,
             org_id=org_id,
             session_id=session_id,
-            details=details,
+            details={
+                "query_hash": query_hash,
+                "results_count": results_count,
+                "memory_types": memory_types,
+            },
             duration_ms=duration_ms,
         )
 
