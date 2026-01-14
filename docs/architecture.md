@@ -184,6 +184,55 @@ Demotion triggers:
 - Low access + time → archive via decay workflow
 - Very low confidence → delete via decay workflow
 
+### 9. Automatic Importance Detection
+
+Episode importance determines how aggressively memories are processed and retained. Rather than requiring callers to manually assign importance, Engram calculates it automatically during `encode()` using fast heuristics that add no latency to the hot path.
+
+**How importance is calculated:**
+
+```python
+# Base score
+importance = 0.5
+
+# Extracted facts indicate concrete information (+0.05 per fact, max +0.15)
+importance += min(0.15, len(facts) * 0.05)
+
+# Negations are corrections - critical for accuracy (+0.1 per negation, max +0.2)
+importance += min(0.2, len(negations) * 0.1)
+
+# Importance keywords signal user intent (+0.05 per keyword, max +0.1)
+importance += min(0.1, keyword_matches * 0.05)
+
+# Role adjustments
+if role == "user":
+    importance += 0.05   # User messages are primary information
+if role == "system":
+    importance -= 0.1    # System prompts less relevant for recall
+
+# Final score clamped to [0.0, 1.0]
+```
+
+**Importance keywords** (checked case-insensitively):
+`remember`, `important`, `don't forget`, `always`, `never`, `critical`, `key`, `must`, `essential`, `priority`, `urgent`, `note that`, `keep in mind`, `fyi`, `heads up`
+
+**Why automatic detection matters:**
+- **No caller burden**: Applications don't need to determine importance
+- **Extraction-based signals**: Facts and negations extracted from content boost importance automatically
+- **High-importance consolidation**: Episodes with `importance >= high_importance_threshold` (default 0.8) trigger immediate consolidation, ensuring critical information is processed promptly
+- **Zero added latency**: All heuristics use fast pattern matching during the existing extraction phase
+
+**Example importance scores:**
+
+| Content | Role | Facts | Negations | Importance |
+|---------|------|-------|-----------|------------|
+| "hi there" | user | 0 | 0 | 0.55 |
+| "my email is user@example.com" | user | 1 | 0 | 0.60 |
+| "remember, I prefer PostgreSQL" | user | 0 | 0 | 0.60 |
+| "actually I don't use MongoDB" | user | 0 | 1 | 0.65 |
+| "important: my phone is 555-1234, email is x@y.com" | user | 2 | 0 | 0.70 |
+
+Callers can still override with an explicit `importance` parameter when they have additional context.
+
 ## Memory Types
 
 | Type | Mutability | Decay | Confidence | Purpose |
