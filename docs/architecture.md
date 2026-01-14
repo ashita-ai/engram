@@ -160,19 +160,25 @@ Memory types form a compression hierarchy:
 ```
 Working (volatile) → Episodic (immutable ground truth)
                          │
-                         ├─→ Factual (pattern-extracted)
-                         ├─→ Negation (contradiction tracking)
-                         │
-                         └─→ Semantic (N episodes → 1 summary via LLM)
+                         └─→ StructuredMemory (per-episode LLM extraction, immutable)
                                    │
-                                   └─→ Procedural (all semantics → 1 behavioral profile)
+                                   └─→ Semantic (N structured → 1 summary via LLM)
+                                             │
+                                             └─→ Procedural (all semantics → 1 behavioral profile)
 ```
 
-**Consolidation** (`run_consolidation` workflow):
-- Fetches all unsummarized episodes for a user
-- Uses LLM to create ONE semantic summary from N episodes (map-reduce for large batches)
-- Marks episodes as `summarized=True` and links them via `summarized_into`
-- Bidirectional traceability: `episode.summarized_into` ↔ `semantic.source_episode_ids`
+**Structure** (`run_structure` workflow):
+- Called immediately after `encode()` or deferred to batch processing
+- Uses regex extractors for emails, phones, URLs (0.9 confidence)
+- Uses LLM for dates, people, preferences, negations (0.8 confidence)
+- Creates ONE StructuredMemory per Episode (immutable)
+- Stores in Episode.quick_extracts for immediate access
+
+**Consolidation** (`run_consolidation_from_structured` workflow):
+- Fetches all unconsolidated StructuredMemories for a user
+- Synthesizes pre-extracted summaries/entities into ONE SemanticMemory
+- Marks StructuredMemories as `consolidated=True`
+- Bidirectional traceability: `structured.source_episode_id` ↔ `semantic.source_episode_ids`
 
 **Procedural Synthesis** (`run_synthesis` workflow):
 - Fetches ALL semantic memories for a user
@@ -183,6 +189,8 @@ Working (volatile) → Episodic (immutable ground truth)
 Demotion triggers:
 - Low access + time → archive via decay workflow
 - Very low confidence → delete via decay workflow
+
+**Note**: Fact and NegationFact are deprecated. Use StructuredMemory instead, which provides typed entity fields and integrated negation handling.
 
 ### 9. Automatic Importance Detection
 
@@ -238,11 +246,12 @@ Callers can still override with an explicit `importance` parameter when they hav
 | Type | Mutability | Decay | Confidence | Purpose |
 |------|------------|-------|------------|---------|
 | **Episodic** | Immutable | Fast | Highest | Raw interactions, ground truth |
-| **Factual** | Immutable | Slow | High | Pattern-extracted facts (emails, dates) |
-| **Semantic** | Mutable | Slow | Variable | LLM-inferred knowledge |
+| **Structured** | Immutable | Slow | High (0.8-0.9) | Per-episode LLM extraction |
+| **Semantic** | Mutable | Slow | Variable | Cross-episode LLM synthesis |
 | **Procedural** | Mutable | Very slow | Variable | Behavioral patterns, preferences |
-| **Negation** | Mutable | Slow | Variable | What is NOT true (negations) |
 | **Working** | Volatile | N/A | N/A | Current context (in-memory) |
+| ~~**Factual**~~ | Immutable | Slow | High | DEPRECATED: Use Structured |
+| ~~**Negation**~~ | Mutable | Slow | Variable | DEPRECATED: Use Structured.negations |
 
 ## Data Models
 
@@ -259,9 +268,45 @@ class Episode(BaseModel):
     embedding: list[float]
     summarized: bool                     # Included in semantic summary?
     summarized_into: str | None          # ID of semantic memory (bidirectional link)
+    quick_extracts: QuickExtracts | None # Immediate regex results
+    structured: bool                     # Has StructuredMemory been created?
+    structured_into: str | None          # ID of StructuredMemory
 ```
 
-### Fact (Deterministically Extracted)
+### StructuredMemory (Per-Episode LLM Extraction)
+
+NEW in v0.x. Bridges Episode and Semantic with per-episode intelligence.
+
+```python
+class StructuredMemory(BaseModel):
+    id: str
+    source_episode_id: str               # One-to-one with Episode
+
+    # Deterministic extraction (0.9 confidence)
+    emails: list[str]
+    phones: list[str]
+    urls: list[str]
+
+    # LLM extraction (0.8 confidence)
+    dates: list[ResolvedDate]            # {"raw": "next Tuesday", "resolved": "2025-01-14"}
+    people: list[Person]                 # {"name": "John", "role": "manager"}
+    organizations: list[str]
+    locations: list[str]
+    preferences: list[Preference]        # {"topic": "database", "value": "PostgreSQL"}
+    negations: list[Negation]            # {"content": "doesn't use MongoDB", "pattern": "MongoDB"}
+
+    summary: str                         # 1-2 sentence episode summary
+    keywords: list[str]                  # Key terms for retrieval
+    derived_at: datetime
+    confidence: ConfidenceScore          # 0.8-0.9 based on extraction method
+    embedding: list[float]
+
+    # Consolidation tracking
+    consolidated: bool                   # Included in semantic synthesis?
+    consolidated_into: str | None        # ID of SemanticMemory
+```
+
+### Fact (DEPRECATED - Use StructuredMemory)
 
 ```python
 class Fact(BaseModel):
@@ -306,7 +351,7 @@ class ProceduralMemory(BaseModel):
     embedding: list[float]
 ```
 
-### NegationFact (Negative Knowledge)
+### NegationFact (DEPRECATED - Use StructuredMemory.negations)
 
 ```python
 class NegationFact(BaseModel):
@@ -327,31 +372,41 @@ Interaction
     ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                         ENCODE                               │
-│   ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
-│   │ Store       │  │ Pattern     │  │ Detect              │ │
-│   │ Episode     │  │ Extract     │  │ Negations           │ │
-│   │ (verbatim)  │  │ Facts       │  │ (negations)         │ │
-│   └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘ │
-└──────────┼────────────────┼────────────────────┼────────────┘
-           │                │                    │
-           ▼                ▼                    ▼
-      [Episodic]       [Factual]          [Negation]
-           │
-           └──────────────┬─────────────────────┘
-                          │
-           ┌──────────────┴──────────────┐
-           │  BACKGROUND (Durable)        │
-           │  ┌──────────┐ ┌──────────┐  │
-           │  │Consolidate│ │  Decay   │  │
-           │  │+ Link     │ │          │  │
-           │  │+ Prune    │ │          │  │
-           │  └─────┬─────┘ └─────┬────┘  │
-           └────────┼─────────────┼───────┘
-                    │             │
-                    ▼             ▼
-               [Semantic]    [updated scores]
-               [Procedural]  [promotions]
-               [Links]       [archival]
+│   ┌─────────────────┐  ┌─────────────────────────────────┐  │
+│   │ Store Episode   │  │ Quick Extract (regex)           │  │
+│   │ (verbatim)      │  │ emails, phones, URLs            │  │
+│   └────────┬────────┘  └───────────────┬─────────────────┘  │
+└────────────┼───────────────────────────┼────────────────────┘
+             │                           │
+             ▼                           ▼
+        [Episodic]              [Episode.quick_extracts]
+             │
+             │
+┌────────────┴────────────────────────────────────────────────┐
+│                    STRUCTURE (deferred)                      │
+│   ┌─────────────────────────────────────────────────────┐   │
+│   │  LLM Extraction per Episode:                         │   │
+│   │  dates, people, organizations, preferences, negations│   │
+│   │  + summary, keywords                                 │   │
+│   └──────────────────────────┬──────────────────────────┘   │
+└──────────────────────────────┼──────────────────────────────┘
+                               │
+                               ▼
+                       [StructuredMemory]
+                               │
+┌──────────────────────────────┴──────────────────────────────┐
+│                  CONSOLIDATE (background)                    │
+│   ┌─────────────────────────────────────────────────────┐   │
+│   │  Synthesize N StructuredMemories → 1 SemanticMemory  │   │
+│   │  + Link to similar existing memories                 │   │
+│   │  + Update consolidation_strength                     │   │
+│   └──────────────────────────┬──────────────────────────┘   │
+└──────────────────────────────┼──────────────────────────────┘
+                               │
+                               ▼
+                          [Semantic]
+                               │
+                               └───→ [Procedural] (user behavioral profile)
 ```
 
 ## Storage: Qdrant
@@ -359,10 +414,13 @@ Interaction
 All persistent memory types stored in Qdrant with type-specific collections (Working memory is in-memory only):
 
 ```
-engram_episodic     → vectors + payload (content, timestamp, session_id, importance)
-engram_factual      → vectors + payload (content, category, source_episode_id, event_at, derived_at, confidence)
+engram_episodic     → vectors + payload (content, timestamp, session_id, importance, quick_extracts)
+engram_structured   → vectors + payload (summary, keywords, entities, negations, source_episode_id, confidence)
 engram_semantic     → vectors + payload (content, source_episode_ids, related_ids, confidence, consolidation_strength)
 engram_procedural   → vectors + payload (content, trigger_context, access_count, confidence)
+
+# DEPRECATED collections (backwards compatibility only):
+engram_factual      → vectors + payload (content, category, source_episode_id, confidence)
 engram_negation     → vectors + payload (content, negates_pattern, source_episode_ids, confidence)
 ```
 

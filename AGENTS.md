@@ -78,16 +78,17 @@ uv run pre-commit run --all-files
 
 ## Key Concepts
 
-### Memory Types (6 Total)
+### Memory Types (5 Active + 2 Deprecated)
 
 | Type | Purpose | Confidence |
 |------|---------|------------|
 | Working | Current session context (in-memory, not persisted) | N/A |
 | Episode | Immutable ground truth (raw interactions) | N/A (verbatim) |
-| Fact | Pattern-extracted facts (emails, phones, dates) | 0.9 (extracted) |
-| SemanticMemory | LLM-inferred knowledge | 0.6 (inferred) |
+| **StructuredMemory** | Per-episode LLM extraction (entities, summary, negations) | 0.8-0.9 |
+| SemanticMemory | Cross-episode LLM synthesis | 0.6 (inferred) |
 | ProceduralMemory | Behavioral patterns | 0.6 (inferred) |
-| NegationFact | What is NOT true (negations) | 0.9 (extracted) |
+| ~~Fact~~ | DEPRECATED: Use StructuredMemory | 0.9 (extracted) |
+| ~~NegationFact~~ | DEPRECATED: Use StructuredMemory.negations | 0.9 (extracted) |
 
 ### Confidence Scoring
 
@@ -108,9 +109,11 @@ Confidence = weighted sum of:
 ### Consolidation Flow
 
 1. Episode stored (ground truth, never modified)
-2. Pattern extraction runs (emails, phones, dates → Facts)
-3. Background consolidation (LLM → SemanticMemory, ProceduralMemory)
-4. Decay applied over time (confidence decreases without confirmation)
+2. Quick extraction runs immediately (regex: emails, phones, URLs → Episode.quick_extracts)
+3. Structure workflow (deferred LLM: dates, people, preferences, negations → StructuredMemory)
+4. Background consolidation (N StructuredMemories → 1 SemanticMemory)
+5. Procedural synthesis (all SemanticMemories → 1 behavioral profile per user)
+6. Decay applied over time (confidence decreases without confirmation)
 
 ---
 
@@ -268,10 +271,10 @@ consolidation_agent = Agent(
 
 ## Memory Types Detail
 
-The six memory types are engineering constructs:
+Memory types are engineering constructs:
 - **Working, Episodic, Semantic, Procedural** — Inspired by cognitive science
-- **Factual** — Engineering subdivision (verbatim vs inferred) not from cognitive science
-- **Negation** — Engineering construct for storing semantic negations (what is NOT true)
+- **StructuredMemory** — Per-episode LLM extraction bridging raw episodes and cross-episode semantic synthesis
+- ~~**Factual, Negation**~~ — DEPRECATED: Now handled by StructuredMemory
 
 Be explicit about which are science-inspired and which are engineering additions.
 
