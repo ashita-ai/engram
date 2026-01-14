@@ -100,6 +100,47 @@ def format_episodes_for_llm(episodes: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
+def format_structured_for_llm(structured_memories: list[dict[str, str | list[str]]]) -> str:
+    """Format StructuredMemories for LLM consolidation.
+
+    StructuredMemories already contain per-episode summaries and entities,
+    so consolidation just needs to synthesize them.
+
+    Args:
+        structured_memories: List of dicts with keys from StructuredMemory.
+
+    Returns:
+        Formatted text for LLM input.
+    """
+    lines = ["# Per-Episode Extractions to Consolidate\n"]
+    for struct in structured_memories:
+        lines.append(f"## Episode: {struct['source_episode_id']} ({struct['id']})")
+        lines.append(f"Summary: {struct['summary']}")
+
+        if struct.get("keywords"):
+            keywords = struct["keywords"]
+            if isinstance(keywords, list):
+                lines.append(f"Keywords: {', '.join(keywords)}")
+
+        if struct.get("people"):
+            lines.append(f"People: {struct['people']}")
+
+        if struct.get("organizations"):
+            orgs = struct["organizations"]
+            if isinstance(orgs, list):
+                lines.append(f"Organizations: {', '.join(orgs)}")
+
+        if struct.get("preferences"):
+            lines.append(f"Preferences: {struct['preferences']}")
+
+        if struct.get("negations"):
+            lines.append(f"Negations: {struct['negations']}")
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def _format_existing_memories_for_llm(memories: list[SemanticMemory]) -> str:
     """Format existing memories for LLM context.
 
@@ -438,6 +479,203 @@ async def run_consolidation(
     )
 
 
+async def _synthesize_structured(
+    structured_memories: list[dict[str, str | list[str]]],
+    existing_context: str,
+) -> SummaryOutput:
+    """Synthesize StructuredMemories into a coherent summary.
+
+    Unlike episode summarization, this works with already-extracted content,
+    so the LLM focuses on synthesis and integration.
+
+    Args:
+        structured_memories: List of StructuredMemory data.
+        existing_context: Existing semantic memories for context.
+
+    Returns:
+        SummaryOutput with synthesized summary.
+    """
+    from pydantic_ai import Agent
+
+    from engram.config import settings
+
+    formatted_text = format_structured_for_llm(structured_memories) + existing_context
+
+    synthesis_prompt = """You are synthesizing pre-extracted memory summaries into a coherent knowledge base.
+
+Each entry already has:
+- A per-episode summary
+- Extracted entities (people, organizations)
+- User preferences
+- Negations/corrections
+
+Your task:
+- Combine these into ONE unified summary (3-5 sentences)
+- Resolve any contradictions (prefer more recent information)
+- Extract overarching themes and patterns
+- Identify stable facts vs transient details
+
+Write in third person ("The user...", "They work at...").
+Focus on lasting/stable information. Be conservative."""
+
+    agent: Agent[None, SummaryOutput] = Agent(
+        settings.consolidation_model,
+        output_type=SummaryOutput,
+        instructions=synthesis_prompt,
+    )
+
+    result = await agent.run(formatted_text)
+    return result.output
+
+
+async def run_consolidation_from_structured(
+    storage: EngramStorage,
+    embedder: Embedder,
+    user_id: str,
+    org_id: str | None = None,
+    similarity_threshold: float = 0.7,
+) -> ConsolidationResult:
+    """Run consolidation using StructuredMemories as input.
+
+    This is the preferred consolidation path when StructuredMemories exist.
+    It synthesizes pre-extracted per-episode summaries into cross-episode
+    SemanticMemory.
+
+    Workflow:
+    1. Get unconsolidated StructuredMemories
+    2. Format for LLM synthesis
+    3. Create unified SemanticMemory
+    4. Link to similar existing memories
+    5. Mark StructuredMemories as consolidated
+
+    Args:
+        storage: EngramStorage instance.
+        embedder: Embedder for generating vectors.
+        user_id: User ID for multi-tenancy.
+        org_id: Optional organization ID.
+        similarity_threshold: Min similarity for linking.
+
+    Returns:
+        ConsolidationResult with processing statistics.
+    """
+    from engram.models import SemanticMemory
+
+    # 1. Get unconsolidated StructuredMemories
+    structured = await storage.get_unconsolidated_structured(
+        user_id=user_id,
+        org_id=org_id,
+        limit=None,
+    )
+
+    if not structured:
+        logger.info("No unconsolidated StructuredMemories found")
+        return ConsolidationResult(
+            episodes_processed=0,
+            semantic_memories_created=0,
+            links_created=0,
+            compression_ratio=0.0,
+        )
+
+    logger.info(f"Consolidating {len(structured)} StructuredMemories")
+
+    # 2. Get existing summaries for context
+    existing_memories = await storage.list_semantic_memories(user_id, org_id)
+    existing_context = _format_existing_memories_for_llm(existing_memories)
+
+    # 3. Format StructuredMemories for LLM
+    struct_data: list[dict[str, str | list[str]]] = []
+    for s in structured:
+        data: dict[str, str | list[str]] = {
+            "id": s.id,
+            "source_episode_id": s.source_episode_id,
+            "summary": s.summary,
+            "keywords": s.keywords,
+        }
+        if s.people:
+            data["people"] = [f"{p.name} ({p.role})" if p.role else p.name for p in s.people]
+        if s.organizations:
+            data["organizations"] = s.organizations
+        if s.preferences:
+            data["preferences"] = [f"{p.topic}: {p.value}" for p in s.preferences]
+        if s.negations:
+            data["negations"] = [n.content for n in s.negations]
+        struct_data.append(data)
+
+    # 4. Synthesize into semantic memory
+    synthesis = await _synthesize_structured(struct_data, existing_context)
+
+    # 5. Create SemanticMemory
+    source_episode_ids = [s.source_episode_id for s in structured]
+    structured_ids = [s.id for s in structured]
+
+    embedding = await embedder.embed(synthesis.summary)
+
+    memory = SemanticMemory(
+        content=synthesis.summary,
+        source_episode_ids=source_episode_ids,
+        user_id=user_id,
+        org_id=org_id,
+        embedding=embedding,
+        keywords=synthesis.keywords,
+        context=synthesis.context,
+    )
+
+    # Set confidence based on structured input count
+    memory.confidence.extraction_base = 0.75  # Higher than raw episodes (0.7)
+    memory.confidence.supporting_episodes = len(structured)
+    memory.confidence.recompute()
+    memory.strengthen(delta=0.1)
+
+    await storage.store_semantic(memory)
+    logger.info(f"Created semantic summary: {memory.id} from {len(structured)} StructuredMemories")
+
+    # 6. Build links to similar existing memories
+    links_created = 0
+    if existing_memories:
+        similar = await _find_semantically_similar_memories(
+            query_embedding=embedding,
+            storage=storage,
+            user_id=user_id,
+            org_id=org_id,
+            limit=5,
+            min_score=similarity_threshold,
+        )
+
+        for similar_mem in similar:
+            if similar_mem.id == memory.id:
+                continue
+            if similar_mem.id not in memory.related_ids:
+                memory.add_link(similar_mem.id)
+                similar_mem.add_link(memory.id)
+                similar_mem.strengthen(delta=0.1)
+                await storage.update_semantic_memory(similar_mem)
+                links_created += 1
+                logger.debug(f"Linked {memory.id} <--> {similar_mem.id}")
+
+        if links_created > 0:
+            await storage.update_semantic_memory(memory)
+
+    # 7. Mark StructuredMemories as consolidated
+    await storage.mark_structured_consolidated(structured_ids, user_id, memory.id)
+
+    # Also mark source episodes as summarized
+    await storage.mark_episodes_summarized(source_episode_ids, user_id, memory.id)
+
+    compression_ratio = len(structured) if len(structured) > 0 else 0.0
+
+    logger.info(
+        f"Consolidation complete: {len(structured)} StructuredMemories → 1 SemanticMemory "
+        f"({compression_ratio:.1f}:1 compression)"
+    )
+
+    return ConsolidationResult(
+        episodes_processed=len(structured),
+        semantic_memories_created=1,
+        links_created=links_created,
+        compression_ratio=compression_ratio,
+    )
+
+
 # Legacy exports for backwards compatibility
 class ExtractedFact(BaseModel):
     """Legacy: A semantic fact extracted by the LLM.
@@ -553,5 +791,7 @@ __all__ = [
     "MemoryEvolution",
     "SummaryOutput",
     "format_episodes_for_llm",
+    "format_structured_for_llm",
     "run_consolidation",
+    "run_consolidation_from_structured",
 ]

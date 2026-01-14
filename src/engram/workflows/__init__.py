@@ -46,6 +46,7 @@ from .consolidation import (
     IdentifiedLink,
     LLMExtractionResult,
     run_consolidation,
+    run_consolidation_from_structured,
 )
 from .decay import DecayResult, run_decay
 from .promotion import PromotionResult, run_promotion
@@ -299,6 +300,7 @@ __all__ = [
     "LLMExtractionOutput",
     "StructureResult",
     "run_consolidation",
+    "run_consolidation_from_structured",
     "run_decay",
     "run_promotion",
     "run_structure",

@@ -543,6 +543,123 @@ class CRUDMixin:
             memory.embedding = results[0].vector
         return memory
 
+    async def get_unconsolidated_structured(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        limit: int | None = 100,
+    ) -> list[StructuredMemory]:
+        """Get StructuredMemories that haven't been consolidated into SemanticMemory.
+
+        Used by the consolidation workflow to find structured extractions
+        that need to be synthesized into semantic memories.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            limit: Maximum results (None for all).
+
+        Returns:
+            List of StructuredMemory objects that haven't been consolidated.
+        """
+        from engram.models import StructuredMemory
+
+        collection = self._collection_name("structured")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+            models.FieldCondition(
+                key="consolidated",
+                match=models.MatchValue(value=False),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        scroll_limit = limit if limit is not None else 10000
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=scroll_limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        memories: list[StructuredMemory] = []
+        for point in results:
+            if point.payload is not None:
+                mem = self._payload_to_memory(point.payload, StructuredMemory)
+                if isinstance(point.vector, list):
+                    mem.embedding = point.vector
+                memories.append(mem)
+
+        # Sort by derived_at for consistent ordering
+        memories.sort(key=lambda m: m.derived_at)
+
+        return memories
+
+    async def mark_structured_consolidated(
+        self,
+        structured_ids: list[str],
+        user_id: str,
+        semantic_id: str,
+    ) -> int:
+        """Mark StructuredMemories as consolidated into a SemanticMemory.
+
+        Args:
+            structured_ids: List of StructuredMemory IDs to mark.
+            user_id: User ID for isolation.
+            semantic_id: ID of the SemanticMemory they were consolidated into.
+
+        Returns:
+            Number of memories updated.
+        """
+        collection = self._collection_name("structured")
+        updated = 0
+
+        for struct_id in structured_ids:
+            results, _ = await self.client.scroll(
+                collection_name=collection,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="id",
+                            match=models.MatchValue(value=struct_id),
+                        ),
+                        models.FieldCondition(
+                            key="user_id",
+                            match=models.MatchValue(value=user_id),
+                        ),
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+            )
+
+            if results:
+                point = results[0]
+                await self.client.set_payload(
+                    collection_name=collection,
+                    payload={
+                        "consolidated": True,
+                        "consolidated_into": semantic_id,
+                    },
+                    points=[point.id],
+                )
+                updated += 1
+
+        return updated
+
     async def list_semantic_memories(
         self,
         user_id: str,

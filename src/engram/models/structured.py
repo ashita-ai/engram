@@ -187,6 +187,16 @@ class StructuredMemory(MemoryBase):
         description="Composite confidence score (weighted by extraction methods)",
     )
 
+    # Consolidation tracking
+    consolidated: bool = Field(
+        default=False,
+        description="Whether this has been consolidated into SemanticMemory",
+    )
+    consolidated_into: str | None = Field(
+        default=None,
+        description="ID of the SemanticMemory this was consolidated into",
+    )
+
     @classmethod
     def from_episode(
         cls,
