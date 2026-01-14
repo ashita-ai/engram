@@ -14,7 +14,14 @@ from qdrant_client import models
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from engram.models import Episode, Fact, NegationFact, ProceduralMemory, SemanticMemory
+    from engram.models import (
+        Episode,
+        Fact,
+        NegationFact,
+        ProceduralMemory,
+        SemanticMemory,
+        StructuredMemory,
+    )
 
 MemoryT = TypeVar("MemoryT")
 
@@ -91,6 +98,59 @@ class SearchMixin:
         return [
             ScoredResult(
                 memory=self._payload_to_memory(r.payload, Episode),
+                score=r.score,
+            )
+            for r in results
+            if r.payload is not None
+        ]
+
+    async def search_structured(
+        self,
+        query_vector: Sequence[float],
+        user_id: str,
+        org_id: str | None = None,
+        limit: int = 10,
+        min_confidence: float | None = None,
+        source_episode_id: str | None = None,
+        derived_at_before: datetime | None = None,
+    ) -> list[ScoredResult[StructuredMemory]]:
+        """Search for similar structured memories.
+
+        Args:
+            query_vector: Query embedding vector.
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            limit: Maximum results to return.
+            min_confidence: Minimum confidence threshold.
+            source_episode_id: Filter by source episode.
+            derived_at_before: Only include memories derived before this time.
+
+        Returns:
+            List of ScoredResult[StructuredMemory] sorted by similarity.
+        """
+        from engram.models import StructuredMemory
+
+        filters = self._build_filters(
+            user_id, org_id, min_confidence, derived_at_before=derived_at_before
+        )
+        if source_episode_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="source_episode_id",
+                    match=models.MatchValue(value=source_episode_id),
+                )
+            )
+
+        results = await self._search(
+            collection="structured",
+            query_vector=query_vector,
+            filters=filters,
+            limit=limit,
+        )
+
+        return [
+            ScoredResult(
+                memory=self._payload_to_memory(r.payload, StructuredMemory),
                 score=r.score,
             )
             for r in results

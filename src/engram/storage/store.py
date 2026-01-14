@@ -10,7 +10,14 @@ from typing import TYPE_CHECKING, Any
 from qdrant_client import models
 
 if TYPE_CHECKING:
-    from engram.models import Episode, Fact, NegationFact, ProceduralMemory, SemanticMemory
+    from engram.models import (
+        Episode,
+        Fact,
+        NegationFact,
+        ProceduralMemory,
+        SemanticMemory,
+        StructuredMemory,
+    )
 
 
 class StoreMixin:
@@ -45,8 +52,21 @@ class StoreMixin:
         """
         return await self._store_memory(episode, "episodic")
 
+    async def store_structured(self, memory: StructuredMemory) -> str:
+        """Store a structured memory.
+
+        Args:
+            memory: StructuredMemory to store.
+
+        Returns:
+            The memory ID.
+        """
+        return await self._store_memory(memory, "structured")
+
     async def store_fact(self, fact: Fact) -> str:
         """Store a fact in the factual collection.
+
+        DEPRECATED: Use store_structured() instead.
 
         Args:
             fact: Fact to store.
@@ -91,7 +111,12 @@ class StoreMixin:
 
     async def _store_memory(
         self,
-        memory: Episode | Fact | SemanticMemory | ProceduralMemory | NegationFact,
+        memory: Episode
+        | StructuredMemory
+        | Fact
+        | SemanticMemory
+        | ProceduralMemory
+        | NegationFact,
         memory_type: str,
     ) -> str:
         """Store a memory in the appropriate collection.

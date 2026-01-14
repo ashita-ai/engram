@@ -17,11 +17,13 @@ if TYPE_CHECKING:
         NegationFact,
         ProceduralMemory,
         SemanticMemory,
+        StructuredMemory,
     )
 
 MemoryT = TypeVar(
     "MemoryT",
     "Episode",
+    "StructuredMemory",
     "Fact",
     "SemanticMemory",
     "ProceduralMemory",
@@ -59,8 +61,17 @@ class CRUDMixin:
 
         return await self._get_by_id(episode_id, user_id, "episodic", Episode)
 
+    async def get_structured(self, memory_id: str, user_id: str) -> StructuredMemory | None:
+        """Get a structured memory by ID."""
+        from engram.models import StructuredMemory
+
+        return await self._get_by_id(memory_id, user_id, "structured", StructuredMemory)
+
     async def get_fact(self, fact_id: str, user_id: str) -> Fact | None:
-        """Get a fact by ID."""
+        """Get a fact by ID.
+
+        DEPRECATED: Use get_structured() instead.
+        """
         from engram.models import Fact
 
         return await self._get_by_id(fact_id, user_id, "factual", Fact)
@@ -140,8 +151,15 @@ class CRUDMixin:
         """
         return await self._delete_by_id(episode_id, user_id, "episodic")
 
+    async def delete_structured(self, memory_id: str, user_id: str) -> bool:
+        """Delete a structured memory."""
+        return await self._delete_by_id(memory_id, user_id, "structured")
+
     async def delete_fact(self, fact_id: str, user_id: str) -> bool:
-        """Delete a fact."""
+        """Delete a fact.
+
+        DEPRECATED: Use delete_structured() instead.
+        """
         return await self._delete_by_id(fact_id, user_id, "factual")
 
     async def delete_semantic(self, memory_id: str, user_id: str) -> bool:
@@ -300,6 +318,230 @@ class CRUDMixin:
                 updated += 1
 
         return updated
+
+    async def list_structured_memories(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        with_negations_only: bool = False,
+        limit: int = 1000,
+    ) -> list[StructuredMemory]:
+        """List all structured memories for a user.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            with_negations_only: If True, only return memories that have negations.
+            limit: Maximum memories to return.
+
+        Returns:
+            List of StructuredMemory objects.
+        """
+        from engram.models import StructuredMemory
+
+        collection = self._collection_name("structured")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        memories: list[StructuredMemory] = []
+        for point in results:
+            if point.payload is not None:
+                memory = self._payload_to_memory(point.payload, StructuredMemory)
+                if isinstance(point.vector, list):
+                    memory.embedding = point.vector
+                # Filter for negations if requested
+                if with_negations_only and not memory.has_negations():
+                    continue
+                memories.append(memory)
+
+        return memories
+
+    async def get_unstructured_episodes(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        limit: int | None = 100,
+    ) -> list[Episode]:
+        """Get episodes that haven't been processed into StructuredMemory.
+
+        Used by the structure() workflow to find episodes needing processing.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            limit: Maximum episodes to return.
+
+        Returns:
+            List of unstructured Episodes, ordered by timestamp.
+        """
+        from engram.models import Episode
+
+        collection = self._collection_name("episodic")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+            models.FieldCondition(
+                key="structured",
+                match=models.MatchValue(value=False),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        # Use a high limit if none specified to get all
+        scroll_limit = limit if limit is not None else 10000
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=scroll_limit,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        episodes: list[Episode] = []
+        for point in results:
+            if point.payload is not None:
+                ep = self._payload_to_memory(point.payload, Episode)
+                if isinstance(point.vector, list):
+                    ep.embedding = point.vector
+                episodes.append(ep)
+
+        # Sort by timestamp for consistent ordering
+        episodes.sort(key=lambda e: e.timestamp)
+
+        return episodes
+
+    async def mark_episodes_structured(
+        self,
+        episode_ids: list[str],
+        user_id: str,
+        structured_id: str,
+    ) -> int:
+        """Mark episodes as structured and link to the StructuredMemory.
+
+        Called after structure() creates a StructuredMemory from an episode.
+        Sets `structured=True` and records which StructuredMemory was created.
+
+        Args:
+            episode_ids: IDs of episodes to mark.
+            user_id: User ID for ownership verification.
+            structured_id: ID of the StructuredMemory created from these episodes.
+
+        Returns:
+            Number of episodes updated.
+        """
+        collection = self._collection_name("episodic")
+        updated = 0
+
+        for episode_id in episode_ids:
+            # Find and update each episode
+            results, _ = await self.client.scroll(
+                collection_name=collection,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="id",
+                            match=models.MatchValue(value=episode_id),
+                        ),
+                        models.FieldCondition(
+                            key="user_id",
+                            match=models.MatchValue(value=user_id),
+                        ),
+                    ]
+                ),
+                limit=1,
+                with_payload=True,
+            )
+
+            if results:
+                point = results[0]
+                await self.client.set_payload(
+                    collection_name=collection,
+                    payload={
+                        "structured": True,
+                        "structured_into": structured_id,
+                    },
+                    points=[point.id],
+                )
+                updated += 1
+
+        return updated
+
+    async def get_structured_for_episode(
+        self,
+        episode_id: str,
+        user_id: str,
+    ) -> StructuredMemory | None:
+        """Get the StructuredMemory for a specific episode.
+
+        Args:
+            episode_id: The source episode ID.
+            user_id: User ID for isolation.
+
+        Returns:
+            StructuredMemory if found, None otherwise.
+        """
+        from engram.models import StructuredMemory
+
+        collection = self._collection_name("structured")
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source_episode_id",
+                        match=models.MatchValue(value=episode_id),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        if not results or results[0].payload is None:
+            return None
+
+        memory: StructuredMemory = self._payload_to_memory(results[0].payload, StructuredMemory)
+        if isinstance(results[0].vector, list):
+            memory.embedding = results[0].vector
+        return memory
 
     async def list_semantic_memories(
         self,

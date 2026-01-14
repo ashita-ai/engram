@@ -42,7 +42,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from engram.config import Settings
 from engram.embeddings import Embedder, get_embedder
 from engram.extraction import ExtractionPipeline, NegationDetector, default_pipeline
-from engram.models import AuditEntry, Episode, Fact, NegationFact, Staleness
+from engram.models import AuditEntry, Episode, Fact, NegationFact, QuickExtracts, Staleness
 from engram.storage import EngramStorage
 
 if TYPE_CHECKING:
@@ -399,7 +399,7 @@ class EngramService:
         # Use provided importance or default to 0.5 (will be recalculated after extraction)
         initial_importance = importance if importance is not None else 0.5
 
-        # Create episode
+        # Create episode first (we need it for extractors)
         episode = Episode(
             content=content,
             role=role,
@@ -409,6 +409,17 @@ class EngramService:
             importance=initial_importance,
             embedding=embedding,
         )
+
+        # Run quick deterministic extraction (emails, phones, URLs) for immediate access
+        # Extractors return Facts with .content field
+        from engram.extraction import EmailExtractor, PhoneExtractor, URLExtractor
+
+        emails: list[str] = [f.content for f in EmailExtractor().extract(episode)]
+        phones: list[str] = [f.content for f in PhoneExtractor().extract(episode)]
+        urls: list[str] = [f.content for f in URLExtractor().extract(episode)]
+
+        quick_extracts = QuickExtracts(emails=emails, phones=phones, urls=urls)
+        episode.quick_extracts = quick_extracts
 
         # Store episode
         await self.storage.store_episode(episode)
@@ -557,7 +568,15 @@ class EngramService:
         start_time = time.monotonic()
 
         # Determine which memory types to search (cognitive science terms)
-        all_types = {"episodic", "factual", "semantic", "procedural", "negation", "working"}
+        all_types = {
+            "episodic",
+            "structured",
+            "factual",
+            "semantic",
+            "procedural",
+            "negation",
+            "working",
+        }
         types_to_search = set(memory_types) if memory_types is not None else all_types
 
         # Generate query embedding
@@ -598,6 +617,53 @@ class EngramService:
                             "timestamp": ep.timestamp.isoformat(),
                             "consolidated": ep.consolidated,
                         },
+                    )
+                )
+
+        # Search structured memories (per-episode LLM extraction)
+        if "structured" in types_to_search:
+            scored_structured = await self.storage.search_structured(
+                query_vector=query_vector,
+                user_id=user_id,
+                org_id=org_id,
+                limit=search_limit,
+                min_confidence=min_confidence,
+            )
+            for scored_struct in scored_structured:
+                struct = scored_struct.memory
+                # Build metadata including extracted entities
+                struct_metadata: dict[str, Any] = {
+                    "source_episode_id": struct.source_episode_id,
+                    "derived_at": struct.derived_at.isoformat(),
+                    "keywords": struct.keywords,
+                }
+                if struct.emails:
+                    struct_metadata["emails"] = struct.emails
+                if struct.phones:
+                    struct_metadata["phones"] = struct.phones
+                if struct.people:
+                    struct_metadata["people"] = [p.name for p in struct.people]
+                if struct.organizations:
+                    struct_metadata["organizations"] = struct.organizations
+                if struct.preferences:
+                    struct_metadata["preferences"] = [
+                        {"topic": p.topic, "value": p.value} for p in struct.preferences
+                    ]
+                if struct.negations:
+                    struct_metadata["negations"] = [n.content for n in struct.negations]
+
+                results.append(
+                    RecallResult(
+                        memory_type="structured",
+                        content=struct.summary,
+                        score=scored_struct.score,
+                        confidence=struct.confidence.value,
+                        memory_id=struct.id,
+                        source_episode_id=struct.source_episode_id,
+                        source_episode_ids=[struct.source_episode_id],
+                        staleness=Staleness.FRESH,
+                        consolidated_at=struct.derived_at.isoformat(),
+                        metadata=struct_metadata,
                     )
                 )
 
@@ -1570,14 +1636,26 @@ class EngramService:
 
         logger = logging.getLogger(__name__)
 
-        # Get all negation facts for this user
-        negations = await self.storage.list_negation_facts(user_id, org_id)
+        # Collect negation patterns from two sources:
+        # 1. Legacy NegationFact collection (deprecated)
+        # 2. StructuredMemory.negations (preferred)
+        negated_patterns: set[str] = set()
 
-        if not negations:
+        # Get from legacy NegationFact collection
+        legacy_negations = await self.storage.list_negation_facts(user_id, org_id)
+        for neg in legacy_negations:
+            negated_patterns.add(neg.negates_pattern.lower())
+
+        # Get from StructuredMemory.negations (the new approach)
+        structured_memories = await self.storage.list_structured_memories(
+            user_id, org_id, with_negations_only=True
+        )
+        for struct in structured_memories:
+            for negation in struct.negations:
+                negated_patterns.add(negation.pattern.lower())
+
+        if not negated_patterns:
             return results
-
-        # Build set of negated patterns (lowercase for case-insensitive matching)
-        negated_patterns = {neg.negates_pattern.lower() for neg in negations}
 
         # Prepare embedding-based filtering if threshold is set
         pattern_embeddings: dict[str, list[float]] = {}
@@ -1671,6 +1749,10 @@ class EngramService:
         if result.memory_type == "episodic":
             ep = await self.storage.get_episode(result.memory_id, user_id)
             return ep.embedding if ep else None
+
+        elif result.memory_type == "structured":
+            struct = await self.storage.get_structured(result.memory_id, user_id)
+            return struct.embedding if struct else None
 
         elif result.memory_type == "factual":
             fact = await self.storage.get_fact(result.memory_id, user_id)

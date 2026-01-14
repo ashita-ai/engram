@@ -49,6 +49,12 @@ from .consolidation import (
 )
 from .decay import DecayResult, run_decay
 from .promotion import PromotionResult, run_promotion
+from .structure import (
+    LLMExtractionOutput,
+    StructureResult,
+    run_structure,
+    run_structure_batch,
+)
 
 if TYPE_CHECKING:
     pass
@@ -290,7 +296,11 @@ __all__ = [
     "ExtractedFact",
     "IdentifiedLink",
     "LLMExtractionResult",
+    "LLMExtractionOutput",
+    "StructureResult",
     "run_consolidation",
     "run_decay",
     "run_promotion",
+    "run_structure",
+    "run_structure_batch",
 ]

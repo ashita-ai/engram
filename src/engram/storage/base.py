@@ -19,6 +19,7 @@ from engram.models import (
     NegationFact,
     ProceduralMemory,
     SemanticMemory,
+    StructuredMemory,
 )
 
 if TYPE_CHECKING:
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
 MemoryT = TypeVar(
     "MemoryT",
     Episode,
+    StructuredMemory,
     Fact,
     SemanticMemory,
     ProceduralMemory,
@@ -38,6 +40,7 @@ MemoryT = TypeVar(
 # Collection names by memory type (keys match API memory_types values)
 COLLECTION_NAMES = {
     "episodic": "episodic",
+    "structured": "structured",
     "factual": "factual",
     "semantic": "semantic",
     "procedural": "procedural",
