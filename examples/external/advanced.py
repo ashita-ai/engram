@@ -127,10 +127,16 @@ async def main() -> None:
         ]
 
         print("  Batch 3: Corrections and negations...")
+        print("    (Using enrich=True for LLM negation detection)")
         negations_detected = 0
         for role, content in batch3:
             result = await engram.encode(
-                content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
+                content=content,
+                role=role,
+                user_id=user_id,
+                org_id=org_id,
+                session_id=session_id,
+                enrich=True,  # Required for negation detection
             )
             negations_detected += len(result.structured.negations)
         print(f"    → {len(batch3)} episodes, {negations_detected} negations detected")
@@ -217,11 +223,13 @@ async def main() -> None:
         for r in results_filtered[:4]:
             print(f"    {r.content[:55]}...")
 
-        removed = len(results_unfiltered) - len(results_filtered)
-        if removed > 0:
-            print(f"\n  ✓ Removed {removed} contradicted result(s) — fewer but accurate")
+        # Check if MongoDB results were filtered
+        unfiltered_mongo = sum(1 for r in results_unfiltered if "mongo" in r.content.lower())
+        filtered_mongo = sum(1 for r in results_filtered if "mongo" in r.content.lower())
+        if unfiltered_mongo > filtered_mongo:
+            print(f"\n  ✓ Filtered {unfiltered_mongo - filtered_mongo} MongoDB result(s)")
         print(
-            "\n  Behavior: Returns fewer results rather than backfilling with irrelevant content."
+            "\n  Behavior: Contradicted results filtered, backfilled with other relevant content."
         )
 
         # =====================================================================
