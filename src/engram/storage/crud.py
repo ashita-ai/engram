@@ -183,6 +183,60 @@ class CRUDMixin:
         deleted: bool = result.status == models.UpdateStatus.COMPLETED
         return deleted
 
+    async def delete_all_user_memories(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+    ) -> dict[str, int]:
+        """Delete all memories for a user (GDPR right to erasure).
+
+        Deletes all memories across all collections for a given user.
+        This is an irreversible operation intended for GDPR compliance.
+
+        Args:
+            user_id: User whose memories should be deleted.
+            org_id: Optional org filter (if provided, only deletes within org).
+
+        Returns:
+            Dict mapping memory type to count of deleted memories.
+        """
+        deleted_counts: dict[str, int] = {}
+        collections = ["episodic", "structured", "semantic", "procedural"]
+
+        for memory_type in collections:
+            collection = self._collection_name(memory_type)
+
+            # Build filter
+            must_conditions = [
+                models.FieldCondition(
+                    key="user_id",
+                    match=models.MatchValue(value=user_id),
+                ),
+            ]
+            if org_id is not None:
+                must_conditions.append(
+                    models.FieldCondition(
+                        key="org_id",
+                        match=models.MatchValue(value=org_id),
+                    )
+                )
+
+            # Count before deletion
+            count_result = await self.client.count(
+                collection_name=collection,
+                count_filter=models.Filter(must=must_conditions),
+            )
+
+            # Delete all matching
+            await self.client.delete(
+                collection_name=collection,
+                points_selector=models.FilterSelector(filter=models.Filter(must=must_conditions)),
+            )
+
+            deleted_counts[memory_type] = count_result.count
+
+        return deleted_counts
+
     async def get_unconsolidated_episodes(
         self,
         user_id: str,

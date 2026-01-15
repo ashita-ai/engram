@@ -147,6 +147,47 @@ class AuditEntry(BaseModel):
             duration_ms=duration_ms,
         )
 
+    @classmethod
+    def for_delete(
+        cls,
+        user_id: str,
+        memory_id: str,
+        memory_type: str,
+        org_id: str | None = None,
+        duration_ms: int | None = None,
+    ) -> "AuditEntry":
+        """Create audit entry for a delete operation."""
+        return cls(
+            event="delete",
+            user_id=user_id,
+            org_id=org_id,
+            details={
+                "memory_id": memory_id,
+                "memory_type": memory_type,
+            },
+            duration_ms=duration_ms,
+        )
+
+    @classmethod
+    def for_bulk_delete(
+        cls,
+        user_id: str,
+        deleted_counts: dict[str, int],
+        org_id: str | None = None,
+        duration_ms: int | None = None,
+    ) -> "AuditEntry":
+        """Create audit entry for a bulk delete operation (GDPR erasure)."""
+        return cls(
+            event="bulk_delete",
+            user_id=user_id,
+            org_id=org_id,
+            details={
+                "deleted_counts": deleted_counts,
+                "total_deleted": sum(deleted_counts.values()),
+            },
+            duration_ms=duration_ms,
+        )
+
     def __str__(self) -> str:
         """String representation showing event and user."""
         return f"AuditEntry({self.event} by {self.user_id})"

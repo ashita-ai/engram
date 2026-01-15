@@ -22,6 +22,8 @@ def mock_service():
     service = MagicMock(spec=EngramService)
     service.encode = AsyncMock()
     service.recall = AsyncMock()
+    # Add storage mock for delete endpoints
+    service.storage = MagicMock()
     return service
 
 
@@ -389,3 +391,177 @@ class TestSchemas:
                 user_id="user_123",
                 memory_types=["invalid_type"],  # type: ignore[list-item]
             )
+
+
+class TestDeleteEndpoint:
+    """Tests for DELETE /memories/{memory_id} endpoint."""
+
+    def test_delete_episode_success(self, client, mock_service):
+        """Should delete an episodic memory."""
+        mock_service.storage.delete_episode = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete(
+            "/api/v1/memories/ep_123",
+            params={"user_id": "user_123"},
+        )
+
+        assert response.status_code == 204
+        mock_service.storage.delete_episode.assert_called_once_with("ep_123", "user_123")
+        mock_service.storage.log_audit.assert_called_once()
+
+    def test_delete_structured_success(self, client, mock_service):
+        """Should delete a structured memory."""
+        mock_service.storage.delete_structured = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete(
+            "/api/v1/memories/struct_456",
+            params={"user_id": "user_123"},
+        )
+
+        assert response.status_code == 204
+        mock_service.storage.delete_structured.assert_called_once_with("struct_456", "user_123")
+
+    def test_delete_semantic_success(self, client, mock_service):
+        """Should delete a semantic memory."""
+        mock_service.storage.delete_semantic = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete(
+            "/api/v1/memories/sem_789",
+            params={"user_id": "user_123"},
+        )
+
+        assert response.status_code == 204
+        mock_service.storage.delete_semantic.assert_called_once_with("sem_789", "user_123")
+
+    def test_delete_procedural_success(self, client, mock_service):
+        """Should delete a procedural memory."""
+        mock_service.storage.delete_procedural = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete(
+            "/api/v1/memories/proc_abc",
+            params={"user_id": "user_123"},
+        )
+
+        assert response.status_code == 204
+        mock_service.storage.delete_procedural.assert_called_once_with("proc_abc", "user_123")
+
+    def test_delete_not_found(self, client, mock_service):
+        """Should return 404 when memory not found."""
+        mock_service.storage.delete_episode = AsyncMock(return_value=False)
+
+        response = client.delete(
+            "/api/v1/memories/ep_nonexistent",
+            params={"user_id": "user_123"},
+        )
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    def test_delete_invalid_prefix(self, client, mock_service):
+        """Should return 400 for invalid memory ID prefix."""
+        response = client.delete(
+            "/api/v1/memories/invalid_123",
+            params={"user_id": "user_123"},
+        )
+
+        assert response.status_code == 400
+        assert "Invalid memory ID format" in response.json()["detail"]
+
+    def test_delete_service_not_initialized(self):
+        """Should return 503 when service not initialized."""
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        set_service(None)  # type: ignore[arg-type]
+        test_client = TestClient(app)
+
+        response = test_client.delete(
+            "/api/v1/memories/ep_123",
+            params={"user_id": "user_123"},
+        )
+
+        assert response.status_code == 503
+
+
+class TestBulkDeleteEndpoint:
+    """Tests for DELETE /users/{user_id}/memories endpoint."""
+
+    def test_bulk_delete_success(self, client, mock_service):
+        """Should delete all user memories and return counts."""
+        mock_service.storage.delete_all_user_memories = AsyncMock(
+            return_value={
+                "episodic": 5,
+                "structured": 3,
+                "semantic": 2,
+                "procedural": 1,
+            }
+        )
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete("/api/v1/users/user_123/memories")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["user_id"] == "user_123"
+        assert data["total_deleted"] == 11
+        assert data["deleted_counts"]["episodic"] == 5
+        assert data["deleted_counts"]["structured"] == 3
+        mock_service.storage.log_audit.assert_called_once()
+
+    def test_bulk_delete_with_org_filter(self, client, mock_service):
+        """Should filter by org_id when provided."""
+        mock_service.storage.delete_all_user_memories = AsyncMock(
+            return_value={
+                "episodic": 2,
+                "structured": 1,
+                "semantic": 0,
+                "procedural": 0,
+            }
+        )
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete(
+            "/api/v1/users/user_123/memories",
+            params={"org_id": "org_456"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["org_id"] == "org_456"
+        assert data["total_deleted"] == 3
+        mock_service.storage.delete_all_user_memories.assert_called_once_with(
+            user_id="user_123",
+            org_id="org_456",
+        )
+
+    def test_bulk_delete_no_memories(self, client, mock_service):
+        """Should return 0 counts when user has no memories."""
+        mock_service.storage.delete_all_user_memories = AsyncMock(
+            return_value={
+                "episodic": 0,
+                "structured": 0,
+                "semantic": 0,
+                "procedural": 0,
+            }
+        )
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete("/api/v1/users/user_123/memories")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total_deleted"] == 0
+
+    def test_bulk_delete_service_not_initialized(self):
+        """Should return 503 when service not initialized."""
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        set_service(None)  # type: ignore[arg-type]
+        test_client = TestClient(app)
+
+        response = test_client.delete("/api/v1/users/user_123/memories")
+
+        assert response.status_code == 503

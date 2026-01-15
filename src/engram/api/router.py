@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from engram.models import AuditEntry
 from engram.service import EngramService
 
 from .schemas import (
+    BulkDeleteResponse,
     ConfidenceStats,
     EncodeRequest,
     EncodeResponse,
@@ -530,4 +533,161 @@ async def verify_memory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while verifying the memory",
+        ) from e
+
+
+@router.delete(
+    "/memories/{memory_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["memory"],
+)
+async def delete_memory(
+    memory_id: str,
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+) -> None:
+    """Delete a specific memory by ID.
+
+    Deletes a memory from the appropriate collection based on its ID prefix.
+    Supported memory types:
+    - ep_*: Episodic memories (ground truth)
+    - struct_*: Structured memories (extracted facts)
+    - sem_*: Semantic memories (consolidated knowledge)
+    - proc_*: Procedural memories (behavioral patterns)
+
+    Args:
+        memory_id: ID of the memory to delete.
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+        org_id: Optional organization ID.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if memory not found.
+    """
+    start_time = time.time()
+
+    # Determine memory type from ID prefix and call appropriate delete method
+    if memory_id.startswith("ep_"):
+        memory_type = "episodic"
+    elif memory_id.startswith("struct_"):
+        memory_type = "structured"
+    elif memory_id.startswith("sem_"):
+        memory_type = "semantic"
+    elif memory_id.startswith("proc_"):
+        memory_type = "procedural"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Expected prefix: ep_, struct_, sem_, or proc_",
+        )
+
+    try:
+        # Call appropriate delete method based on memory type
+        if memory_type == "episodic":
+            deleted = await service.storage.delete_episode(memory_id, user_id)
+        elif memory_type == "structured":
+            deleted = await service.storage.delete_structured(memory_id, user_id)
+        elif memory_type == "semantic":
+            deleted = await service.storage.delete_semantic(memory_id, user_id)
+        else:  # procedural
+            deleted = await service.storage.delete_procedural(memory_id, user_id)
+
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Memory not found: {memory_id}",
+            )
+
+        # Log audit entry for deletion
+        duration_ms = int((time.time() - start_time) * 1000)
+        audit_entry = AuditEntry.for_delete(
+            user_id=user_id,
+            memory_id=memory_id,
+            memory_type=memory_type,
+            org_id=org_id,
+            duration_ms=duration_ms,
+        )
+        await service.storage.log_audit(audit_entry)
+
+        logger.info("Deleted %s memory %s for user %s", memory_type, memory_id, user_id)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete memory %s", memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while deleting the memory",
+        ) from e
+
+
+@router.delete(
+    "/users/{user_id}/memories",
+    response_model=BulkDeleteResponse,
+    tags=["memory"],
+)
+async def delete_all_user_memories(
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+) -> BulkDeleteResponse:
+    """Delete all memories for a user (GDPR right to erasure).
+
+    This endpoint permanently deletes all memories across all collections
+    for the specified user. This operation is irreversible and is intended
+    for GDPR compliance (right to erasure / right to be forgotten).
+
+    Args:
+        user_id: User ID whose memories should be deleted.
+        service: Injected EngramService.
+        org_id: Optional organization ID filter.
+
+    Returns:
+        Counts of deleted memories by type.
+
+    Raises:
+        HTTPException: If deletion fails.
+    """
+    start_time = time.time()
+
+    try:
+        deleted_counts = await service.storage.delete_all_user_memories(
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+        total_deleted = sum(deleted_counts.values())
+
+        # Log audit entry for bulk deletion
+        duration_ms = int((time.time() - start_time) * 1000)
+        audit_entry = AuditEntry.for_bulk_delete(
+            user_id=user_id,
+            deleted_counts=deleted_counts,
+            org_id=org_id,
+            duration_ms=duration_ms,
+        )
+        await service.storage.log_audit(audit_entry)
+
+        logger.info(
+            "Bulk deleted %d memories for user %s: %s",
+            total_deleted,
+            user_id,
+            deleted_counts,
+        )
+
+        return BulkDeleteResponse(
+            user_id=user_id,
+            org_id=org_id,
+            deleted_counts=deleted_counts,
+            total_deleted=total_deleted,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to bulk delete memories for user %s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while deleting user memories",
         ) from e
