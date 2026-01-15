@@ -230,8 +230,11 @@ async def main() -> None:
         print(f"  Without negation filter: {len(mongodb_results)} results")
         print(f"  With negation filter:    {len(mongodb_filtered)} results")
 
-        if len(mongodb_results) > len(mongodb_filtered):
-            print("\n  Filtered out content matching 'I don't use MongoDB'")
+        # Check if MongoDB results were filtered
+        unfiltered_mongo = sum(1 for r in mongodb_results if "mongo" in r.content.lower())
+        filtered_mongo = sum(1 for r in mongodb_filtered if "mongo" in r.content.lower())
+        if unfiltered_mongo > filtered_mongo:
+            print(f"\n  ✓ Filtered {unfiltered_mongo - filtered_mongo} MongoDB result(s)")
 
     shutdown_workflows()
 
