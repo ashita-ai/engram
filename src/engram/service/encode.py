@@ -5,7 +5,6 @@ Provides the encode() method for storing memories.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -181,8 +180,15 @@ class EncodeMixin:
             # Synchronous enrichment - blocks until complete, returns enriched version
             structured = await self._enrich_structured_sync(episode, structured)
         elif enrich == "background":
-            # Background enrichment - fire and forget
-            asyncio.create_task(self._enrich_structured_background(episode, structured))
+            # Durable background enrichment - uses DBOS/Temporal/Prefect
+            # If process crashes, enrichment will be retried automatically
+            from engram.workflows.structure import schedule_durable_enrichment
+
+            await schedule_durable_enrichment(
+                episode_id=episode.id,
+                user_id=user_id,
+                org_id=org_id,
+            )
 
         # High-importance episodes trigger immediate consolidation
         if calculated_importance >= self.settings.high_importance_threshold:

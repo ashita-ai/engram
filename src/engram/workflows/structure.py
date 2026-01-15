@@ -402,6 +402,210 @@ async def run_structure_batch(
     return results
 
 
+async def schedule_durable_enrichment(
+    episode_id: str,
+    user_id: str,
+    org_id: str | None = None,
+) -> None:
+    """Schedule durable background enrichment for an episode.
+
+    This function schedules the enrichment to run via the configured
+    durable backend (DBOS, Temporal, or Prefect). If the process crashes,
+    the enrichment will be retried automatically.
+
+    Args:
+        episode_id: ID of the episode to enrich.
+        user_id: User ID for storage access.
+        org_id: Optional org ID.
+    """
+    from engram.config import settings
+
+    backend = settings.durable_backend.lower()
+
+    if backend == "dbos":
+        await _schedule_dbos_enrichment(episode_id, user_id, org_id)
+    elif backend == "temporal":
+        await _schedule_temporal_enrichment(episode_id, user_id, org_id)
+    elif backend == "prefect":
+        await _schedule_prefect_enrichment(episode_id, user_id, org_id)
+    else:
+        # Fallback to non-durable asyncio (logs warning)
+        logger.warning(
+            f"Unknown durable backend '{backend}', using non-durable asyncio. "
+            "Enrichment may be lost if process crashes."
+        )
+        import asyncio
+
+        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
+
+
+async def _run_enrichment_task(
+    episode_id: str,
+    user_id: str,
+    org_id: str | None = None,
+) -> None:
+    """Run enrichment for a single episode (internal task).
+
+    This is the actual enrichment logic, used by all backends.
+
+    Args:
+        episode_id: ID of the episode to enrich.
+        user_id: User ID for storage access.
+        org_id: Optional org ID (not used in get_episode, kept for API consistency).
+    """
+    from engram.embeddings import get_embedder
+    from engram.storage import EngramStorage
+
+    try:
+        async with EngramStorage() as storage:
+            embedder = get_embedder()
+
+            # Get the episode (org_id filtering happens via user isolation)
+            episode = await storage.get_episode(episode_id, user_id)
+            if not episode:
+                logger.warning(f"Episode {episode_id} not found for enrichment")
+                return
+
+            # Run structure workflow
+            result = await run_structure(
+                episode=episode,
+                storage=storage,
+                embedder=embedder,
+                skip_if_structured=False,  # Force enrichment
+            )
+
+            if result:
+                logger.info(
+                    f"Durable enrichment completed for {episode_id}: "
+                    f"{result.llm_count} LLM extracts"
+                )
+            else:
+                logger.warning(f"Enrichment returned no result for {episode_id}")
+
+    except Exception as e:
+        logger.error(f"Durable enrichment failed for {episode_id}: {e}")
+        raise  # Re-raise for durable retry
+
+
+async def _schedule_dbos_enrichment(
+    episode_id: str,
+    user_id: str,
+    org_id: str | None = None,
+) -> None:
+    """Schedule enrichment via DBOS durable execution."""
+    try:
+        from dbos import DBOS
+
+        # DBOS.start_workflow schedules durable async execution
+        # The workflow will be retried if it fails
+        DBOS.start_workflow(
+            _dbos_enrich_episode,
+            episode_id,
+            user_id,
+            org_id,
+        )
+        logger.debug(f"Scheduled DBOS enrichment for {episode_id}")
+
+    except ImportError:
+        logger.warning("DBOS not available, falling back to asyncio")
+        import asyncio
+
+        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
+    except Exception as e:
+        logger.error(f"Failed to schedule DBOS enrichment: {e}")
+        # Fallback to asyncio
+        import asyncio
+
+        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
+
+
+async def _schedule_temporal_enrichment(
+    episode_id: str,
+    user_id: str,
+    org_id: str | None = None,
+) -> None:
+    """Schedule enrichment via Temporal workflow."""
+    try:
+        from temporalio.client import Client
+
+        from engram.config import settings
+
+        # Connect to Temporal and start workflow
+        client = await Client.connect(settings.temporal_address)
+        await client.start_workflow(
+            "enrich_episode",
+            args=[episode_id, user_id, org_id],
+            id=f"enrich-{episode_id}",
+            task_queue=settings.temporal_task_queue,
+        )
+        logger.debug(f"Scheduled Temporal enrichment for {episode_id}")
+
+    except ImportError:
+        logger.warning("Temporal not available, falling back to asyncio")
+        import asyncio
+
+        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
+    except Exception as e:
+        logger.error(f"Failed to schedule Temporal enrichment: {e}")
+        import asyncio
+
+        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
+
+
+async def _schedule_prefect_enrichment(
+    episode_id: str,
+    user_id: str,
+    org_id: str | None = None,
+) -> None:
+    """Schedule enrichment via Prefect task."""
+    try:
+        from prefect import flow  # type: ignore[import-not-found]
+
+        # Create and run Prefect flow
+        @flow(name=f"enrich-{episode_id}")  # type: ignore[untyped-decorator]
+        async def enrich_flow() -> None:
+            await _run_enrichment_task(episode_id, user_id, org_id)
+
+        # Submit for background execution
+        await enrich_flow()
+        logger.debug(f"Scheduled Prefect enrichment for {episode_id}")
+
+    except ImportError:
+        logger.warning("Prefect not available, falling back to asyncio")
+        import asyncio
+
+        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
+    except Exception as e:
+        logger.error(f"Failed to schedule Prefect enrichment: {e}")
+        import asyncio
+
+        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
+
+
+# DBOS workflow function (must be defined at module level for DBOS registration)
+def _dbos_enrich_episode(
+    episode_id: str,
+    user_id: str,
+    org_id: str | None = None,
+) -> None:
+    """DBOS workflow for durable episode enrichment.
+
+    This function is decorated by DBOS at runtime if DBOS is available.
+    """
+    import asyncio
+
+    asyncio.run(_run_enrichment_task(episode_id, user_id, org_id))
+
+
+# Try to register DBOS workflow at import time
+try:
+    from dbos import DBOS
+
+    _dbos_enrich_episode = DBOS.workflow()(_dbos_enrich_episode)
+except ImportError:
+    pass  # DBOS not available
+
+
 __all__ = [
     "ExtractedDate",
     "ExtractedNegation",
@@ -411,4 +615,5 @@ __all__ = [
     "StructureResult",
     "run_structure",
     "run_structure_batch",
+    "schedule_durable_enrichment",
 ]

@@ -145,13 +145,13 @@ This is an **engineering construct** for storing semantic negations (e.g., "User
 
 Expensive LLM work is batched and deferred:
 
-| Operation | When | Cost |
-|-----------|------|------|
-| Episode storage | Immediate | Low (embed + store) |
-| Pattern extraction | Immediate | Low (regex: emails, phones, URLs) |
-| Structure (LLM) | Immediate or Background | Medium (LLM enrichment) |
-| Consolidation | Scheduled | Medium (LLM, batched) |
-| Decay | Scheduled | Low (math) |
+| Operation | When | Cost | Durable |
+|-----------|------|------|---------|
+| Episode storage | Immediate | Low (embed + store) | N/A |
+| Pattern extraction | Immediate | Low (regex: emails, phones, URLs) | N/A |
+| Structure (LLM) | Immediate or Background | Medium (LLM enrichment) | Yes (DBOS/Temporal) |
+| Consolidation | Scheduled | Medium (LLM, batched) | Yes (DBOS/Temporal) |
+| Decay | Scheduled | Low (math) | Yes (DBOS/Temporal) |
 
 ### 8. Hierarchical Memory Compression
 
