@@ -15,10 +15,9 @@ from engram.config import settings
 from engram.models import (
     AuditEntry,
     Episode,
-    Fact,
-    NegationFact,
     ProceduralMemory,
     SemanticMemory,
+    StructuredMemory,
 )
 
 if TYPE_CHECKING:
@@ -28,20 +27,18 @@ if TYPE_CHECKING:
 MemoryT = TypeVar(
     "MemoryT",
     Episode,
-    Fact,
+    StructuredMemory,
     SemanticMemory,
     ProceduralMemory,
-    NegationFact,
     AuditEntry,
 )
 
 # Collection names by memory type (keys match API memory_types values)
 COLLECTION_NAMES = {
     "episodic": "episodic",
-    "factual": "factual",
+    "structured": "structured",
     "semantic": "semantic",
     "procedural": "procedural",
-    "negation": "negation",
     "audit": "audit",
 }
 

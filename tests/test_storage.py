@@ -10,8 +10,6 @@ from qdrant_client import AsyncQdrantClient
 from engram.models import (
     AuditEntry,
     Episode,
-    Fact,
-    NegationFact,
     ProceduralMemory,
     SemanticMemory,
 )
@@ -56,22 +54,23 @@ class TestEngramStorageInit:
         names = [c.name for c in collections.collections]
 
         assert "test_episodic" in names
-        assert "test_factual" in names
+        assert "test_structured" in names
         assert "test_semantic" in names
         assert "test_procedural" in names
-        assert "test_negation" in names
         assert "test_audit" in names
 
     async def test_context_manager(self, storage: EngramStorage):
         """Storage should work as async context manager (tested via fixture)."""
         # The fixture itself uses async context manager pattern
         collections = await storage.client.get_collections()
-        assert len(collections.collections) == 6
+        assert (
+            len(collections.collections) == 5
+        )  # episodic, structured, semantic, procedural, audit
 
     def test_collection_name(self, storage: EngramStorage):
         """_collection_name should apply prefix correctly."""
         assert storage._collection_name("episodic") == "test_episodic"
-        assert storage._collection_name("factual") == "test_factual"
+        assert storage._collection_name("structured") == "test_structured"
         assert storage._collection_name("semantic") == "test_semantic"
 
     def test_build_key_with_org(self):
@@ -176,59 +175,6 @@ class TestEpisodeStorage:
         assert result is None
 
 
-class TestFactStorage:
-    """Tests for fact storage operations."""
-
-    async def test_store_and_get_fact(self, storage: EngramStorage):
-        """Should store and retrieve a fact."""
-        fact = Fact(
-            content="email=test@example.com",
-            category="email",
-            source_episode_id="ep_123",
-            user_id="user_123",
-            embedding=make_embedding(),
-        )
-
-        await storage.store_fact(fact)
-        retrieved = await storage.get_fact(fact.id, "user_123")
-
-        assert retrieved is not None
-        assert retrieved.content == "email=test@example.com"
-        assert retrieved.category == "email"
-
-    async def test_search_facts_by_category(self, storage: EngramStorage):
-        """Should filter facts by category."""
-        # Store facts of different categories
-        email_fact = Fact(
-            content="email=a@b.com",
-            category="email",
-            source_episode_id="ep_1",
-            user_id="user_123",
-            embedding=make_embedding(0.1),
-        )
-        phone_fact = Fact(
-            content="phone=555-1234",
-            category="phone",
-            source_episode_id="ep_2",
-            user_id="user_123",
-            embedding=make_embedding(0.2),
-        )
-
-        await storage.store_fact(email_fact)
-        await storage.store_fact(phone_fact)
-
-        # Search for emails only
-        results = await storage.search_facts(
-            query_vector=make_embedding(0.1),
-            user_id="user_123",
-            category="email",
-        )
-
-        assert len(results) == 1
-        assert results[0].memory.category == "email"
-        assert results[0].score > 0
-
-
 class TestSemanticMemoryStorage:
     """Tests for semantic memory storage."""
 
@@ -303,26 +249,6 @@ class TestProceduralMemoryStorage:
 
         assert retrieved is not None
         assert retrieved.content == "User likes verbose responses"
-
-
-class TestNegationFactStorage:
-    """Tests for negation fact storage."""
-
-    async def test_store_and_get_negation(self, storage: EngramStorage):
-        """Should store and retrieve negation fact."""
-        fact = NegationFact(
-            content="User does NOT use MongoDB",
-            negates_pattern="mongodb",
-            user_id="user_123",
-            embedding=make_embedding(),
-        )
-
-        await storage.store_negation(fact)
-        retrieved = await storage.get_negation(fact.id, "user_123")
-
-        assert retrieved is not None
-        assert retrieved.content == "User does NOT use MongoDB"
-        assert retrieved.negates_pattern == "mongodb"
 
 
 class TestAuditLogging:

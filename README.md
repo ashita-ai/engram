@@ -32,11 +32,11 @@ Engram preserves ground truth and tracks confidence:
 
 1. **Store first, derive later** — Raw conversations stored verbatim. LLM extraction happens in background where errors can be caught.
 
-2. **Track confidence** — Every fact carries a composite confidence score: extraction method + corroboration + recency + verification. Fully auditable.
+2. **Track confidence** — Every memory carries a composite confidence score: extraction method + corroboration + recency + verification. Fully auditable.
 
-3. **Verify on retrieval** — Applications filter by confidence. High-stakes queries use only trusted facts.
+3. **Verify on retrieval** — Applications filter by confidence. High-stakes queries use only trusted memories.
 
-4. **Enable recovery** — Derived facts trace to sources. Errors can be corrected by re-deriving.
+4. **Enable recovery** — Derived memories trace to sources. Errors can be corrected by re-deriving.
 
 ## How Trust Works
 
@@ -45,9 +45,9 @@ User: "My email is john@example.com"
     ↓
 Episodic Memory (immutable, verbatim)
     ↓
-Factual Memory: email=john@example.com
+Structured Memory: emails=["john@example.com"]
 ├── Source: Episode #1234
-├── Extraction: pattern match (deterministic)
+├── Extraction: regex pattern match (deterministic)
 └── Confidence: 0.9
 
 Later query: "What's the user's email?"
@@ -69,10 +69,9 @@ flowchart LR
     subgraph CORE [" "]
         direction TB
         EP([📝 EPISODIC])
-        FACT{{📊 FACTUAL}}
+        STRUCT{{📊 STRUCTURED}}
         SEM([💡 SEMANTIC])
         PROC([⚙️ PROCEDURAL])
-        NEG([🚫 NEGATION])
     end
 
     subgraph STORE [" "]
@@ -81,23 +80,20 @@ flowchart LR
     end
 
     WM ==>|encode| EP
-    EP -->|extract| FACT
-    EP -->|extract| NEG
+    EP -->|extract| STRUCT
     EP -->|consolidate| SEM
     SEM -->|synthesize| PROC
 
     EP -.->|store| QD
-    FACT -.->|store| QD
+    STRUCT -.->|store| QD
     SEM -.->|store| QD
     PROC -.->|store| QD
-    NEG -.->|store| QD
 
     style WM fill:#fbbf24,stroke:#b45309,stroke-width:3px,color:#1c1917
     style EP fill:#a78bfa,stroke:#7c3aed,stroke-width:3px,color:#1c1917
-    style FACT fill:#60a5fa,stroke:#2563eb,stroke-width:3px,color:#1c1917
+    style STRUCT fill:#60a5fa,stroke:#2563eb,stroke-width:3px,color:#1c1917
     style SEM fill:#34d399,stroke:#059669,stroke-width:3px,color:#1c1917
     style PROC fill:#f472b6,stroke:#db2777,stroke-width:3px,color:#1c1917
-    style NEG fill:#f87171,stroke:#dc2626,stroke-width:3px,color:#1c1917
     style QD fill:#fb923c,stroke:#c2410c,stroke-width:3px,color:#1c1917
 
     style INPUT fill:transparent,stroke:#fbbf24,stroke-width:2px,stroke-dasharray:5
@@ -109,10 +105,9 @@ flowchart LR
 |------|------------|--------|----------|
 | **Working** | N/A | Current context | Active conversation (in-memory, volatile) |
 | **Episodic** | Highest | Verbatim storage | Ground truth, audit trail |
-| **Factual** | High | Pattern extraction | Emails, dates, names |
-| **Semantic** | Variable | LLM inference | Preferences, context |
-| **Procedural** | Variable | LLM inference | Behavioral preferences |
-| **Negation** | High | Pattern extraction | What is NOT true |
+| **Structured** | High | Pattern extraction + LLM | Emails, phones, URLs, people, preferences, negations |
+| **Semantic** | Variable | LLM inference | Cross-episode knowledge synthesis |
+| **Procedural** | Variable | LLM inference | Behavioral patterns and preferences |
 
 ## Hierarchical Memory Consolidation
 
@@ -121,7 +116,7 @@ Engram implements **hierarchical compression** based on cognitive science resear
 ```
 EPISODIC (raw, immutable, automatic)
     │
-    ├──→ FACTS/NEGATIONS (pattern-extracted, high confidence)
+    ├──→ STRUCTURED (per-episode extraction: emails, phones, negations)
     │
     └──→ SEMANTIC (LLM summary of N episodes → 1 memory)
               │
@@ -132,7 +127,7 @@ EPISODIC (raw, immutable, automatic)
 
 | Stage | Input | Output | Compression |
 |-------|-------|--------|-------------|
-| **Encode** | 1 message | 1 episode + N facts | None (ground truth) |
+| **Encode** | 1 message | 1 episode + 1 structured | None (ground truth) |
 | **Consolidate** | N episodes | 1 semantic summary | N:1 |
 | **Synthesize** | All semantics | 1 procedural memory | ∞:1 |
 
@@ -180,9 +175,9 @@ User: "My email is user@example.com"
 └─────────────────────────────────────────────────────────────┘
                 ↓ pattern extraction
 ┌─────────────────────────────────────────────────────────────┐
-│  Fact                                                       │
-│  ├── content: "user@example.com"                           │
-│  ├── category: "email"                                      │
+│  StructuredMemory                                           │
+│  ├── emails: ["user@example.com"]                          │
+│  ├── mode: "fast"                                          │
 │  └── embedding: [0.23, -0.45, 0.67, ...]  ← semantic search │
 └─────────────────────────────────────────────────────────────┘
                 ↓ consolidation (LLM)
@@ -198,11 +193,11 @@ User: "My email is user@example.com"
 | Stage | What happens | Semantic capability |
 |-------|--------------|---------------------|
 | **Encode** | Episode embedded | "contact" finds "my email is..." |
-| **Extract** | Facts embedded | "email" finds "user@example.com" |
+| **Extract** | Structured embedded | "email" finds "user@example.com" |
 | **Consolidate** | Semantic memories embedded | "communication preferences" finds derived insights |
 | **Recall** | Query embedded, similarity search | Natural language queries work |
 
-**Pattern extraction is an optimization, not a limitation.** Deterministic extractors (emails, phones, dates) provide high-confidence facts quickly. The embedding layer makes everything semantically discoverable regardless of extraction method.
+**Pattern extraction is an optimization, not a limitation.** Deterministic extractors (emails, phones, dates) provide high-confidence data quickly. The embedding layer makes everything semantically discoverable regardless of extraction method.
 
 ```python
 # These all work via semantic similarity:
@@ -220,7 +215,7 @@ Pattern matching before LLMs — no hallucination possible:
 ```python
 # High confidence, reproducible
 EMAIL_PATTERN = r'\b[\w.-]+@[\w.-]+\.\w+\b'
-facts = extract_patterns(message, [EMAIL_PATTERN])
+emails = extract_patterns(message, [EMAIL_PATTERN])
 ```
 
 ### 2. Defer LLM Work
@@ -230,10 +225,10 @@ Batch in background where errors can be caught:
 ```python
 # Critical path: store ground truth + extract patterns
 result = await engram.encode(content, role="user", user_id="u1")  # Fast, no LLM
-# Facts extracted immediately via regex (emails, phones, dates)
+# Emails, phones, URLs extracted immediately via regex
 
-# Background: derive semantics with oversight (coming soon)
-# await engram.consolidate()  # LLM extraction, batched
+# Background: derive semantics with oversight
+await engram.consolidate(user_id="u1")  # LLM extraction, batched
 ```
 
 ### 3. Confidence-Gated Retrieval
@@ -241,7 +236,7 @@ result = await engram.encode(content, role="user", user_id="u1")  # Fast, no LLM
 Applications choose their trust level:
 
 ```python
-# High-stakes: only verified facts
+# High-stakes: only verified memories
 trusted = await engram.recall(query, user_id="u1", min_confidence=0.9)
 
 # Exploratory: include inferences
@@ -250,17 +245,17 @@ all_relevant = await engram.recall(query, user_id="u1", min_confidence=0.5)
 
 ### 4. Source Verification
 
-Trace any fact back to its source:
+Trace any memory back to its source:
 
 ```python
 # Debug: why does the system believe this?
-result = await engram.verify("fact_abc123", user_id="u1")
+result = await engram.verify("sem_abc123", user_id="u1")
 print(result.explanation)
-# → "Pattern-matched email from source episode(s). Source: ep_xyz (2024-01-15 10:30). Confidence: 0.90"
+# → "LLM-inferred from source episode(s). Source: ep_xyz (2024-01-15 10:30). Confidence: 0.90"
 
 # Get raw source episodes
-episodes = await engram.get_sources("fact_abc123", user_id="u1")
-# → Returns original conversation where email was mentioned
+episodes = await engram.get_sources("sem_abc123", user_id="u1")
+# → Returns original conversation where info was mentioned
 ```
 
 ## Usage
@@ -277,17 +272,17 @@ async with EngramService.create() as engram:
         user_id="user_123",
     )
     print(f"Stored episode {result.episode.id}")
-    print(f"Extracted {len(result.facts)} facts")
+    print(f"Extracted emails: {result.structured.emails}")
 
     # Retrieve with confidence filtering
     memories = await engram.recall(
         query="What's the user's email?",
         user_id="user_123",
-        memory_types=["factual", "semantic"],
+        memory_types=["structured", "semantic"],
         min_confidence=0.7,
     )
 
-    # Verify a specific fact
+    # Verify a specific memory
     if memories:
         verified = await engram.verify(memories[0].memory_id, user_id="user_123")
         print(verified.explanation)
@@ -331,7 +326,7 @@ Engram isn't just storage—it's a system that learns:
 | Operation | When | Cost |
 |-----------|------|------|
 | Store episode | Every message | Low (embed + store) |
-| Extract facts | Every message | Low (regex, no LLM) |
+| Extract structured | Every message | Low (regex, no LLM) |
 | Infer semantics | Background | Medium (LLM, batched) |
 
 ## Documentation

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Memory types overview demo.
 
-Demonstrates Engram's six memory types:
-1. Working - Current session context (volatile)
-2. Episodic - Raw interactions (immutable ground truth)
-3. Factual - Pattern-extracted facts (high confidence)
-4. Semantic - LLM-inferred knowledge (variable confidence)
-5. Procedural - Behavioral patterns (how to do things)
-6. Negation - What is NOT true (prevents contradictions)
+Demonstrates Engram's four persistent memory types:
+1. Episodic - Raw interactions (immutable ground truth)
+2. Structured - Per-episode extraction (emails, phones, URLs, negations)
+3. Semantic - LLM-inferred knowledge (variable confidence)
+4. Procedural - Behavioral patterns (how to do things)
+
+Working memory (volatile, in-session) is also available but not persisted.
 
 No external dependencies required - runs entirely locally.
 """
@@ -15,10 +15,10 @@ No external dependencies required - runs entirely locally.
 from engram.models import (
     ConfidenceScore,
     Episode,
-    Fact,
-    NegationFact,
+    Negation,
     ProceduralMemory,
     SemanticMemory,
+    StructuredMemory,
 )
 
 
@@ -31,7 +31,7 @@ def main() -> None:
     # Overview
     # =========================================================================
     print("""
-  Engram organizes memory into six types, inspired by cognitive science:
+  Engram organizes memory into four persistent types:
 
   ┌─────────────────────────────────────────────────────────────────────┐
   │  WORKING MEMORY (volatile, in-session only)                        │
@@ -44,19 +44,24 @@ def main() -> None:
   │    └─> Raw interactions stored verbatim, never modified            │
   └─────────────────────────────────────────────────────────────────────┘
                                     │
-              ┌─────────────────────┼─────────────────────┐
-              ▼                     ▼                     ▼
-  ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
-  │  FACTUAL          │ │  SEMANTIC         │ │  NEGATION         │
-  │  (extracted)      │ │  (inferred)       │ │  (what's NOT true)│
-  │  emails, phones   │ │  preferences      │ │  contradictions   │
-  │  dates, names     │ │  knowledge        │ │  corrections      │
-  └───────────────────┘ └───────────────────┘ └───────────────────┘
+                                    ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │  STRUCTURED MEMORY (per-episode extraction)                        │
+  │    └─> Regex extracts (emails, phones, URLs)                       │
+  │    └─> Negations (what is NOT true)                                │
+  │    └─> LLM enrichment optional (people, preferences, dates)        │
+  └─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │  SEMANTIC MEMORY (cross-episode LLM synthesis)                     │
+  │    └─> Consolidates multiple episodes into summarized knowledge    │
+  └─────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
   ┌─────────────────────────────────────────────────────────────────────┐
   │  PROCEDURAL MEMORY (behavioral patterns)                           │
-  │    └─> How to do things, promoted from semantic memories           │
+  │    └─> How to interact with this user, promoted from semantic      │
   └─────────────────────────────────────────────────────────────────────┘
     """)
 
@@ -103,7 +108,7 @@ def main() -> None:
     print(f"    Role: {episode.role}")
     print(f"    Timestamp: {episode.timestamp}")
     print(f"    Importance: {episode.importance}")
-    print(f"    Consolidated: {episode.consolidated}")
+    print(f"    Summarized: {episode.summarized}")
 
     print("""
   Key Properties:
@@ -113,34 +118,55 @@ def main() -> None:
     """)
 
     # =========================================================================
-    # 3. Factual Memory
+    # 3. Structured Memory
     # =========================================================================
-    print("\n3. FACTUAL MEMORY")
+    print("\n3. STRUCTURED MEMORY")
     print("-" * 70)
 
-    fact = Fact(
-        content="alice@example.com",
-        category="email",
+    structured = StructuredMemory.from_episode_fast(
         source_episode_id=episode.id,
         user_id="demo_user",
         org_id="demo_org",
-        confidence=ConfidenceScore.for_extracted(),
+        emails=["alice@example.com"],
     )
 
-    print("  Example Fact:")
-    print(f"    ID: {fact.id}")
-    print(f'    Content: "{fact.content}"')
-    print(f"    Category: {fact.category}")
-    print(f"    Source: {fact.source_episode_id}")
-    print(f"    Confidence: {fact.confidence.value:.0%}")
-    print(f"    Derived At: {fact.derived_at}")
+    print("  Example StructuredMemory (fast mode):")
+    print(f"    ID: {structured.id}")
+    print(f"    Source Episode: {structured.source_episode_id}")
+    print(f"    Mode: {structured.mode}")
+    print(f"    Enriched: {structured.enriched}")
+    print(f"    Emails: {structured.emails}")
+    print(f"    Confidence: {structured.confidence.value:.0%}")
+
+    # Rich mode example with negations
+    structured_rich = StructuredMemory.from_episode(
+        source_episode_id=episode.id,
+        user_id="demo_user",
+        org_id="demo_org",
+        emails=["alice@example.com"],
+        negations=[
+            Negation(
+                content="does not use MongoDB",
+                pattern="MongoDB",
+                context="switched to PostgreSQL",
+            )
+        ],
+    )
+
+    print("\n  Example StructuredMemory (rich mode with negation):")
+    print(f"    ID: {structured_rich.id}")
+    print(f"    Mode: {structured_rich.mode}")
+    print(f"    Enriched: {structured_rich.enriched}")
+    print(f"    Negations: {[n.content for n in structured_rich.negations]}")
+    print(f"    Confidence: {structured_rich.confidence.value:.0%}")
 
     print("""
   Key Properties:
-  - Extracted via pattern matching (deterministic)
-  - High confidence (90% base)
-  - No hallucination possible
-  - Categories: email, phone, url, date, quantity, language, name, id
+  - One per Episode (1:1 relationship)
+  - Fast mode: regex-only extraction (emails, phones, URLs)
+  - Rich mode: regex + LLM extraction (dates, people, preferences, negations)
+  - Negations stored here to filter contradicted information
+  - Categories: email, phone, url, date, person, preference, negation
     """)
 
     # =========================================================================
@@ -172,6 +198,7 @@ def main() -> None:
     print("""
   Key Properties:
   - Created by LLM consolidation (background)
+  - Cross-episode synthesis (N episodes -> 1 semantic)
   - Variable confidence (60% base for inferred)
   - Links to related memories (multi-hop reasoning)
   - Strengthens with repeated consolidation (Testing Effect)
@@ -204,38 +231,10 @@ def main() -> None:
     print("""
   Key Properties:
   - HOW to do things (behavioral patterns)
-  - Promoted from well-consolidated semantic memories
+  - Synthesized from all semantic memories for a user
+  - One per user (holistic profile)
   - Trigger context specifies when to activate
   - Access count tracks usage
-    """)
-
-    # =========================================================================
-    # 6. Negation Memory
-    # =========================================================================
-    print("\n6. NEGATION MEMORY")
-    print("-" * 70)
-
-    negation = NegationFact(
-        content="User does NOT use MongoDB - they explicitly stated they switched to PostgreSQL",
-        negates_pattern="MongoDB",
-        source_episode_ids=[episode.id],
-        user_id="demo_user",
-        org_id="demo_org",
-        confidence=ConfidenceScore.for_extracted(),  # Negations are pattern-extracted (0.9)
-    )
-
-    print("  Example NegationFact:")
-    print(f"    ID: {negation.id}")
-    print(f'    Content: "{negation.content}"')
-    print(f'    Negates Pattern: "{negation.negates_pattern}"')
-    print(f"    Confidence: {negation.confidence.value:.0%}")
-
-    print("""
-  Key Properties:
-  - Stores what is NOT true
-  - Prevents returning contradicted information
-  - Detected from phrases like "I don't", "not interested", "no longer"
-  - Filters out matching memories during recall
     """)
 
     # =========================================================================
@@ -249,10 +248,11 @@ def main() -> None:
   |------------|-------------|------------|------------------|----------------------|
   | Working    | Volatile    | N/A        | encode()         | Session context      |
   | Episodic   | Permanent   | N/A        | encode()         | Ground truth         |
-  | Factual    | Permanent   | 90%        | Pattern matching | Structured data      |
-  | Semantic   | Permanent   | 60%        | LLM consolidation| Knowledge/preferences|
-  | Procedural | Permanent   | 60%        | Promotion        | Behavioral patterns  |
-  | Negation   | Permanent   | 90%        | Pattern matching | What's NOT true      |
+  | Structured | Permanent   | 90%        | encode()         | Per-episode extracts |
+  | Semantic   | Permanent   | 60%        | consolidate()    | Knowledge synthesis  |
+  | Procedural | Permanent   | 60%        | create_procedural() | Behavioral profile|
+
+  Hierarchy: Episode -> Structured -> Semantic -> Procedural
     """)
 
     print("=" * 70)

@@ -108,9 +108,7 @@ Main Context (working) ←→ Archival Memory (long-term)
 ```
 Message → Embed → Store Episode (immutable)
               ↓
-        Pattern Extract → Store Facts (high confidence, no LLM)
-              ↓
-        Detect Negations → Store NegationFacts
+        Pattern Extract → StructuredMemory (emails, phones, URLs - no LLM)
               │
               └──────────────────────────────────────────────┐
                                                              ↓
@@ -229,7 +227,7 @@ Novel approaches from recent literature:
 
 **Engram**: The `consolidation_strength` (0.0-1.0) field on SemanticMemory tracks how well-established a memory is. During consolidation, `strengthen()` is called when existing memories get linked to new memories (via semantic similarity or LLM identification) or receive evolution updates. Each call increases consolidation_strength by 0.1 and increments `consolidation_passes`.
 
-Note: `NegationFact` (which stores semantic negations like "User does NOT use MongoDB") is a separate engineering construct.
+Note: Negations (stored in `StructuredMemory.negations`, e.g., "User does NOT use MongoDB") are a separate engineering construct.
 
 ---
 

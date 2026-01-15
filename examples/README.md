@@ -9,9 +9,10 @@ examples/
 ├── local/              # No external dependencies
 │   ├── extraction.py   # Pattern extraction + negation detection
 │   ├── confidence.py   # Confidence scoring system
-│   └── memory_types.py # All 6 memory types explained
+│   └── memory_types.py # All 4 memory types explained
 └── external/           # Requires Qdrant + API keys
     ├── quickstart.py   # Core encode/recall/verify workflow
+    ├── structured.py   # StructuredMemory + LLM enrichment
     ├── advanced.py     # Multi-hop, negation filtering
     └── consolidation.py # LLM consolidation + linking
 ```
@@ -23,13 +24,13 @@ examples/
 Run without any external dependencies:
 
 ```bash
-# Pattern extraction (8 extractors + negation detection)
+# Pattern extraction (7 extractors + negation detection)
 uv run python examples/local/extraction.py
 
 # Confidence scoring system
 uv run python examples/local/confidence.py
 
-# All 6 memory types explained
+# All 4 memory types explained
 uv run python examples/local/memory_types.py
 ```
 
@@ -53,6 +54,9 @@ ENGRAM_QDRANT_URL=http://localhost:6333
 # Core workflow: encode, recall, verify
 uv run python examples/external/quickstart.py
 
+# StructuredMemory + LLM enrichment
+uv run python examples/external/structured.py
+
 # Advanced: multi-hop, negation filtering
 uv run python examples/external/advanced.py
 
@@ -68,7 +72,7 @@ uv run python examples/external/consolidation.py
 **`local/extraction.py`**
 
 Demonstrates:
-- All 8 pattern extractors (email, phone, URL, date, quantity, language, name, ID)
+- All 7 pattern extractors (email, phone, URL, date, quantity, name, ID)
 - Negation detection ("I don't use X", "not interested in Y")
 - Why pattern extraction before LLM matters (no hallucination possible)
 
@@ -84,13 +88,13 @@ Explains:
 ### Memory Types
 **`local/memory_types.py`**
 
-Covers all 6 memory types:
-1. **Working** - Current session context (volatile)
-2. **Episodic** - Raw interactions (immutable ground truth)
-3. **Factual** - Pattern-extracted facts (high confidence)
-4. **Semantic** - LLM-inferred knowledge (variable confidence)
-5. **Procedural** - Behavioral patterns (how to do things)
-6. **Negation** - What is NOT true (prevents contradictions)
+Covers all 4 persistent memory types:
+1. **Episodic** - Raw interactions (immutable ground truth)
+2. **Structured** - Per-episode extraction (emails, phones, URLs, negations)
+3. **Semantic** - LLM-inferred knowledge (variable confidence)
+4. **Procedural** - Behavioral patterns (how to do things)
+
+Plus Working memory (volatile, in-session only).
 
 ---
 
@@ -100,7 +104,7 @@ Covers all 6 memory types:
 **`external/quickstart.py`**
 
 Core workflow demonstrating:
-- `encode()` - Store episodes, extract facts
+- `encode()` - Store episodes, extract structured data
 - `recall()` - Semantic search with filtering
 - `verify()` - Trace any memory to its source
 - `min_confidence` - Confidence-gated retrieval
@@ -108,11 +112,20 @@ Core workflow demonstrating:
 - `memory_types` - Filter by memory type
 - Working memory management
 
+### Structured Memory
+**`external/structured.py`**
+
+StructuredMemory extraction modes:
+- `enrich=False` (default) - Fast regex-only extraction
+- `enrich=True` - Sync LLM extraction (blocks)
+- `enrich="background"` - Queue for background processing
+- Negation detection and filtering
+
 ### Advanced Features
 **`external/advanced.py`**
 
 Advanced recall features:
-- **All 6 memory types** - Query across episodic, factual, semantic, procedural, negation, working
+- **All 4 memory types** - Query across episodic, structured, semantic, procedural
 - **Negation filtering** - Automatically exclude contradicted information
 - **Multi-hop reasoning** - `follow_links=True` traverses related_ids
 - **Freshness filtering** - Only return consolidated memories
@@ -137,13 +150,14 @@ LLM-powered semantic extraction:
 | Feature | Local Example | External Example |
 |---------|---------------|------------------|
 | Pattern extraction | `extraction.py` | `quickstart.py` |
-| Negation detection | `extraction.py` | `advanced.py` |
+| Negation detection | `extraction.py` | `structured.py` |
 | Confidence scoring | `confidence.py` | `quickstart.py` |
-| All 6 memory types | `memory_types.py` | `advanced.py` |
+| All 4 memory types | `memory_types.py` | `advanced.py` |
 | encode/recall | - | `quickstart.py` |
 | verify() | - | `quickstart.py` |
 | min_confidence | - | `quickstart.py` |
 | include_sources | - | `quickstart.py` |
+| StructuredMemory modes | - | `structured.py` |
 | Multi-hop (follow_links) | - | `advanced.py` |
 | Negation filtering | - | `advanced.py` |
 | Freshness filtering | - | `advanced.py` |
@@ -162,5 +176,6 @@ LLM-powered semantic extraction:
 | local/confidence.py | - | - |
 | local/memory_types.py | - | - |
 | external/quickstart.py | ✅ | ✅ |
+| external/structured.py | ✅ | ✅ |
 | external/advanced.py | ✅ | ✅ |
 | external/consolidation.py | ✅ | ✅ |

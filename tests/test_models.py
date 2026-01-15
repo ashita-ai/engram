@@ -10,8 +10,6 @@ from engram.models import (
     ConfidenceScore,
     Episode,
     ExtractionMethod,
-    Fact,
-    NegationFact,
     ProceduralMemory,
     SemanticMemory,
     generate_id,
@@ -374,60 +372,6 @@ class TestEpisode:
         assert ep_with_embedding.embedding == [0.1, 0.2, 0.3]
 
 
-class TestFact:
-    """Tests for Fact model."""
-
-    def test_create_fact(self):
-        """Basic fact creation."""
-        fact = Fact(
-            content="email=john@example.com",
-            category="email",
-            source_episode_id="ep_123",
-            user_id="user_123",
-        )
-        assert fact.content == "email=john@example.com"
-        assert fact.category == "email"
-        assert fact.id.startswith("fact_")
-
-    def test_default_confidence_is_extracted(self):
-        """Default confidence should be for extracted pattern."""
-        fact = Fact(
-            content="test",
-            category="email",
-            source_episode_id="ep_123",
-            user_id="user_123",
-        )
-        assert fact.confidence.value == 0.9
-        assert fact.confidence.extraction_method == ExtractionMethod.EXTRACTED
-
-    def test_from_extraction_factory(self):
-        """from_extraction factory method should work correctly."""
-        fact = Fact.from_extraction(
-            content="phone=555-1234",
-            category="phone",
-            source_episode_id="ep_456",
-            user_id="user_123",
-            org_id="org_789",
-        )
-        assert fact.content == "phone=555-1234"
-        assert fact.category == "phone"
-        assert fact.source_episode_id == "ep_456"
-        assert fact.user_id == "user_123"
-        assert fact.org_id == "org_789"
-        assert fact.confidence.value == 0.9
-
-    def test_str_representation(self):
-        """String representation should show category and content."""
-        fact = Fact(
-            content="email@test.com",
-            category="email",
-            source_episode_id="ep_123",
-            user_id="user_123",
-        )
-        assert "email" in str(fact)
-        assert "email@test.com" in str(fact)
-
-
 class TestSemanticMemory:
     """Tests for SemanticMemory model."""
 
@@ -675,40 +619,6 @@ class TestProceduralMemory:
             user_id="user_123",
         )
         assert mem.trigger_context == "when explaining code"
-
-
-class TestNegationFact:
-    """Tests for NegationFact model."""
-
-    def test_create_negation_fact(self):
-        """Basic negation fact creation."""
-        fact = NegationFact(
-            content="User does NOT use MongoDB",
-            negates_pattern="mongodb",
-            user_id="user_123",
-        )
-        assert fact.content == "User does NOT use MongoDB"
-        assert fact.negates_pattern == "mongodb"
-        assert fact.id.startswith("neg_")
-
-    def test_default_confidence(self):
-        """Default confidence should be inferred at 0.7."""
-        fact = NegationFact(
-            content="Test negation",
-            negates_pattern="test",
-            user_id="user_123",
-        )
-        assert fact.confidence.value == 0.7
-        assert fact.confidence.extraction_method == ExtractionMethod.INFERRED
-
-    def test_str_representation(self):
-        """String representation should show negation content."""
-        fact = NegationFact(
-            content="User does NOT like verbose output",
-            negates_pattern="verbose",
-            user_id="user_123",
-        )
-        assert "User does NOT like verbose output" in str(fact)
 
 
 class TestAuditEntry:

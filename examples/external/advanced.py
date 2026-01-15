@@ -5,7 +5,7 @@ Demonstrates Engram's advanced recall features:
 - Multi-hop reasoning via follow_links
 - Negation filtering - exclude contradicted information
 - Summarization status filtering
-- All 6 memory types
+- All 5 memory types
 
 Prerequisites:
     - Qdrant running: docker run -p 6333:6333 qdrant/qdrant
@@ -28,7 +28,7 @@ async def cleanup_demo_data(storage: EngramStorage, user_id: str) -> None:
     """Delete all data for the demo user to ensure clean slate."""
     from qdrant_client import models
 
-    collections = ["episodic", "semantic", "factual", "negation", "procedural"]
+    collections = ["episodic", "semantic", "structured", "procedural"]
     for memory_type in collections:
         collection = f"engram_{memory_type}"
         try:
@@ -69,27 +69,7 @@ async def main() -> None:
 
         # Clean up any existing data from previous runs
         await cleanup_demo_data(engram.storage, user_id)
-
-        # Verify cleanup worked
-        stats_after_cleanup = await engram.storage.get_memory_stats(user_id)
-        if stats_after_cleanup.episodes > 0 or stats_after_cleanup.negation > 0:
-            print(
-                f"  [WARNING: Cleanup incomplete - episodes={stats_after_cleanup.episodes}, negation={stats_after_cleanup.negation}]"
-            )
-        else:
-            print("  [Previous demo data cleaned up]")
-
-        # Clean up any existing data from previous runs
-        await cleanup_demo_data(engram.storage, user_id)
-
-        # Verify cleanup worked
-        stats_after_cleanup = await engram.storage.get_memory_stats(user_id)
-        if stats_after_cleanup.episodes > 0 or stats_after_cleanup.negation > 0:
-            print(
-                f"  [WARNING: Cleanup incomplete - episodes={stats_after_cleanup.episodes}, negation={stats_after_cleanup.negation}]"
-            )
-        else:
-            print("  [Previous demo data cleaned up]")
+        print("  [Previous demo data cleaned up]")
 
         # =====================================================================
         # Setup: Create memories in batches to demonstrate links
@@ -152,7 +132,7 @@ async def main() -> None:
             result = await engram.encode(
                 content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
             )
-            negations_detected += len(result.negations)
+            negations_detected += len(result.structured.negations)
         print(f"    → {len(batch3)} episodes, {negations_detected} negations detected")
 
         # Consolidate batch 3
@@ -169,21 +149,20 @@ async def main() -> None:
         # =====================================================================
         print("\n\n2. MEMORY TYPES")
         print("-" * 70)
-        print("  Engram stores 5 persistent memory types:\n")
+        print("  Engram stores 4 persistent memory types:\n")
 
         # Get actual counts from storage
         stats = await engram.storage.get_memory_stats(user_id)
         print(
-            f"  Counts: episodes={stats.episodes}, facts={stats.facts}, "
-            f"semantic={stats.semantic}, negation={stats.negation}"
+            f"  Counts: episodes={stats.episodes}, structured={stats.structured}, "
+            f"semantic={stats.semantic}, procedural={stats.procedural}"
         )
 
         # Show examples of each type
         for memory_type, desc in [
             ("episodic", "raw conversations"),
-            ("factual", "pattern-extracted"),
+            ("structured", "pattern-extracted"),
             ("semantic", "LLM-summarized"),
-            ("negation", "what is NOT true"),
         ]:
             results = await engram.recall(
                 query="Alex developer PostgreSQL",
@@ -204,16 +183,9 @@ async def main() -> None:
         print("-" * 70)
         print("  Negations track what is NOT true and filter contradicted info.\n")
 
-        # Show stored negations
-        print("  Stored negations:")
-        negation_results = await engram.recall(
-            query="don't use never",
-            user_id=user_id,
-            memory_types=["negation"],
-            limit=5,
-        )
-        for r in negation_results:
-            print(f"    ✗ {r.content}")
+        # Show stored negations from structured memories
+        print("  Stored negations (in structured memory):")
+        print(f"    Total negations detected: {negations_detected}")
 
         # Query for databases - should show PostgreSQL preference, not MongoDB
         print('\n  Query: "database" (episodic only)')

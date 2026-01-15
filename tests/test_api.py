@@ -12,7 +12,7 @@ from engram.api.schemas import (
     HealthResponse,
     RecallRequest,
 )
-from engram.models import Episode, Fact
+from engram.models import Episode, StructuredMemory
 from engram.service import EncodeResult, EngramService, RecallResult
 
 
@@ -73,21 +73,22 @@ class TestEncodeEndpoint:
     """Tests for /encode endpoint."""
 
     def test_encode_success(self, client, mock_service):
-        """Should encode content and return episode with facts."""
+        """Should encode content and return episode with structured extracts."""
         mock_episode = Episode(
             content="Email me at user@example.com",
             role="user",
             user_id="user_123",
             embedding=[0.1, 0.2, 0.3],
         )
-        mock_fact = Fact(
-            content="user@example.com",
-            category="email",
+        mock_structured = StructuredMemory(
             source_episode_id=mock_episode.id,
+            mode="fast",
             user_id="user_123",
-            embedding=[0.1, 0.2, 0.3],
+            emails=["user@example.com"],
         )
-        mock_service.encode.return_value = EncodeResult(episode=mock_episode, facts=[mock_fact])
+        mock_service.encode.return_value = EncodeResult(
+            episode=mock_episode, structured=mock_structured
+        )
 
         response = client.post(
             "/api/v1/encode",
@@ -101,8 +102,8 @@ class TestEncodeEndpoint:
         assert response.status_code == 201
         data = response.json()
         assert data["episode"]["content"] == "Email me at user@example.com"
-        assert data["fact_count"] == 1
-        assert data["facts"][0]["content"] == "user@example.com"
+        assert data["extract_count"] == 1
+        assert data["structured"]["emails"] == ["user@example.com"]
 
     def test_encode_with_all_options(self, client, mock_service):
         """Should accept all optional parameters."""
@@ -115,7 +116,14 @@ class TestEncodeEndpoint:
             importance=0.8,
             embedding=[0.1],
         )
-        mock_service.encode.return_value = EncodeResult(episode=mock_episode, facts=[])
+        mock_structured = StructuredMemory(
+            source_episode_id=mock_episode.id,
+            mode="fast",
+            user_id="user_123",
+        )
+        mock_service.encode.return_value = EncodeResult(
+            episode=mock_episode, structured=mock_structured
+        )
 
         response = client.post(
             "/api/v1/encode",
@@ -126,7 +134,7 @@ class TestEncodeEndpoint:
                 "org_id": "org_456",
                 "session_id": "session_789",
                 "importance": 0.8,
-                "run_extraction": False,
+                "enrich": False,
             },
         )
 
@@ -136,7 +144,7 @@ class TestEncodeEndpoint:
         assert call_kwargs["org_id"] == "org_456"
         assert call_kwargs["session_id"] == "session_789"
         assert call_kwargs["importance"] == 0.8
-        assert call_kwargs["run_extraction"] is False
+        assert call_kwargs["enrich"] is False
 
     def test_encode_missing_required_fields(self, client, mock_service):
         """Should return 422 for missing required fields."""
@@ -194,11 +202,11 @@ class TestRecallEndpoint:
                 metadata={"role": "user"},
             ),
             RecallResult(
-                memory_type="factual",
+                memory_type="structured",
                 content="user@example.com",
                 score=0.9,
                 confidence=0.85,
-                memory_id="fact_456",
+                memory_id="struct_456",
                 source_episode_id="ep_123",
                 metadata={"category": "email"},
             ),
@@ -228,7 +236,7 @@ class TestRecallEndpoint:
                 "org_id": "org_456",
                 "limit": 5,
                 "min_confidence": 0.8,
-                "memory_types": ["factual"],
+                "memory_types": ["structured"],
             },
         )
 
@@ -238,7 +246,7 @@ class TestRecallEndpoint:
         assert call_kwargs["org_id"] == "org_456"
         assert call_kwargs["limit"] == 5
         assert call_kwargs["min_confidence"] == 0.8
-        assert call_kwargs["memory_types"] == ["factual"]
+        assert call_kwargs["memory_types"] == ["structured"]
 
     def test_recall_empty_results(self, client, mock_service):
         """Should return empty list when no matches."""
@@ -316,7 +324,7 @@ class TestSchemas:
         assert request.content == "Hello world"
         assert request.role == "user"
         assert request.importance is None  # Default (auto-calculated)
-        assert request.run_extraction is True  # Default
+        assert request.enrich is False  # Default (regex only)
 
     def test_encode_request_invalid_role(self):
         """Should reject invalid role."""
@@ -351,9 +359,9 @@ class TestSchemas:
         request = RecallRequest(
             query="hello",
             user_id="user_123",
-            memory_types=["episodic", "factual"],
+            memory_types=["episodic", "structured"],
         )
-        assert request.memory_types == ["episodic", "factual"]
+        assert request.memory_types == ["episodic", "structured"]
 
     def test_recall_request_memory_types_none_means_all(self):
         """When memory_types is None, all types should be searched."""

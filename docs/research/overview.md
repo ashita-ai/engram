@@ -42,7 +42,7 @@ Episode (immutable) → Derived Facts → Application
 
 ### 1. Multiple Memory Types
 
-**Design**: Engram maintains six distinct memory types (working, episodic, factual, semantic, procedural, negation) rather than a single undifferentiated store.
+**Design**: Engram maintains five distinct memory types (working, episodic, structured, semantic, procedural) rather than a single undifferentiated store.
 
 **Research basis**:
 

@@ -2,7 +2,7 @@
 """Quickstart demo - core encode/recall workflow with verification.
 
 Demonstrates:
-- encode(): Store episodes and extract facts automatically
+- encode(): Store episodes and extract structured data automatically
 - recall(): Semantic search across memory types
 - verify(): Trace any memory back to its source
 - Confidence-based filtering
@@ -28,7 +28,7 @@ async def cleanup_demo_data(storage: EngramStorage, user_id: str) -> None:
     """Delete all data for the demo user to ensure clean slate."""
     from qdrant_client import models
 
-    collections = ["episodic", "semantic", "factual", "negation", "procedural"]
+    collections = ["episodic", "semantic", "structured", "procedural"]
     for memory_type in collections:
         collection = f"engram_{memory_type}"
         try:
@@ -69,15 +69,12 @@ async def main() -> None:
         # Clean up any existing data from previous runs
         await cleanup_demo_data(engram.storage, user_id)
 
-        # Clean up any existing data from previous runs
-        await cleanup_demo_data(engram.storage, user_id)
-
         # =====================================================================
-        # 1. ENCODE: Store episodes and extract facts
+        # 1. ENCODE: Store episodes and extract structured data
         # =====================================================================
         print("\n1. ENCODING MEMORIES")
         print("-" * 70)
-        print("  Episodes are stored verbatim. Facts are auto-extracted.\n")
+        print("  Episodes are stored verbatim. Structured data is auto-extracted.\n")
 
         messages = [
             ("user", "Hi! I'm Jordan, a data scientist at TechFlow Inc."),
@@ -91,44 +88,43 @@ async def main() -> None:
             ("user", "I've been mass liking posts about Rust on Twitter lately."),
         ]
 
-        facts_extracted = []
-        negations_extracted = []
+        extracts_count = 0
 
         for role, content in messages:
             result = await engram.encode(
                 content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
             )
             extras = []
-            if result.facts:
-                facts_extracted.extend(result.facts)
-                extras.append("+fact")
-            if result.negations:
-                negations_extracted.extend(result.negations)
-                extras.append("+negation")
+            extract_count = (
+                len(result.structured.emails)
+                + len(result.structured.phones)
+                + len(result.structured.urls)
+            )
+            if extract_count > 0:
+                extracts_count += extract_count
+                extras.append(f"+{extract_count} extract(s)")
             extras_str = f"  [{', '.join(extras)}]" if extras else ""
             print(f"  [{role:9}] {content[:50]}...{extras_str}")
 
         print("\n  Results:")
         print(f"    Episodes stored: {len(messages)}")
-        print(f"    Facts extracted: {len(facts_extracted)} (emails, phones, etc.)")
-        print(f'    Negations found: {len(negations_extracted)} ("I don\'t use...")')
+        print(f"    Structured extracts: {extracts_count} (emails, phones, URLs)")
 
         # =====================================================================
         # 2. RECALL BEFORE CONSOLIDATION
         # =====================================================================
         print("\n\n2. RECALL BEFORE CONSOLIDATION")
         print("-" * 70)
-        print("  Episodic and factual memories are available IMMEDIATELY.\n")
+        print("  Episodic and structured memories are available IMMEDIATELY.\n")
 
         # Get actual counts from storage to show what's available
         pre_stats = await engram.storage.get_memory_stats(user_id)
         print("  Available now (before LLM consolidation):")
-        print(f"    Episodic: {pre_stats.episodes}")
-        print(f"    Factual:  {pre_stats.facts}")
-        print(f"    Negation: {pre_stats.negation}")
-        print(f"    Semantic: {pre_stats.semantic} ← Empty! Requires consolidation")
+        print(f"    Episodic:   {pre_stats.episodes}")
+        print(f"    Structured: {pre_stats.structured}")
+        print(f"    Semantic:   {pre_stats.semantic} ← Empty! Requires consolidation")
         print()
-        print("  ✓ Episodic (raw) and factual (extracted) available instantly")
+        print("  ✓ Episodic (raw) and structured (extracted) available instantly")
         print("  ✗ Semantic memories require consolidation (LLM processing)")
 
         # =====================================================================
@@ -154,19 +150,11 @@ async def main() -> None:
             ("user", "I've been using Python for about 5 years now."),
             ("user", "PyTorch is essential for my NLP work at TechFlow."),
         ]
-        additional_facts = 0
         for role, content in more_messages:
-            result = await engram.encode(
+            await engram.encode(
                 content=content, role=role, user_id=user_id, org_id=org_id, session_id=session_id
             )
-            extras = []
-            if result.facts:
-                additional_facts += len(result.facts)
-                extras.append("+fact")
-            extras_str = f"  [{', '.join(extras)}]" if extras else ""
-            print(f"    [{role}] {content[:40]}...{extras_str}")
-        if additional_facts:
-            print(f"    (Extracted {additional_facts} additional fact(s))")
+            print(f"    [{role}] {content[:40]}...")
 
         print("\n  Running second consolidation (links new → existing)...")
         result2 = await run_consolidation(
@@ -187,7 +175,7 @@ async def main() -> None:
                 memories_by_type[m.memory_type] = []
             memories_by_type[m.memory_type].append(m.content[:50])
 
-        for mem_type in ["episodic", "factual", "negation", "semantic"]:
+        for mem_type in ["episodic", "structured", "semantic"]:
             if mem_type in memories_by_type:
                 print(f"\n    [{mem_type.upper()}]")
                 for content in memories_by_type[mem_type][:3]:
@@ -217,10 +205,9 @@ async def main() -> None:
         # Get actual counts from storage after consolidation
         post_stats = await engram.storage.get_memory_stats(user_id)
         print("  Available now (after LLM consolidation):")
-        print(f"    Episodic: {post_stats.episodes}")
-        print(f"    Factual:  {post_stats.facts}")
-        print(f"    Negation: {post_stats.negation}")
-        print(f"    Semantic: {post_stats.semantic} ← Created by consolidation!")
+        print(f"    Episodic:   {post_stats.episodes}")
+        print(f"    Structured: {post_stats.structured}")
+        print(f"    Semantic:   {post_stats.semantic} ← Created by consolidation!")
         print()
         print("  ✓ Semantic memories now available for recall")
 
@@ -244,17 +231,9 @@ async def main() -> None:
         for r in results_sorted[:5]:
             print(f"    [{r.confidence:.0%}] {r.content[:55]}...")
 
-        print("\n  Note: LLM is CONSERVATIVE - only extracts certain facts (0.9).")
+        print("\n  Note: LLM is CONSERVATIVE - only extracts certain knowledge (0.9).")
         print("  Uncertain statements are intentionally NOT extracted to avoid hallucination.")
         print("  Lower confidence (0.6-0.8) would appear for implicit/inferred knowledge.")
-
-        # Negation
-        print("\n  NEGATION (what the user does NOT do):")
-        results = await engram.recall(
-            query="programming", user_id=user_id, memory_types=["negation"], limit=2
-        )
-        for r in results:
-            print(f'    ✗ "{r.content}"')
 
         # =====================================================================
         # 6. LINKED MEMORIES (Multi-hop)
@@ -289,7 +268,7 @@ async def main() -> None:
                 print("    (No additional memories found via traversal)")
         else:
             print("  No links created in this run.")
-            print("  Links are created when the LLM identifies related facts.")
+            print("  Links are created when the LLM identifies related memories.")
             print("  They typically grow over multiple consolidation passes.")
 
         # =====================================================================
@@ -321,7 +300,7 @@ async def main() -> None:
             if verification.source_episodes:
                 src = verification.source_episodes[0]
                 print("\n  Source Episode (ground truth):")
-                print(f"    \"{src['content']}\"")
+                print(f'    "{src["content"]}"')
                 print(f"    Role: {src['role']}")
 
     print("\n" + "=" * 70)
@@ -329,8 +308,8 @@ async def main() -> None:
     print("=" * 70)
     print("""
 Key Takeaways:
-1. encode() stores episodes AND extracts facts/negations instantly
-2. Episodic + factual available BEFORE consolidation
+1. encode() stores episodes AND extracts structured data (emails, phones, URLs) instantly
+2. Episodic + structured available BEFORE consolidation
 3. Consolidation creates semantic memories via LLM
 4. Confidence scores show extraction certainty (0.6-0.9)
 5. Links enable multi-hop reasoning across memories

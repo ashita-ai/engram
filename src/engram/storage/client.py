@@ -35,21 +35,20 @@ class MemoryStats(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     episodes: int = Field(default=0, ge=0, description="Number of episode memories")
-    facts: int = Field(default=0, ge=0, description="Number of extracted facts")
+    structured: int = Field(default=0, ge=0, description="Number of structured memories")
     semantic: int = Field(default=0, ge=0, description="Number of semantic memories")
     procedural: int = Field(default=0, ge=0, description="Number of procedural memories")
-    negation: int = Field(default=0, ge=0, description="Number of negation facts")
     pending_consolidation: int = Field(
         default=0, ge=0, description="Episodes awaiting consolidation"
     )
-    facts_avg_confidence: float | None = Field(
-        default=None, description="Average confidence of facts"
+    structured_avg_confidence: float | None = Field(
+        default=None, description="Average confidence of structured memories"
     )
-    facts_min_confidence: float | None = Field(
-        default=None, description="Minimum confidence of facts"
+    structured_min_confidence: float | None = Field(
+        default=None, description="Minimum confidence of structured memories"
     )
-    facts_max_confidence: float | None = Field(
-        default=None, description="Maximum confidence of facts"
+    structured_max_confidence: float | None = Field(
+        default=None, description="Maximum confidence of structured memories"
     )
     semantic_avg_confidence: float | None = Field(
         default=None, description="Average confidence of semantic memories"
@@ -148,10 +147,9 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
 
         # Count all memory types
         episodes_count = await count_collection("episodic")
-        facts_count = await count_collection("factual")
+        structured_count = await count_collection("structured")
         semantic_count = await count_collection("semantic")
         procedural_count = await count_collection("procedural")
-        negation_count = await count_collection("negation")
 
         # Count pending consolidation (unconsolidated episodes)
         unconsolidated_filter = models.Filter(
@@ -173,25 +171,25 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
             logger.warning("Failed to count pending consolidation", exc_info=True)
             pending_count = 0
 
-        # Get confidence stats for facts
-        facts_avg = None
-        facts_min = None
-        facts_max = None
-        if facts_count > 0:
+        # Get confidence stats for structured memories
+        structured_avg = None
+        structured_min = None
+        structured_max = None
+        if structured_count > 0:
             try:
-                facts_result = await self.client.scroll(
-                    collection_name=f"{prefix}_factual",
+                structured_result = await self.client.scroll(
+                    collection_name=f"{prefix}_structured",
                     scroll_filter=query_filter,
                     limit=1000,
                     with_payload=["confidence"],
                 )
-                confidences = self._extract_confidences_from_points(facts_result[0])
+                confidences = self._extract_confidences_from_points(structured_result[0])
                 if confidences:
-                    facts_avg = sum(confidences) / len(confidences)
-                    facts_min = min(confidences)
-                    facts_max = max(confidences)
+                    structured_avg = sum(confidences) / len(confidences)
+                    structured_min = min(confidences)
+                    structured_max = max(confidences)
             except Exception:
-                logger.warning("Failed to compute facts confidence stats", exc_info=True)
+                logger.warning("Failed to compute structured confidence stats", exc_info=True)
 
         # Get confidence stats for semantic memories
         semantic_avg = None
@@ -211,14 +209,13 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
 
         return MemoryStats(
             episodes=episodes_count,
-            facts=facts_count,
+            structured=structured_count,
             semantic=semantic_count,
             procedural=procedural_count,
-            negation=negation_count,
             pending_consolidation=pending_count,
-            facts_avg_confidence=facts_avg,
-            facts_min_confidence=facts_min,
-            facts_max_confidence=facts_max,
+            structured_avg_confidence=structured_avg,
+            structured_min_confidence=structured_min,
+            structured_max_confidence=structured_max,
             semantic_avg_confidence=semantic_avg,
         )
 

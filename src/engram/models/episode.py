@@ -2,9 +2,25 @@
 
 from datetime import UTC, datetime
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .base import MemoryBase, generate_id
+
+
+class QuickExtracts(BaseModel):
+    """Quick extraction results from regex matchers.
+
+    Populated immediately during encode() for fast access to
+    deterministic data before the full structure() workflow runs.
+
+    These are copied into StructuredMemory once it's created.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    emails: list[str] = Field(default_factory=list, description="Extracted emails")
+    phones: list[str] = Field(default_factory=list, description="Extracted phones")
+    urls: list[str] = Field(default_factory=list, description="Extracted URLs")
 
 
 class Episode(MemoryBase):
@@ -50,6 +66,18 @@ class Episode(MemoryBase):
     summarized_into: str | None = Field(
         default=None,
         description="ID of the semantic memory that summarizes this episode",
+    )
+    structured: bool = Field(
+        default=False,
+        description="Whether this episode has been processed into a StructuredMemory",
+    )
+    structured_into: str | None = Field(
+        default=None,
+        description="ID of the StructuredMemory extracted from this episode",
+    )
+    quick_extracts: QuickExtracts | None = Field(
+        default=None,
+        description="Quick regex extractions (emails, phones, URLs) for immediate access",
     )
 
     def __str__(self) -> str:

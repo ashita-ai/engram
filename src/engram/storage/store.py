@@ -10,7 +10,12 @@ from typing import TYPE_CHECKING, Any
 from qdrant_client import models
 
 if TYPE_CHECKING:
-    from engram.models import Episode, Fact, NegationFact, ProceduralMemory, SemanticMemory
+    from engram.models import (
+        Episode,
+        ProceduralMemory,
+        SemanticMemory,
+        StructuredMemory,
+    )
 
 
 class StoreMixin:
@@ -45,16 +50,16 @@ class StoreMixin:
         """
         return await self._store_memory(episode, "episodic")
 
-    async def store_fact(self, fact: Fact) -> str:
-        """Store a fact in the factual collection.
+    async def store_structured(self, memory: StructuredMemory) -> str:
+        """Store a structured memory.
 
         Args:
-            fact: Fact to store.
+            memory: StructuredMemory to store.
 
         Returns:
-            The fact ID.
+            The memory ID.
         """
-        return await self._store_memory(fact, "factual")
+        return await self._store_memory(memory, "structured")
 
     async def store_semantic(self, memory: SemanticMemory) -> str:
         """Store a semantic memory.
@@ -78,20 +83,9 @@ class StoreMixin:
         """
         return await self._store_memory(memory, "procedural")
 
-    async def store_negation(self, fact: NegationFact) -> str:
-        """Store a negation fact.
-
-        Args:
-            fact: NegationFact to store.
-
-        Returns:
-            The fact ID.
-        """
-        return await self._store_memory(fact, "negation")
-
     async def _store_memory(
         self,
-        memory: Episode | Fact | SemanticMemory | ProceduralMemory | NegationFact,
+        memory: Episode | StructuredMemory | SemanticMemory | ProceduralMemory,
         memory_type: str,
     ) -> str:
         """Store a memory in the appropriate collection.

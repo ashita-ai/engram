@@ -9,7 +9,7 @@ import re
 
 from email_validator import EmailNotValidError, validate_email
 
-from engram.models import Episode, Fact
+from engram.models import Episode
 
 from .base import Extractor
 
@@ -30,23 +30,21 @@ class EmailExtractor(Extractor):
     Example:
         ```python
         extractor = EmailExtractor()
-        facts = extractor.extract(episode)
-        # facts[0].content = "user@example.com"
-        # facts[0].category = "email"
+        emails = extractor.extract(episode)
+        # emails = ["user@example.com"]
         ```
     """
 
     name: str = "email"
-    category: str = "email"
 
-    def extract(self, episode: Episode) -> list[Fact]:
+    def extract(self, episode: Episode) -> list[str]:
         """Extract email addresses from episode content.
 
         Args:
             episode: Episode containing text to search.
 
         Returns:
-            List of Facts, one per unique valid email found.
+            List of unique valid email addresses found.
         """
         candidates = EMAIL_CANDIDATE_PATTERN.findall(episode.content)
         valid_emails: list[str] = []
@@ -61,6 +59,4 @@ class EmailExtractor(Extractor):
                 continue
 
         # Deduplicate while preserving order
-        unique_emails = list(dict.fromkeys(valid_emails))
-
-        return [self._create_fact(email, episode) for email in unique_emails]
+        return list(dict.fromkeys(valid_emails))

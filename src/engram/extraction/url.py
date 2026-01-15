@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 import validators
 
-from engram.models import Episode, Fact
+from engram.models import Episode
 
 from .base import Extractor
 
@@ -67,23 +67,21 @@ class URLExtractor(Extractor):
     Example:
         ```python
         extractor = URLExtractor()
-        facts = extractor.extract(episode)
-        # facts[0].content = "https://example.com/page"
-        # facts[0].category = "url"
+        urls = extractor.extract(episode)
+        # urls = ["https://example.com/page"]
         ```
     """
 
     name: str = "url"
-    category: str = "url"
 
-    def extract(self, episode: Episode) -> list[Fact]:
+    def extract(self, episode: Episode) -> list[str]:
         """Extract URLs from episode content.
 
         Args:
             episode: Episode containing text to search.
 
         Returns:
-            List of Facts, one per unique valid URL found.
+            List of unique valid URLs found.
         """
         candidates = URL_CANDIDATE_PATTERN.findall(episode.content)
         valid_urls: list[str] = []
@@ -96,6 +94,4 @@ class URLExtractor(Extractor):
                 valid_urls.append(normalized)
 
         # Deduplicate while preserving order
-        unique_urls = list(dict.fromkeys(valid_urls))
-
-        return [self._create_fact(url, episode) for url in unique_urls]
+        return list(dict.fromkeys(valid_urls))
