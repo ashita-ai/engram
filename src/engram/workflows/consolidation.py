@@ -676,12 +676,11 @@ async def run_consolidation_from_structured(
     )
 
 
-# Legacy exports for backwards compatibility
+# Models for DurableAgentFactory consolidation output
 class ExtractedFact(BaseModel):
-    """Legacy: A semantic fact extracted by the LLM.
+    """A semantic fact extracted by the LLM.
 
-    Deprecated: Fact extraction now happens at encode time.
-    This class is kept for backwards compatibility with existing tests.
+    Used by DurableAgentFactory consolidation agents.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -711,10 +710,9 @@ class IdentifiedLink(BaseModel):
 
 
 class MemoryEvolution(BaseModel):
-    """Legacy: Suggested update to an existing memory.
+    """Suggested update to an existing memory.
 
-    Deprecated: Evolution is now handled differently.
-    This class is kept for backwards compatibility.
+    Used by DurableAgentFactory consolidation agents.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -726,26 +724,10 @@ class MemoryEvolution(BaseModel):
     reason: str = Field(default="")
 
 
-class DetectedNegation(BaseModel):
-    """Legacy: A negation detected by the LLM.
-
-    Deprecated: Negation extraction now happens at encode time.
-    This class is kept for backwards compatibility.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    statement: str = Field(description="The negation statement")
-    negates_pattern: str = Field(description="Pattern this negates")
-    confidence: float = Field(ge=0.0, le=1.0, default=0.7)
-    source_context: str = Field(default="")
-
-
 class LLMExtractionResult(BaseModel):
-    """Legacy: Structured output from the consolidation LLM agent.
+    """Structured output from the consolidation LLM agent.
 
-    Deprecated: The new consolidation uses SummaryOutput instead.
-    This class is kept for backwards compatibility with existing tests.
+    Used by DurableAgentFactory for durable execution wrappers.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -754,17 +736,13 @@ class LLMExtractionResult(BaseModel):
     links: list[IdentifiedLink] = Field(default_factory=list)
     contradictions: list[str] = Field(default_factory=list)
     evolutions: list[MemoryEvolution] = Field(default_factory=list)
-    negations: list[DetectedNegation] = Field(default_factory=list)
 
 
 def _find_matching_memory(
     content: str,
     memories: dict[str, SemanticMemory],
 ) -> SemanticMemory | None:
-    """Find a memory matching the given content (fallback string matching).
-
-    Legacy function kept for backwards compatibility.
-    """
+    """Find a memory matching the given content (fallback string matching)."""
     if content in memories:
         return memories[content]
 
@@ -783,7 +761,6 @@ def _find_matching_memory(
 
 __all__ = [
     "ConsolidationResult",
-    "DetectedNegation",
     "ExtractedFact",
     "IdentifiedLink",
     "LLMExtractionResult",

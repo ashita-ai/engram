@@ -4,29 +4,29 @@ A memory system for AI applications that preserves ground truth,
 tracks confidence, and prevents hallucinations.
 
 Quick Start:
-    from engram import Engram
+    from engram.service import EngramService
 
-    memory = Engram(user_id="user_123")
+    async with EngramService.create() as engram:
+        # Store an interaction
+        result = await engram.encode(
+            content="My email is john@example.com",
+            role="user",
+            user_id="user_123",
+        )
 
-    # Store an interaction
-    result = await memory.encode(
-        content="My email is john@example.com",
-        role="user",
-    )
-
-    # Retrieve relevant memories
-    memories = await memory.recall(
-        query="What's the user's email?",
-        min_confidence=0.7,
-    )
+        # Retrieve relevant memories
+        memories = await engram.recall(
+            query="What's the user's email?",
+            user_id="user_123",
+            min_confidence=0.7,
+        )
 
 Memory Types:
     - Episode: Immutable ground truth (raw interactions)
-    - Fact: Pattern-extracted facts (emails, phones, dates)
-    - SemanticMemory: LLM-inferred knowledge
+    - StructuredMemory: Per-episode extraction (emails, phones, URLs, negations)
+    - SemanticMemory: LLM-inferred knowledge (cross-episode synthesis)
     - ProceduralMemory: Behavioral patterns
-    - NegationFact: What is NOT true (negations)
-    - Working: Current session context (in-memory)
+    - Working: Current session context (in-memory, volatile)
 
 For more information, see: https://github.com/ashita-ai/engram
 """
@@ -42,10 +42,9 @@ from .models import (
     ConfidenceScore,
     Episode,
     ExtractionMethod,
-    Fact,
-    NegationFact,
     ProceduralMemory,
     SemanticMemory,
+    StructuredMemory,
 )
 
 __all__ = [
@@ -59,9 +58,8 @@ __all__ = [
     "ConfidenceScore",
     "ExtractionMethod",
     "Episode",
-    "Fact",
+    "StructuredMemory",
     "SemanticMemory",
     "ProceduralMemory",
-    "NegationFact",
     "AuditEntry",
 ]

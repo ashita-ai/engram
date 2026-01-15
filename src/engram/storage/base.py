@@ -15,8 +15,6 @@ from engram.config import settings
 from engram.models import (
     AuditEntry,
     Episode,
-    Fact,
-    NegationFact,
     ProceduralMemory,
     SemanticMemory,
     StructuredMemory,
@@ -30,10 +28,8 @@ MemoryT = TypeVar(
     "MemoryT",
     Episode,
     StructuredMemory,
-    Fact,
     SemanticMemory,
     ProceduralMemory,
-    NegationFact,
     AuditEntry,
 )
 
@@ -41,10 +37,8 @@ MemoryT = TypeVar(
 COLLECTION_NAMES = {
     "episodic": "episodic",
     "structured": "structured",
-    "factual": "factual",
     "semantic": "semantic",
     "procedural": "procedural",
-    "negation": "negation",
     "audit": "audit",
 }
 

@@ -4,11 +4,9 @@ This module exports all memory models and related types:
 
 Memory Types:
     - Episode: Immutable ground truth storage
-    - StructuredMemory: Per-episode structured extraction (NEW)
+    - StructuredMemory: Per-episode structured extraction
     - SemanticMemory: Cross-episode LLM-inferred knowledge
     - ProceduralMemory: Behavioral patterns
-    - Fact: Deterministically extracted facts (DEPRECATED - use StructuredMemory)
-    - NegationFact: What is NOT true (DEPRECATED - use StructuredMemory.negations)
 
 Supporting Types:
     - ConfidenceScore: Composite confidence with auditability
@@ -21,8 +19,6 @@ Supporting Types:
 from .audit import AuditEntry
 from .base import ConfidenceScore, ExtractionMethod, MemoryBase, Staleness, generate_id
 from .episode import Episode, QuickExtracts
-from .fact import Fact
-from .negation import NegationFact
 from .procedural import ProceduralMemory
 from .semantic import EvolutionEntry, SemanticMemory
 from .structured import Negation, Person, Preference, ResolvedDate, StructuredMemory
@@ -45,9 +41,6 @@ __all__ = [
     "Person",
     "Preference",
     "Negation",
-    # Deprecated (use StructuredMemory instead)
-    "Fact",
-    "NegationFact",
     # Supporting types
     "EvolutionEntry",
     # Audit

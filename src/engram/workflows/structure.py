@@ -138,24 +138,9 @@ def _run_deterministic_extractors(episode: Episode) -> tuple[list[str], list[str
     """
     from engram.extraction import EmailExtractor, PhoneExtractor, URLExtractor
 
-    emails: list[str] = []
-    phones: list[str] = []
-    urls: list[str] = []
-
-    # Email extraction - returns Facts with .content field
-    email_extractor = EmailExtractor()
-    for fact in email_extractor.extract(episode):
-        emails.append(fact.content)
-
-    # Phone extraction
-    phone_extractor = PhoneExtractor()
-    for fact in phone_extractor.extract(episode):
-        phones.append(fact.content)
-
-    # URL extraction
-    url_extractor = URLExtractor()
-    for fact in url_extractor.extract(episode):
-        urls.append(fact.content)
+    emails = EmailExtractor().extract(episode)
+    phones = PhoneExtractor().extract(episode)
+    urls = URLExtractor().extract(episode)
 
     return emails, phones, urls
 
@@ -201,7 +186,7 @@ For negations, look for:
 - "That's wrong, I actually..." → pattern for the wrong info
 
 Be conservative - only extract information that is clearly stated.
-Today's date is {datetime.now(UTC).strftime('%Y-%m-%d')} for resolving relative dates."""
+Today's date is {datetime.now(UTC).strftime("%Y-%m-%d")} for resolving relative dates."""
 
     agent: Agent[None, LLMExtractionOutput] = Agent(
         model_spec,

@@ -13,8 +13,6 @@ if TYPE_CHECKING:
     from engram.models import (
         AuditEntry,
         Episode,
-        Fact,
-        NegationFact,
         ProceduralMemory,
         SemanticMemory,
         StructuredMemory,
@@ -24,10 +22,8 @@ MemoryT = TypeVar(
     "MemoryT",
     "Episode",
     "StructuredMemory",
-    "Fact",
     "SemanticMemory",
     "ProceduralMemory",
-    "NegationFact",
     "AuditEntry",
 )
 
@@ -67,15 +63,6 @@ class CRUDMixin:
 
         return await self._get_by_id(memory_id, user_id, "structured", StructuredMemory)
 
-    async def get_fact(self, fact_id: str, user_id: str) -> Fact | None:
-        """Get a fact by ID.
-
-        DEPRECATED: Use get_structured() instead.
-        """
-        from engram.models import Fact
-
-        return await self._get_by_id(fact_id, user_id, "factual", Fact)
-
     async def get_semantic(self, memory_id: str, user_id: str) -> SemanticMemory | None:
         """Get a semantic memory by ID."""
         from engram.models import SemanticMemory
@@ -87,12 +74,6 @@ class CRUDMixin:
         from engram.models import ProceduralMemory
 
         return await self._get_by_id(memory_id, user_id, "procedural", ProceduralMemory)
-
-    async def get_negation(self, fact_id: str, user_id: str) -> NegationFact | None:
-        """Get a negation fact by ID."""
-        from engram.models import NegationFact
-
-        return await self._get_by_id(fact_id, user_id, "negation", NegationFact)
 
     async def _get_by_id(
         self,
@@ -155,13 +136,6 @@ class CRUDMixin:
         """Delete a structured memory."""
         return await self._delete_by_id(memory_id, user_id, "structured")
 
-    async def delete_fact(self, fact_id: str, user_id: str) -> bool:
-        """Delete a fact.
-
-        DEPRECATED: Use delete_structured() instead.
-        """
-        return await self._delete_by_id(fact_id, user_id, "factual")
-
     async def delete_semantic(self, memory_id: str, user_id: str) -> bool:
         """Delete a semantic memory."""
         return await self._delete_by_id(memory_id, user_id, "semantic")
@@ -169,10 +143,6 @@ class CRUDMixin:
     async def delete_procedural(self, memory_id: str, user_id: str) -> bool:
         """Delete a procedural memory."""
         return await self._delete_by_id(memory_id, user_id, "procedural")
-
-    async def delete_negation(self, fact_id: str, user_id: str) -> bool:
-        """Delete a negation fact."""
-        return await self._delete_by_id(fact_id, user_id, "negation")
 
     async def _delete_by_id(
         self,
@@ -776,62 +746,6 @@ class CRUDMixin:
 
         return memories
 
-    async def list_negation_facts(
-        self,
-        user_id: str,
-        org_id: str | None = None,
-        limit: int = 1000,
-    ) -> list[NegationFact]:
-        """List all negation facts for a user.
-
-        Used for filtering during recall to exclude memories that
-        match negated patterns.
-
-        Args:
-            user_id: User ID for isolation.
-            org_id: Optional org ID filter.
-            limit: Maximum facts to return.
-
-        Returns:
-            List of NegationFact objects.
-        """
-        from engram.models import NegationFact
-
-        collection = self._collection_name("negation")
-
-        filters: list[models.FieldCondition] = [
-            models.FieldCondition(
-                key="user_id",
-                match=models.MatchValue(value=user_id),
-            ),
-        ]
-
-        if org_id is not None:
-            filters.append(
-                models.FieldCondition(
-                    key="org_id",
-                    match=models.MatchValue(value=org_id),
-                )
-            )
-
-        results, _ = await self.client.scroll(
-            collection_name=collection,
-            scroll_filter=models.Filter(must=filters),
-            limit=limit,
-            with_payload=True,
-            with_vectors=True,
-        )
-
-        facts: list[NegationFact] = []
-        for point in results:
-            if point.payload is not None:
-                fact = self._payload_to_memory(point.payload, NegationFact)
-                if isinstance(point.vector, list):
-                    fact.embedding = point.vector
-                facts.append(fact)
-
-        return facts
-
     async def update_semantic_memory(
         self,
         memory: SemanticMemory,
@@ -879,53 +793,6 @@ class CRUDMixin:
 
         return True
 
-    async def update_fact(
-        self,
-        fact: Fact,
-    ) -> bool:
-        """Update a fact.
-
-        Args:
-            fact: Fact with updated fields.
-
-        Returns:
-            True if updated, False if not found.
-        """
-        collection = self._collection_name("factual")
-
-        # Find the point
-        results, _ = await self.client.scroll(
-            collection_name=collection,
-            scroll_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="id",
-                        match=models.MatchValue(value=fact.id),
-                    ),
-                    models.FieldCondition(
-                        key="user_id",
-                        match=models.MatchValue(value=fact.user_id),
-                    ),
-                ]
-            ),
-            limit=1,
-            with_payload=True,
-        )
-
-        if not results:
-            return False
-
-        point = results[0]
-        payload = self._memory_to_payload(fact)
-
-        await self.client.set_payload(
-            collection_name=collection,
-            payload=payload,
-            points=[point.id],
-        )
-
-        return True
-
     async def update_procedural_memory(
         self,
         memory: ProceduralMemory,
@@ -964,53 +831,6 @@ class CRUDMixin:
 
         point = results[0]
         payload = self._memory_to_payload(memory)
-
-        await self.client.set_payload(
-            collection_name=collection,
-            payload=payload,
-            points=[point.id],
-        )
-
-        return True
-
-    async def update_negation_fact(
-        self,
-        negation: NegationFact,
-    ) -> bool:
-        """Update a negation fact.
-
-        Args:
-            negation: NegationFact with updated fields.
-
-        Returns:
-            True if updated, False if not found.
-        """
-        collection = self._collection_name("negation")
-
-        # Find the point
-        results, _ = await self.client.scroll(
-            collection_name=collection,
-            scroll_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="id",
-                        match=models.MatchValue(value=negation.id),
-                    ),
-                    models.FieldCondition(
-                        key="user_id",
-                        match=models.MatchValue(value=negation.user_id),
-                    ),
-                ]
-            ),
-            limit=1,
-            with_payload=True,
-        )
-
-        if not results:
-            return False
-
-        point = results[0]
-        payload = self._memory_to_payload(negation)
 
         await self.client.set_payload(
             collection_name=collection,

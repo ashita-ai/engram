@@ -1,18 +1,18 @@
 """Tests for EngramService."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from engram.config import Settings
 from engram.models import (
     Episode,
-    Fact,
-    NegationFact,
     ProceduralMemory,
     SemanticMemory,
+    StructuredMemory,
 )
-from engram.service import EncodeResult, EngramService, RecallResult, _calculate_importance
+from engram.service import EncodeResult, EngramService, RecallResult
+from engram.service.helpers import calculate_importance
 from engram.storage import ScoredResult
 
 
@@ -21,19 +21,18 @@ class TestEngramServiceCreate:
 
     def test_create_with_default_settings(self):
         """Should create service with default settings."""
-        with patch("engram.service.EngramStorage"):
-            with patch("engram.service.get_embedder"):
+        with patch("engram.service.base.EngramStorage"):
+            with patch("engram.service.base.get_embedder"):
                 service = EngramService.create()
                 assert service.settings is not None
                 assert service.storage is not None
                 assert service.embedder is not None
-                assert service.pipeline is not None
 
     def test_create_with_custom_settings(self):
         """Should create service with custom settings."""
         settings = Settings(embedding_provider="fastembed")
-        with patch("engram.service.EngramStorage"):
-            with patch("engram.service.get_embedder"):
+        with patch("engram.service.base.EngramStorage"):
+            with patch("engram.service.base.get_embedder"):
                 service = EngramService.create(settings)
                 assert service.settings.embedding_provider == "fastembed"
 
@@ -46,29 +45,25 @@ class TestEngramServiceEncode:
         """Create a service with mocked dependencies."""
         storage = AsyncMock()
         storage.store_episode = AsyncMock(return_value="ep_123")
-        storage.store_fact = AsyncMock(return_value="fact_123")
+        storage.update_episode = AsyncMock()
+        storage.store_structured = AsyncMock(return_value="struct_123")
+        storage.log_audit = AsyncMock()
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
         embedder.embed_batch = AsyncMock(side_effect=lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
-
-        pipeline = MagicMock()
 
         settings = Settings(openai_api_key="sk-test-dummy-key")
 
         return EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=pipeline,
             settings=settings,
         )
 
     @pytest.mark.asyncio
     async def test_encode_stores_episode(self, mock_service):
         """Should store episode with embedding."""
-        # Mock extraction to return no facts
-        mock_service.pipeline.run.return_value = []
-
         result = await mock_service.encode(
             content="Hello world",
             role="user",
@@ -84,45 +79,38 @@ class TestEngramServiceEncode:
         mock_service.storage.store_episode.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_encode_runs_extraction(self, mock_service):
-        """Should run extraction pipeline and store facts."""
-        # Create a mock fact
-        mock_fact = Fact(
-            content="user@example.com",
-            category="email",
-            source_episode_id="ep_123",
-            user_id="user_123",
-        )
-        mock_service.pipeline.run.return_value = [mock_fact]
-
+    async def test_encode_creates_structured_memory(self, mock_service):
+        """Should create StructuredMemory with regex extracts."""
         result = await mock_service.encode(
             content="Email me at user@example.com",
             role="user",
             user_id="user_123",
         )
 
-        assert len(result.facts) == 1
-        assert result.facts[0].content == "user@example.com"
-        mock_service.storage.store_fact.assert_called_once()
+        # Check structured memory was created
+        assert result.structured is not None
+        assert result.structured.source_episode_id == result.episode.id
+        assert "user@example.com" in result.structured.emails
+        assert result.structured.mode == "fast"
+        assert result.structured.enriched is False
+        mock_service.storage.store_structured.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_encode_skips_extraction_when_disabled(self, mock_service):
-        """Should skip extraction when run_extraction=False."""
+    async def test_encode_extracts_multiple_patterns(self, mock_service):
+        """Should extract emails, phones, and URLs via regex."""
         result = await mock_service.encode(
-            content="Email me at user@example.com",
+            content="Email: test@example.com, Phone: 555-123-4567, URL: https://example.com",
             role="user",
             user_id="user_123",
-            run_extraction=False,
         )
 
-        assert result.facts == []
-        mock_service.pipeline.run.assert_not_called()
+        assert "test@example.com" in result.structured.emails
+        assert any("555" in p for p in result.structured.phones)
+        assert "https://example.com" in result.structured.urls
 
     @pytest.mark.asyncio
     async def test_encode_with_optional_fields(self, mock_service):
         """Should pass optional fields to episode."""
-        mock_service.pipeline.run.return_value = []
-
         result = await mock_service.encode(
             content="Hello",
             role="assistant",
@@ -139,7 +127,6 @@ class TestEngramServiceEncode:
     @pytest.mark.asyncio
     async def test_encode_high_importance_triggers_consolidation(self, mock_service):
         """Should trigger consolidation when importance >= threshold."""
-        mock_service.pipeline.run.return_value = []
         # Set threshold to 0.8 (default)
         mock_service.settings = Settings(
             openai_api_key="sk-test-dummy-key",
@@ -169,7 +156,6 @@ class TestEngramServiceEncode:
     @pytest.mark.asyncio
     async def test_encode_low_importance_skips_consolidation(self, mock_service):
         """Should NOT trigger consolidation when importance < threshold."""
-        mock_service.pipeline.run.return_value = []
         mock_service.settings = Settings(
             openai_api_key="sk-test-dummy-key",
             high_importance_threshold=0.8,
@@ -190,7 +176,6 @@ class TestEngramServiceEncode:
     @pytest.mark.asyncio
     async def test_encode_at_threshold_triggers_consolidation(self, mock_service):
         """Should trigger consolidation when importance == threshold."""
-        mock_service.pipeline.run.return_value = []
         mock_service.settings = Settings(
             openai_api_key="sk-test-dummy-key",
             high_importance_threshold=0.8,
@@ -219,7 +204,6 @@ class TestEngramServiceEncode:
     @pytest.mark.asyncio
     async def test_encode_consolidation_failure_doesnt_fail_encode(self, mock_service):
         """Should not fail encode if consolidation raises exception."""
-        mock_service.pipeline.run.return_value = []
         mock_service.settings = Settings(
             openai_api_key="sk-test-dummy-key",
             high_importance_threshold=0.8,
@@ -248,18 +232,21 @@ class TestEngramServiceRecall:
     def mock_service(self):
         """Create a service with mocked dependencies."""
         storage = AsyncMock()
+        # Default all searches to return empty
+        storage.search_episodes.return_value = []
+        storage.search_structured.return_value = []
+        storage.search_semantic.return_value = []
+        storage.search_procedural.return_value = []
+        storage.list_structured_memories.return_value = []
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
-
-        pipeline = MagicMock()
 
         settings = Settings(openai_api_key="sk-test-dummy-key")
 
         return EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=pipeline,
             settings=settings,
         )
 
@@ -275,7 +262,6 @@ class TestEngramServiceRecall:
         mock_service.storage.search_episodes.return_value = [
             ScoredResult(memory=mock_episode, score=0.85)
         ]
-        mock_service.storage.search_facts.return_value = []
 
         results = await mock_service.recall(
             query="hello",
@@ -289,18 +275,16 @@ class TestEngramServiceRecall:
         assert episode_results[0].score == 0.85  # Actual score from Qdrant
 
     @pytest.mark.asyncio
-    async def test_recall_searches_facts(self, mock_service):
-        """Should search facts and return results."""
-        mock_fact = Fact(
-            content="user@example.com",
-            category="email",
+    async def test_recall_searches_structured(self, mock_service):
+        """Should search structured memories and return results."""
+        mock_structured = StructuredMemory.from_episode_fast(
             source_episode_id="ep_123",
             user_id="user_123",
+            emails=["user@example.com"],
             embedding=[0.1, 0.2, 0.3],
         )
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = [
-            ScoredResult(memory=mock_fact, score=0.92)
+        mock_service.storage.search_structured.return_value = [
+            ScoredResult(memory=mock_structured, score=0.92)
         ]
 
         results = await mock_service.recall(
@@ -308,44 +292,37 @@ class TestEngramServiceRecall:
             user_id="user_123",
         )
 
-        fact_results = [r for r in results if r.memory_type == "factual"]
-        assert len(fact_results) == 1
-        assert fact_results[0].content == "user@example.com"
-        assert fact_results[0].source_episode_id == "ep_123"
-        assert fact_results[0].score == 0.92  # Actual score from Qdrant
+        struct_results = [r for r in results if r.memory_type == "structured"]
+        assert len(struct_results) == 1
+        assert mock_structured.emails[0] in struct_results[0].content
+        assert struct_results[0].source_episode_id == "ep_123"
+        assert struct_results[0].score == 0.92
 
     @pytest.mark.asyncio
     async def test_recall_excludes_episodes_when_not_in_types(self, mock_service):
         """Should skip episodes when not in memory_types."""
-        mock_service.storage.search_facts.return_value = []
-
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            memory_types=["factual"],  # Episode not included
+            memory_types=["structured"],  # Episode not included
         )
 
         mock_service.storage.search_episodes.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_recall_excludes_facts_when_not_in_types(self, mock_service):
-        """Should skip facts when not in memory_types."""
-        mock_service.storage.search_episodes.return_value = []
-
+    async def test_recall_excludes_structured_when_not_in_types(self, mock_service):
+        """Should skip structured when not in memory_types."""
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            memory_types=["episodic"],  # Fact not included
+            memory_types=["episodic"],  # Structured not included
         )
 
-        mock_service.storage.search_facts.assert_not_called()
+        mock_service.storage.search_structured.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_recall_passes_filters(self, mock_service):
         """Should pass filters to storage search."""
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-
         await mock_service.recall(
             query="hello",
             user_id="user_123",
@@ -355,8 +332,8 @@ class TestEngramServiceRecall:
             apply_negation_filter=False,  # Disable to test direct limit passthrough
         )
 
-        mock_service.storage.search_facts.assert_called_once()
-        call_kwargs = mock_service.storage.search_facts.call_args.kwargs
+        mock_service.storage.search_structured.assert_called_once()
+        call_kwargs = mock_service.storage.search_structured.call_args.kwargs
         assert call_kwargs["user_id"] == "user_123"
         assert call_kwargs["org_id"] == "org_456"
         assert call_kwargs["limit"] == 5
@@ -371,9 +348,6 @@ class TestEngramServiceRecall:
             trigger_context="general conversation",
             embedding=[0.1, 0.2, 0.3],
         )
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-        mock_service.storage.search_semantic.return_value = []
         mock_service.storage.search_procedural.return_value = [
             ScoredResult(memory=mock_procedural, score=0.85)
         ]
@@ -392,14 +366,10 @@ class TestEngramServiceRecall:
     @pytest.mark.asyncio
     async def test_recall_excludes_procedural_when_not_in_types(self, mock_service):
         """Should skip procedural when not in memory_types."""
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-        mock_service.storage.search_semantic.return_value = []
-
         await mock_service.recall(
             query="hello",
             user_id="user_123",
-            memory_types=["episodic", "factual", "semantic"],  # Procedural not included
+            memory_types=["episodic", "structured", "semantic"],  # Procedural not included
         )
 
         mock_service.storage.search_procedural.assert_not_called()
@@ -414,9 +384,6 @@ class TestEngramServiceRecall:
             access_count=5,
             embedding=[0.1, 0.2, 0.3],
         )
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-        mock_service.storage.search_semantic.return_value = []
         mock_service.storage.search_procedural.return_value = [
             ScoredResult(memory=mock_procedural, score=0.9)
         ]
@@ -431,79 +398,6 @@ class TestEngramServiceRecall:
         metadata = proc_results[0].metadata
         assert metadata["trigger_context"] == "technical discussion"
         assert metadata["access_count"] == 5
-        assert "derived_at" in metadata
-
-    @pytest.mark.asyncio
-    async def test_recall_searches_negation(self, mock_service):
-        """Should search negation facts and return results."""
-        mock_negation = NegationFact(
-            content="User does NOT use MongoDB",
-            negates_pattern="mongodb",
-            user_id="user_123",
-            embedding=[0.1, 0.2, 0.3],
-        )
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-        mock_service.storage.search_semantic.return_value = []
-        mock_service.storage.search_procedural.return_value = []
-        mock_service.storage.search_negation.return_value = [
-            ScoredResult(memory=mock_negation, score=0.88)
-        ]
-
-        results = await mock_service.recall(
-            query="mongodb preferences",
-            user_id="user_123",
-        )
-
-        neg_results = [r for r in results if r.memory_type == "negation"]
-        assert len(neg_results) == 1
-        assert neg_results[0].content == "User does NOT use MongoDB"
-        assert neg_results[0].score == 0.88
-        assert neg_results[0].metadata["negates_pattern"] == "mongodb"
-
-    @pytest.mark.asyncio
-    async def test_recall_excludes_negation_when_not_in_types(self, mock_service):
-        """Should skip negation when not in memory_types."""
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-        mock_service.storage.search_semantic.return_value = []
-        mock_service.storage.search_procedural.return_value = []
-
-        await mock_service.recall(
-            query="hello",
-            user_id="user_123",
-            memory_types=["episodic", "factual"],  # Negation not included
-        )
-
-        mock_service.storage.search_negation.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_recall_includes_negation_metadata(self, mock_service):
-        """Should include negation-specific metadata in results."""
-        mock_negation = NegationFact(
-            content="User does NOT want spam",
-            negates_pattern="spam",
-            user_id="user_123",
-            embedding=[0.1, 0.2, 0.3],
-        )
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-        mock_service.storage.search_semantic.return_value = []
-        mock_service.storage.search_procedural.return_value = []
-        mock_service.storage.search_negation.return_value = [
-            ScoredResult(memory=mock_negation, score=0.9)
-        ]
-
-        results = await mock_service.recall(
-            query="spam preferences",
-            user_id="user_123",
-        )
-
-        neg_results = [r for r in results if r.memory_type == "negation"]
-        assert len(neg_results) == 1
-        metadata = neg_results[0].metadata
-        assert metadata["negates_pattern"] == "spam"
-        assert "derived_at" in metadata
 
     @pytest.mark.asyncio
     async def test_recall_with_memory_types_array(self, mock_service):
@@ -514,19 +408,20 @@ class TestEngramServiceRecall:
             user_id="user_123",
             embedding=[0.1, 0.2, 0.3],
         )
-        mock_fact = Fact(
-            content="user@example.com",
-            category="email",
+        mock_structured = StructuredMemory.from_episode_fast(
             source_episode_id="ep_123",
             user_id="user_123",
+            emails=["user@example.com"],
             embedding=[0.1, 0.2, 0.3],
         )
         mock_service.storage.search_episodes.return_value = [
             ScoredResult(memory=mock_episode, score=0.85)
         ]
-        mock_service.storage.search_facts.return_value = [ScoredResult(memory=mock_fact, score=0.9)]
+        mock_service.storage.search_structured.return_value = [
+            ScoredResult(memory=mock_structured, score=0.9)
+        ]
 
-        # Only request episodes - should not search facts
+        # Only request episodes - should not search structured
         results = await mock_service.recall(
             query="hello",
             user_id="user_123",
@@ -534,7 +429,7 @@ class TestEngramServiceRecall:
         )
 
         mock_service.storage.search_episodes.assert_called_once()
-        mock_service.storage.search_facts.assert_not_called()
+        mock_service.storage.search_structured.assert_not_called()
         assert len(results) == 1
         assert results[0].memory_type == "episodic"
 
@@ -548,10 +443,9 @@ class TestEngramServiceRecall:
         )
 
         mock_service.storage.search_episodes.assert_not_called()
-        mock_service.storage.search_facts.assert_not_called()
+        mock_service.storage.search_structured.assert_not_called()
         mock_service.storage.search_semantic.assert_not_called()
         mock_service.storage.search_procedural.assert_not_called()
-        mock_service.storage.search_negation.assert_not_called()
         assert len(results) == 0
 
     @pytest.mark.asyncio
@@ -575,13 +469,9 @@ class TestEngramServiceRecall:
         mock_semantic2.add_link("sem_001")  # Bidirectional link
 
         # Initial search returns only sem_001
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
         mock_service.storage.search_semantic.return_value = [
             ScoredResult(memory=mock_semantic1, score=0.9)
         ]
-        mock_service.storage.search_procedural.return_value = []
-        mock_service.storage.search_negation.return_value = []
 
         # Mock get_semantic to return the linked memory
         mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic2)
@@ -626,13 +516,9 @@ class TestEngramServiceRecall:
         )
         mock_semantic3.id = "sem_003"
 
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
         mock_service.storage.search_semantic.return_value = [
             ScoredResult(memory=mock_semantic1, score=0.9)
         ]
-        mock_service.storage.search_procedural.return_value = []
-        mock_service.storage.search_negation.return_value = []
 
         # Mock get_semantic to return memories based on ID
         async def mock_get_semantic(memory_id: str, user_id: str):
@@ -668,13 +554,9 @@ class TestEngramServiceRecall:
         mock_semantic.id = "sem_001"
         mock_semantic.add_link("sem_002")  # Has a link
 
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
         mock_service.storage.search_semantic.return_value = [
             ScoredResult(memory=mock_semantic, score=0.9)
         ]
-        mock_service.storage.search_procedural.return_value = []
-        mock_service.storage.search_negation.return_value = []
 
         results = await mock_service.recall(
             query="python preferences",
@@ -729,34 +611,36 @@ class TestEncodeResult:
     """Tests for EncodeResult model."""
 
     def test_encode_result_creation(self):
-        """Should create EncodeResult with episode and facts."""
+        """Should create EncodeResult with episode and structured memory."""
         episode = Episode(
             content="Hello",
             role="user",
             user_id="user_123",
         )
+        structured = StructuredMemory.from_episode_fast(
+            source_episode_id=episode.id,
+            user_id="user_123",
+        )
 
-        result = EncodeResult(episode=episode)
+        result = EncodeResult(episode=episode, structured=structured)
         assert result.episode == episode
-        assert result.facts == []
+        assert result.structured == structured
 
-    def test_encode_result_with_facts(self):
-        """Should create EncodeResult with facts list."""
+    def test_encode_result_with_extracts(self):
+        """Should create EncodeResult with structured memory containing extracts."""
         episode = Episode(
             content="Email me at user@example.com",
             role="user",
             user_id="user_123",
         )
-        fact = Fact(
-            content="user@example.com",
-            category="email",
+        structured = StructuredMemory.from_episode_fast(
             source_episode_id=episode.id,
             user_id="user_123",
+            emails=["user@example.com"],
         )
 
-        result = EncodeResult(episode=episode, facts=[fact])
-        assert len(result.facts) == 1
-        assert result.facts[0].content == "user@example.com"
+        result = EncodeResult(episode=episode, structured=structured)
+        assert "user@example.com" in result.structured.emails
 
 
 class TestWorkingMemory:
@@ -767,22 +651,24 @@ class TestWorkingMemory:
         """Create a service with mocked dependencies."""
         storage = AsyncMock()
         storage.store_episode = AsyncMock(return_value="ep_123")
-        storage.store_fact = AsyncMock(return_value="fact_123")
+        storage.update_episode = AsyncMock()
+        storage.store_structured = AsyncMock(return_value="struct_123")
         storage.log_audit = AsyncMock()
+        storage.search_episodes.return_value = []
+        storage.search_structured.return_value = []
+        storage.search_semantic.return_value = []
+        storage.search_procedural.return_value = []
+        storage.list_structured_memories.return_value = []
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
         embedder.embed_batch = AsyncMock(side_effect=lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
-
-        pipeline = MagicMock()
-        pipeline.run.return_value = []
 
         settings = Settings(openai_api_key="sk-test-dummy-key")
 
         return EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=pipeline,
             settings=settings,
         )
 
@@ -851,10 +737,6 @@ class TestWorkingMemory:
         # Add episode to working memory
         await mock_service.encode(content="Test content", role="user", user_id="user_123")
 
-        # Mock storage to return empty results
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-
         results = await mock_service.recall(query="test", user_id="user_123")
 
         # Should have working memory result
@@ -867,13 +749,10 @@ class TestWorkingMemory:
         """Recall should exclude working memory when not in memory_types."""
         await mock_service.encode(content="Test content", role="user", user_id="user_123")
 
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
-
         results = await mock_service.recall(
             query="test",
             user_id="user_123",
-            memory_types=["episodic", "factual"],  # Working not included
+            memory_types=["episodic", "structured"],  # Working not included
         )
 
         working_results = [r for r in results if r.memory_type == "working"]
@@ -884,9 +763,6 @@ class TestWorkingMemory:
         """Recall should only return working memory for the specified user."""
         await mock_service.encode(content="User 1 content", role="user", user_id="user_1")
         await mock_service.encode(content="User 2 content", role="user", user_id="user_2")
-
-        mock_service.storage.search_episodes.return_value = []
-        mock_service.storage.search_facts.return_value = []
 
         results = await mock_service.recall(query="content", user_id="user_1")
 
@@ -903,42 +779,39 @@ class TestGetSources:
         """Create a service with mocked dependencies."""
         storage = AsyncMock()
         embedder = AsyncMock()
-        pipeline = MagicMock()
         settings = Settings(openai_api_key="sk-test-dummy-key")
 
         return EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=pipeline,
             settings=settings,
         )
 
     @pytest.mark.asyncio
-    async def test_get_sources_for_fact(self, mock_service):
-        """Should return source episode for a fact."""
+    async def test_get_sources_for_structured(self, mock_service):
+        """Should return source episode for a structured memory."""
         source_episode = Episode(
             id="ep_source_123",
             content="My email is user@example.com",
             role="user",
             user_id="user_123",
         )
-        mock_fact = Fact(
-            id="fact_abc123",
-            content="user@example.com",
-            category="email",
+        mock_structured = StructuredMemory.from_episode_fast(
             source_episode_id="ep_source_123",
             user_id="user_123",
+            emails=["user@example.com"],
         )
+        mock_structured.id = "struct_abc123"
 
-        mock_service.storage.get_fact.return_value = mock_fact
+        mock_service.storage.get_structured.return_value = mock_structured
         mock_service.storage.get_episode.return_value = source_episode
 
-        episodes = await mock_service.get_sources("fact_abc123", "user_123")
+        episodes = await mock_service.get_sources("struct_abc123", "user_123")
 
         assert len(episodes) == 1
         assert episodes[0].id == "ep_source_123"
         assert episodes[0].content == "My email is user@example.com"
-        mock_service.storage.get_fact.assert_called_once_with("fact_abc123", "user_123")
+        mock_service.storage.get_structured.assert_called_once_with("struct_abc123", "user_123")
 
     @pytest.mark.asyncio
     async def test_get_sources_for_semantic(self, mock_service):
@@ -984,34 +857,12 @@ class TestGetSources:
         mock_service.storage.get_procedural.assert_called_once_with("proc_abc", "user_123")
 
     @pytest.mark.asyncio
-    async def test_get_sources_for_negation(self, mock_service):
-        """Should return source episodes for a negation fact."""
-        source_episode = Episode(
-            id="ep_neg_1", content="I don't like spam", role="user", user_id="user_123"
-        )
-        mock_negation = NegationFact(
-            id="neg_def",
-            content="User does not want promotional emails",
-            negates_pattern="promotional emails",
-            source_episode_ids=["ep_neg_1"],
-            user_id="user_123",
-        )
+    async def test_get_sources_structured_not_found(self, mock_service):
+        """Should raise KeyError if structured memory not found."""
+        mock_service.storage.get_structured.return_value = None
 
-        mock_service.storage.get_negation.return_value = mock_negation
-        mock_service.storage.get_episode.return_value = source_episode
-
-        episodes = await mock_service.get_sources("neg_def", "user_123")
-
-        assert len(episodes) == 1
-        mock_service.storage.get_negation.assert_called_once_with("neg_def", "user_123")
-
-    @pytest.mark.asyncio
-    async def test_get_sources_fact_not_found(self, mock_service):
-        """Should raise KeyError if fact not found."""
-        mock_service.storage.get_fact.return_value = None
-
-        with pytest.raises(KeyError, match="Fact not found"):
-            await mock_service.get_sources("fact_nonexistent", "user_123")
+        with pytest.raises(KeyError, match="StructuredMemory not found"):
+            await mock_service.get_sources("struct_nonexistent", "user_123")
 
     @pytest.mark.asyncio
     async def test_get_sources_semantic_not_found(self, mock_service):
@@ -1078,176 +929,110 @@ class TestImportanceCalculation:
 
     def test_baseline_importance(self):
         """Base importance should be 0.5 with no extra signals."""
-        importance = _calculate_importance(
+        importance = calculate_importance(
             content="Hello world",
             role="assistant",  # assistant doesn't get bonus
-            facts=[],
-            negations=[],
         )
         assert importance == 0.5
 
     def test_user_role_bonus(self):
         """User messages should get +0.05 bonus."""
-        importance = _calculate_importance(
+        importance = calculate_importance(
             content="Hello world",
             role="user",
-            facts=[],
-            negations=[],
         )
         assert importance == 0.55
 
     def test_system_role_penalty(self):
         """System messages should get -0.1 penalty."""
-        importance = _calculate_importance(
+        importance = calculate_importance(
             content="You are a helpful assistant",
             role="system",
-            facts=[],
-            negations=[],
         )
         assert importance == 0.4
 
-    def test_facts_increase_importance(self):
-        """Each fact should add 0.05 up to 0.15 cap."""
-        facts = [
-            Fact(
-                content="test@example.com",
-                category="email",
-                source_episode_id="ep_1",
-                user_id="u1",
-            )
-        ]
-        importance = _calculate_importance(
+    def test_regex_extracts_increase_importance(self):
+        """Each regex extract should add 0.05 up to 0.15 cap."""
+        structured = StructuredMemory.from_episode_fast(
+            source_episode_id="ep_1",
+            user_id="u1",
+            emails=["test@example.com"],
+        )
+        importance = calculate_importance(
             content="My email is test@example.com",
             role="assistant",
-            facts=facts,
-            negations=[],
+            structured=structured,
         )
         assert importance == 0.55  # 0.5 + 0.05
 
-        # Multiple facts
-        facts = [
-            Fact(content=f"fact{i}", category="test", source_episode_id="ep_1", user_id="u1")
-            for i in range(5)
-        ]
-        importance = _calculate_importance(
-            content="Lots of facts here",
-            role="assistant",
-            facts=facts,
-            negations=[],
+        # Multiple extracts
+        structured = StructuredMemory.from_episode_fast(
+            source_episode_id="ep_1",
+            user_id="u1",
+            emails=["a@b.com", "c@d.com"],
+            phones=["555-1234", "555-5678"],
+            urls=["https://example.com"],
         )
-        assert importance == 0.65  # 0.5 + 0.15 (capped)
-
-    def test_negations_increase_importance(self):
-        """Each negation should add 0.1 up to 0.2 cap."""
-        negations = [
-            NegationFact(
-                content="I don't use MongoDB",
-                negates_pattern="MongoDB",
-                source_episode_ids=["ep_1"],
-                user_id="u1",
-            )
-        ]
-        importance = _calculate_importance(
-            content="I don't use MongoDB",
+        importance = calculate_importance(
+            content="Lots of contact info here",
             role="assistant",
-            facts=[],
-            negations=negations,
+            structured=structured,
         )
-        assert importance == 0.6  # 0.5 + 0.1
-
-        # Multiple negations
-        negations = [
-            NegationFact(
-                content=f"I don't use {db}",
-                negates_pattern=db,
-                source_episode_ids=["ep_1"],
-                user_id="u1",
-            )
-            for db in ["MongoDB", "MySQL", "Redis"]
-        ]
-        importance = _calculate_importance(
-            content="I don't use these databases",
-            role="assistant",
-            facts=[],
-            negations=negations,
-        )
-        assert importance == 0.7  # 0.5 + 0.2 (capped)
+        assert importance == 0.65  # 0.5 + 0.15 (capped at 5 extracts)
 
     def test_importance_keywords_increase_importance(self):
         """Importance keywords should add 0.05 each up to 0.1 cap."""
-        importance = _calculate_importance(
+        importance = calculate_importance(
             content="Remember this is important",
             role="assistant",
-            facts=[],
-            negations=[],
         )
         assert importance == 0.6  # 0.5 + 0.1 (2 keywords: remember, important)
 
         # Single keyword
-        importance = _calculate_importance(
+        importance = calculate_importance(
             content="This is critical information",
             role="assistant",
-            facts=[],
-            negations=[],
         )
         assert importance == 0.55  # 0.5 + 0.05 (1 keyword: critical)
 
     def test_combined_signals(self):
         """Multiple signals should combine correctly."""
-        facts = [
-            Fact(
-                content="test@example.com", category="email", source_episode_id="ep_1", user_id="u1"
-            )
-        ]
-        negations = [
-            NegationFact(
-                content="I don't use MongoDB",
-                negates_pattern="MongoDB",
-                source_episode_ids=["ep_1"],
-                user_id="u1",
-            )
-        ]
-        importance = _calculate_importance(
-            content="Remember my email is test@example.com, I don't use MongoDB",
-            role="user",
-            facts=facts,
-            negations=negations,
+        structured = StructuredMemory.from_episode_fast(
+            source_episode_id="ep_1",
+            user_id="u1",
+            emails=["test@example.com"],
         )
-        # 0.5 base + 0.05 (user) + 0.05 (1 fact) + 0.1 (1 negation) + 0.05 (1 keyword: remember) = 0.75
-        assert importance == pytest.approx(0.75)
+        importance = calculate_importance(
+            content="Remember my email is test@example.com",
+            role="user",
+            structured=structured,
+        )
+        # 0.5 base + 0.05 (user) + 0.05 (1 email) + 0.05 (1 keyword: remember) = 0.65
+        assert importance == pytest.approx(0.65)
 
     def test_importance_capped_at_one(self):
         """Importance should never exceed 1.0."""
         # Create many signals
-        facts = [
-            Fact(content=f"fact{i}", category="test", source_episode_id="ep_1", user_id="u1")
-            for i in range(10)
-        ]
-        negations = [
-            NegationFact(
-                content=f"I don't use {db}",
-                negates_pattern=db,
-                source_episode_ids=["ep_1"],
-                user_id="u1",
-            )
-            for db in ["MongoDB", "MySQL", "Redis", "SQLite", "Oracle"]
-        ]
-        importance = _calculate_importance(
+        structured = StructuredMemory.from_episode_fast(
+            source_episode_id="ep_1",
+            user_id="u1",
+            emails=["a@b.com", "c@d.com", "e@f.com", "g@h.com", "i@j.com"],
+            phones=["555-1234", "555-5678", "555-9012"],
+            urls=["https://example.com", "https://test.com"],
+        )
+        importance = calculate_importance(
             content="Remember this is important and critical and urgent and essential",
             role="user",
-            facts=facts,
-            negations=negations,
+            structured=structured,
         )
-        assert importance == 1.0
+        assert importance == 0.8  # 0.5 + 0.15 (extracts) + 0.05 (user) + 0.1 (keywords)
 
     def test_importance_floored_at_zero(self):
         """Importance should never go below 0.0."""
         # System role with negative base
-        importance = _calculate_importance(
+        importance = calculate_importance(
             content="You are a helper",
             role="system",
-            facts=[],
-            negations=[],
             base_importance=0.0,  # Start at 0
         )
         assert importance == 0.0  # 0.0 - 0.1 = -0.1 -> clamped to 0.0

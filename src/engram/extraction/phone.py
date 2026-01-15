@@ -8,7 +8,7 @@ from __future__ import annotations
 import phonenumbers
 from phonenumbers import Leniency, PhoneNumberFormat
 
-from engram.models import Episode, Fact
+from engram.models import Episode
 
 from .base import Extractor
 
@@ -24,14 +24,12 @@ class PhoneExtractor(Extractor):
     Example:
         ```python
         extractor = PhoneExtractor()
-        facts = extractor.extract(episode)
-        # facts[0].content = "+15551234567"
-        # facts[0].category = "phone"
+        phones = extractor.extract(episode)
+        # phones = ["+15551234567"]
         ```
     """
 
     name: str = "phone"
-    category: str = "phone"
 
     def __init__(self, default_region: str = "US") -> None:
         """Initialize phone extractor.
@@ -42,14 +40,14 @@ class PhoneExtractor(Extractor):
         """
         self.default_region = default_region
 
-    def extract(self, episode: Episode) -> list[Fact]:
+    def extract(self, episode: Episode) -> list[str]:
         """Extract phone numbers from episode content.
 
         Args:
             episode: Episode containing text to search.
 
         Returns:
-            List of Facts, one per unique valid phone number found.
+            List of unique valid phone numbers in E.164 format.
         """
         valid_phones: list[str] = []
 
@@ -69,6 +67,4 @@ class PhoneExtractor(Extractor):
                 valid_phones.append(formatted)
 
         # Deduplicate while preserving order
-        unique_phones = list(dict.fromkeys(valid_phones))
-
-        return [self._create_fact(phone, episode) for phone in unique_phones]
+        return list(dict.fromkeys(valid_phones))

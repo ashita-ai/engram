@@ -9,14 +9,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from engram.models import Staleness
 
-# Valid memory types for the memory_types parameter (cognitive science terms)
-MemoryType = Literal["episodic", "factual", "semantic", "procedural", "negation", "working"]
+# Valid memory types for the memory_types parameter
+MemoryType = Literal["episodic", "structured", "semantic", "procedural", "working"]
 ALL_MEMORY_TYPES: set[str] = {
     "episodic",
-    "factual",
+    "structured",
     "semantic",
     "procedural",
-    "negation",
     "working",
 }
 
@@ -31,7 +30,7 @@ class EncodeRequest(BaseModel):
         org_id: Optional organization ID.
         session_id: Optional session ID for grouping.
         importance: Importance score (0.0-1.0).
-        run_extraction: Whether to run fact extraction.
+        enrich: LLM enrichment mode (False=regex only, True=sync LLM, "background"=async).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -49,27 +48,36 @@ class EncodeRequest(BaseModel):
         le=1.0,
         description="Importance score (auto-calculated if not provided)",
     )
-    run_extraction: bool = Field(default=True, description="Whether to run fact extraction")
+    enrich: bool | Literal["background"] = Field(
+        default=False,
+        description="LLM enrichment: False=regex only, True=sync LLM, 'background'=async",
+    )
 
 
-class FactResponse(BaseModel):
-    """Response model for an extracted fact.
+class StructuredResponse(BaseModel):
+    """Response model for a structured memory extraction.
 
     Attributes:
-        id: Unique fact ID.
-        content: The extracted fact content.
-        category: Fact category (email, phone, date, etc.).
-        confidence: Confidence score.
+        id: Unique structured memory ID.
         source_episode_id: ID of the source episode.
+        mode: Extraction mode ("fast" or "rich").
+        enriched: Whether LLM enrichment was applied.
+        emails: Extracted email addresses.
+        phones: Extracted phone numbers.
+        urls: Extracted URLs.
+        confidence: Confidence score.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    content: str
-    category: str
-    confidence: float
     source_episode_id: str
+    mode: str
+    enriched: bool
+    emails: list[str] = Field(default_factory=list)
+    phones: list[str] = Field(default_factory=list)
+    urls: list[str] = Field(default_factory=list)
+    confidence: float
 
 
 class EpisodeResponse(BaseModel):
@@ -103,15 +111,15 @@ class EncodeResponse(BaseModel):
 
     Attributes:
         episode: The stored episode.
-        facts: List of extracted facts.
-        fact_count: Number of facts extracted.
+        structured: The structured memory with extractions.
+        extract_count: Total number of extracts (emails + phones + urls).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     episode: EpisodeResponse
-    facts: list[FactResponse] = Field(default_factory=list)
-    fact_count: int = Field(description="Number of facts extracted")
+    structured: StructuredResponse
+    extract_count: int = Field(description="Total number of extracts")
 
 
 class RecallRequest(BaseModel):
@@ -189,12 +197,12 @@ class RecallResultResponse(BaseModel):
     """Response model for a single recalled memory.
 
     Attributes:
-        memory_type: Type of memory (episodic, factual, semantic, etc.).
+        memory_type: Type of memory (episodic, structured, semantic, procedural).
         content: The memory content.
         score: Similarity score (0.0-1.0).
-        confidence: Confidence score for facts/semantic memories.
+        confidence: Confidence score for structured/semantic memories.
         memory_id: Unique memory ID.
-        source_episode_id: Source episode ID for facts (single source).
+        source_episode_id: Source episode ID (single source).
         source_episode_ids: Source episode IDs for memories with multiple sources.
         source_episodes: Source episode details (when include_sources=True).
         related_ids: IDs of related memories (for multi-hop).
@@ -258,36 +266,34 @@ class MemoryCounts(BaseModel):
 
     Attributes:
         episodes: Number of episode memories.
-        facts: Number of extracted facts.
+        structured: Number of structured memories.
         semantic: Number of semantic memories (from consolidation).
         procedural: Number of procedural memories.
-        negation: Number of negation facts.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     episodes: int = Field(ge=0)
-    facts: int = Field(ge=0)
+    structured: int = Field(ge=0)
     semantic: int = Field(ge=0)
     procedural: int = Field(ge=0)
-    negation: int = Field(ge=0)
 
 
 class ConfidenceStats(BaseModel):
     """Confidence statistics for memories.
 
     Attributes:
-        facts_avg: Average confidence of facts.
-        facts_min: Minimum confidence of facts.
-        facts_max: Maximum confidence of facts.
+        structured_avg: Average confidence of structured memories.
+        structured_min: Minimum confidence of structured memories.
+        structured_max: Maximum confidence of structured memories.
         semantic_avg: Average confidence of semantic memories.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    facts_avg: float | None = Field(default=None, description="Average fact confidence")
-    facts_min: float | None = Field(default=None, description="Minimum fact confidence")
-    facts_max: float | None = Field(default=None, description="Maximum fact confidence")
+    structured_avg: float | None = Field(default=None, description="Average structured confidence")
+    structured_min: float | None = Field(default=None, description="Minimum structured confidence")
+    structured_max: float | None = Field(default=None, description="Maximum structured confidence")
     semantic_avg: float | None = Field(default=None, description="Average semantic confidence")
 
 
@@ -334,12 +340,12 @@ class WorkingMemoryResponse(BaseModel):
 class SourcesResponse(BaseModel):
     """Response for get_sources endpoint.
 
-    Returns the source episodes that a derived memory (fact, semantic,
-    procedural, negation) was extracted from.
+    Returns the source episodes that a derived memory (structured, semantic,
+    procedural) was extracted from.
 
     Attributes:
         memory_id: The ID of the derived memory.
-        memory_type: Type of memory (factual, semantic, procedural, negation).
+        memory_type: Type of memory (structured, semantic, procedural).
         sources: Source episodes in chronological order.
         count: Number of source episodes.
     """
@@ -378,7 +384,7 @@ class VerificationResponse(BaseModel):
 
     Attributes:
         memory_id: ID of the verified memory.
-        memory_type: Type of memory (factual, semantic, etc.).
+        memory_type: Type of memory (structured, semantic, procedural).
         content: The memory content.
         verified: True if sources found and traceable.
         source_episodes: Source episode details.
@@ -390,7 +396,7 @@ class VerificationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     memory_id: str = Field(description="ID of the verified memory")
-    memory_type: str = Field(description="Type: factual, semantic, procedural, negation")
+    memory_type: str = Field(description="Type: structured, semantic, procedural")
     content: str = Field(description="The memory content")
     verified: bool = Field(description="True if sources found and traceable")
     source_episodes: list[SourceEpisodeDetail] = Field(

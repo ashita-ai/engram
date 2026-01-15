@@ -1,17 +1,26 @@
 """StructuredMemory model - per-episode structured extraction.
 
 StructuredMemory represents the single-episode intelligence layer:
-- Created by LLM processing of one Episode
-- Contains both deterministic (regex) and LLM-extracted entities
+- Always created for every Episode (fast mode by default)
+- Contains deterministic (regex) extracts always
+- Optionally enriched with LLM-extracted entities (rich mode)
 - Immutable once created
 - Bridges the gap between raw Episodes and cross-episode Semantic memories
+
+Modes:
+- fast: Regex extraction only (emails, phones, URLs) - no LLM, immediate
+- rich: Regex + LLM extraction (dates, people, orgs, prefs, negations)
 """
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .base import ConfidenceScore, ExtractionMethod, MemoryBase, generate_id
+
+# Structured memory modes
+StructuredMode = Literal["fast", "rich"]
 
 
 class ResolvedDate(BaseModel):
@@ -187,6 +196,16 @@ class StructuredMemory(MemoryBase):
         description="Composite confidence score (weighted by extraction methods)",
     )
 
+    # Mode tracking
+    mode: StructuredMode = Field(
+        default="fast",
+        description="Extraction mode: 'fast' (regex only) or 'rich' (regex + LLM)",
+    )
+    enriched: bool = Field(
+        default=False,
+        description="Whether LLM enrichment has been applied",
+    )
+
     # Consolidation tracking
     consolidated: bool = Field(
         default=False,
@@ -196,6 +215,58 @@ class StructuredMemory(MemoryBase):
         default=None,
         description="ID of the SemanticMemory this was consolidated into",
     )
+
+    @classmethod
+    def from_episode_fast(
+        cls,
+        source_episode_id: str,
+        user_id: str,
+        org_id: str | None = None,
+        emails: list[str] | None = None,
+        phones: list[str] | None = None,
+        urls: list[str] | None = None,
+        embedding: list[float] | None = None,
+    ) -> "StructuredMemory":
+        """Create a fast-mode StructuredMemory (regex extracts only).
+
+        Fast mode extracts only deterministic data using regex:
+        - Emails, phones, URLs
+
+        No LLM calls are made. This is the default for encode().
+
+        Args:
+            source_episode_id: The Episode this was extracted from.
+            user_id: User who owns this memory.
+            org_id: Optional organization.
+            emails: Regex-extracted emails.
+            phones: Regex-extracted phones.
+            urls: Regex-extracted URLs.
+            embedding: Vector embedding.
+
+        Returns:
+            StructuredMemory instance in fast mode.
+        """
+        deterministic_count = len(emails or []) + len(phones or []) + len(urls or [])
+
+        # Fast mode: high confidence for regex extracts, baseline otherwise
+        confidence_value = 0.9 if deterministic_count > 0 else 0.7
+
+        return cls(
+            source_episode_id=source_episode_id,
+            user_id=user_id,
+            org_id=org_id,
+            emails=emails or [],
+            phones=phones or [],
+            urls=urls or [],
+            embedding=embedding,
+            mode="fast",
+            enriched=False,
+            confidence=ConfidenceScore(
+                value=confidence_value,
+                extraction_method=ExtractionMethod.EXTRACTED,
+                extraction_base=0.9,
+            ),
+        )
 
     @classmethod
     def from_episode(
@@ -219,7 +290,11 @@ class StructuredMemory(MemoryBase):
         keywords: list[str] | None = None,
         embedding: list[float] | None = None,
     ) -> "StructuredMemory":
-        """Create a StructuredMemory from extraction results.
+        """Create a rich-mode StructuredMemory (regex + LLM extracts).
+
+        Rich mode includes both deterministic and LLM-extracted data:
+        - Deterministic: emails, phones, URLs (regex)
+        - LLM: dates, people, orgs, locations, preferences, negations
 
         Computes composite confidence based on what was extracted:
         - If only deterministic data: 0.9 confidence
@@ -244,7 +319,7 @@ class StructuredMemory(MemoryBase):
             embedding: Vector embedding.
 
         Returns:
-            StructuredMemory instance.
+            StructuredMemory instance in rich mode.
         """
         # Count deterministic vs LLM extracts for confidence weighting
         deterministic_count = len(emails or []) + len(phones or []) + len(urls or [])
@@ -288,6 +363,8 @@ class StructuredMemory(MemoryBase):
             summary=summary,
             keywords=keywords or [],
             embedding=embedding,
+            mode="rich",
+            enriched=True,
             confidence=ConfidenceScore(
                 value=confidence_value,
                 extraction_method=ExtractionMethod.INFERRED,

@@ -137,7 +137,7 @@ Each call increases `consolidation_strength` by 0.1 and increments `consolidatio
 
 ### 6. Negation Tracking
 
-Track what is explicitly NOT true to prevent false matches. When a user corrects a misunderstanding or explicitly negates something, we store that negation as a `NegationFact`.
+Track what is explicitly NOT true to prevent false matches. When a user corrects a misunderstanding or explicitly negates something, we store that negation in `StructuredMemory.negations`.
 
 This is an **engineering construct** for storing semantic negations (e.g., "User does NOT use MongoDB"), not an implementation of neural inhibition mechanisms.
 
@@ -190,7 +190,6 @@ Demotion triggers:
 - Low access + time → archive via decay workflow
 - Very low confidence → delete via decay workflow
 
-**Note**: Fact and NegationFact are deprecated. Use StructuredMemory instead, which provides typed entity fields and integrated negation handling.
 
 ### 9. Automatic Importance Detection
 
@@ -250,8 +249,6 @@ Callers can still override with an explicit `importance` parameter when they hav
 | **Semantic** | Mutable | Slow | Variable | Cross-episode LLM synthesis |
 | **Procedural** | Mutable | Very slow | Variable | Behavioral patterns, preferences |
 | **Working** | Volatile | N/A | N/A | Current context (in-memory) |
-| ~~**Factual**~~ | Immutable | Slow | High | DEPRECATED: Use Structured |
-| ~~**Negation**~~ | Mutable | Slow | Variable | DEPRECATED: Use Structured.negations |
 
 ## Data Models
 
@@ -306,20 +303,6 @@ class StructuredMemory(BaseModel):
     consolidated_into: str | None        # ID of SemanticMemory
 ```
 
-### Fact (DEPRECATED - Use StructuredMemory)
-
-```python
-class Fact(BaseModel):
-    id: str
-    content: str
-    category: str                        # email, phone, date, name, etc.
-    source_episode_id: str
-    event_at: datetime                   # When fact was true
-    derived_at: datetime                 # When we extracted it
-    confidence: ConfidenceScore          # Composite score with auditability
-    embedding: list[float]
-```
-
 ### SemanticMemory (LLM-Inferred)
 
 ```python
@@ -348,19 +331,6 @@ class ProceduralMemory(BaseModel):
     related_ids: list[str]
     confidence: ConfidenceScore          # Composite score with auditability
     access_count: int                    # Reinforcement through use
-    embedding: list[float]
-```
-
-### NegationFact (DEPRECATED - Use StructuredMemory.negations)
-
-```python
-class NegationFact(BaseModel):
-    id: str
-    content: str                         # "User does NOT use MongoDB"
-    negates_pattern: str                 # Pattern this negates
-    source_episode_ids: list[str]
-    derived_at: datetime
-    confidence: ConfidenceScore          # Composite score with auditability
     embedding: list[float]
 ```
 
@@ -418,16 +388,13 @@ engram_episodic     → vectors + payload (content, timestamp, session_id, impor
 engram_structured   → vectors + payload (summary, keywords, entities, negations, source_episode_id, confidence)
 engram_semantic     → vectors + payload (content, source_episode_ids, related_ids, confidence, consolidation_strength)
 engram_procedural   → vectors + payload (content, trigger_context, access_count, confidence)
-
-# DEPRECATED collections (backwards compatibility only):
-engram_factual      → vectors + payload (content, category, source_episode_id, confidence)
-engram_negation     → vectors + payload (content, negates_pattern, source_episode_ids, confidence)
+engram_audit        → vectors + payload (audit trail)
 ```
 
 ### Indexing
 
 - **Episodic**: HNSW with time-decay weighting
-- **Factual/Semantic/Negation**: Standard HNSW
+- **Structured/Semantic**: Standard HNSW
 - **Procedural**: HNSW with context filtering
 
 ## Semantic Layer
@@ -453,8 +420,8 @@ User: "My email is user@example.com"
                     │
                     ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  3. EXTRACT: Pattern match + embed extracted facts                       │
-│     "user@example.com" → embedding → Fact { content, embedding }         │
+│  3. EXTRACT: Pattern match + store in StructuredMemory                   │
+│     "user@example.com" → StructuredMemory.emails                         │
 └──────────────────────────────────────────────────────────────────────────┘
                     │
                     ▼
@@ -475,7 +442,7 @@ query_vector = embed(query)  # [0.23, -0.45, 0.67, ...]
 
 # Searches:
 # - Episodes: "my email is user@example.com" → similarity 0.82
-# - Facts: "user@example.com" → similarity 0.78
+# - Structured: per-episode extraction → similarity 0.78
 # - Semantic: "User's primary contact is email" → similarity 0.85
 ```
 
@@ -520,7 +487,7 @@ async with EngramService.create() as engram:
     memories = await engram.recall(
         query="What databases does the user work with?",
         user_id="user_123",
-        memory_types=["factual", "semantic"],
+        memory_types=["structured", "semantic"],
         min_confidence=0.7,
         follow_links=True,             # Multi-hop reasoning
     )
@@ -641,10 +608,9 @@ async def decay():
 
 Decay constants by type:
 - Episodic: Fast (days)
-- Factual: Slow (months)
+- Structured: Slow (months)
 - Semantic: Slow (months)
 - Procedural: Very slow (years)
-- Negation: Slow (months)
 
 ## Durable Execution
 

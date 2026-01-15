@@ -16,8 +16,6 @@ if TYPE_CHECKING:
 
     from engram.models import (
         Episode,
-        Fact,
-        NegationFact,
         ProceduralMemory,
         SemanticMemory,
         StructuredMemory,
@@ -157,59 +155,6 @@ class SearchMixin:
             if r.payload is not None
         ]
 
-    async def search_facts(
-        self,
-        query_vector: Sequence[float],
-        user_id: str,
-        org_id: str | None = None,
-        limit: int = 10,
-        min_confidence: float | None = None,
-        category: str | None = None,
-        derived_at_before: datetime | None = None,
-    ) -> list[ScoredResult[Fact]]:
-        """Search for similar facts.
-
-        Args:
-            query_vector: Query embedding vector.
-            user_id: User ID for isolation.
-            org_id: Optional org ID filter.
-            limit: Maximum results to return.
-            min_confidence: Minimum confidence threshold.
-            category: Filter by fact category.
-            derived_at_before: Only include facts derived before this time.
-
-        Returns:
-            List of ScoredResult[Fact] sorted by similarity.
-        """
-        from engram.models import Fact
-
-        filters = self._build_filters(
-            user_id, org_id, min_confidence, derived_at_before=derived_at_before
-        )
-        if category is not None:
-            filters.append(
-                models.FieldCondition(
-                    key="category",
-                    match=models.MatchValue(value=category),
-                )
-            )
-
-        results = await self._search(
-            collection="factual",
-            query_vector=query_vector,
-            filters=filters,
-            limit=limit,
-        )
-
-        return [
-            ScoredResult(
-                memory=self._payload_to_memory(r.payload, Fact),
-                score=r.score,
-            )
-            for r in results
-            if r.payload is not None
-        ]
-
     async def search_semantic(
         self,
         query_vector: Sequence[float],
@@ -217,6 +162,7 @@ class SearchMixin:
         org_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
+        min_selectivity: float = 0.0,
         derived_at_before: datetime | None = None,
         track_activation: bool = False,
     ) -> list[ScoredResult[SemanticMemory]]:
@@ -228,6 +174,7 @@ class SearchMixin:
             org_id: Optional org ID filter.
             limit: Maximum results to return.
             min_confidence: Minimum confidence threshold.
+            min_selectivity: Minimum selectivity score (0.0-1.0).
             derived_at_before: Only include memories derived before this time.
             track_activation: If True, update retrieval_count and last_accessed
                 for returned memories (A-MEM style activation tracking).
@@ -241,11 +188,14 @@ class SearchMixin:
             user_id, org_id, min_confidence, derived_at_before=derived_at_before
         )
 
+        # Fetch extra results to account for selectivity filtering
+        fetch_limit = limit if min_selectivity <= 0.0 else limit * 2
+
         results = await self._search(
             collection="semantic",
             query_vector=query_vector,
             filters=filters,
-            limit=limit,
+            limit=fetch_limit,
         )
 
         scored_results = [
@@ -256,6 +206,12 @@ class SearchMixin:
             for r in results
             if r.payload is not None
         ]
+
+        # Filter by selectivity if specified
+        if min_selectivity > 0.0:
+            scored_results = [
+                sr for sr in scored_results if sr.memory.selectivity_score >= min_selectivity
+            ][:limit]
 
         # A-MEM style activation tracking
         if track_activation and scored_results:
@@ -391,44 +347,6 @@ class SearchMixin:
                     )
                 ),
             )
-
-    async def search_negation(
-        self,
-        query_vector: Sequence[float],
-        user_id: str,
-        org_id: str | None = None,
-        limit: int = 10,
-    ) -> list[ScoredResult[NegationFact]]:
-        """Search for similar negation facts.
-
-        Args:
-            query_vector: Query embedding vector.
-            user_id: User ID for isolation.
-            org_id: Optional org ID filter.
-            limit: Maximum results to return.
-
-        Returns:
-            List of ScoredResult[NegationFact] sorted by similarity.
-        """
-        from engram.models import NegationFact
-
-        filters = self._build_filters(user_id, org_id)
-
-        results = await self._search(
-            collection="negation",
-            query_vector=query_vector,
-            filters=filters,
-            limit=limit,
-        )
-
-        return [
-            ScoredResult(
-                memory=self._payload_to_memory(r.payload, NegationFact),
-                score=r.score,
-            )
-            for r in results
-            if r.payload is not None
-        ]
 
     def _build_filters(
         self,

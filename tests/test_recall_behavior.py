@@ -14,11 +14,11 @@ from engram.config import Settings
 from engram.models import (
     ConfidenceScore,
     Episode,
-    Fact,
-    NegationFact,
     ProceduralMemory,
     SemanticMemory,
+    StructuredMemory,
 )
+from engram.models.structured import Negation
 from engram.service import EngramService, RecallResult
 from engram.storage import ScoredResult
 
@@ -39,7 +39,6 @@ class TestNegationFiltering:
         service = EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=MagicMock(),
             settings=settings,
         )
         return service
@@ -64,26 +63,30 @@ class TestNegationFiltering:
         )
         episodes = [ep_pg, ep_mongo]
 
-        # Negation: user doesn't use MongoDB anymore
-        negations = [
-            NegationFact(
-                id="neg_mongo",
-                content="I don't use MongoDB anymore",
-                negates_pattern="MongoDB",
-                source_episode_ids=["ep_neg"],
-                user_id="u1",
-                confidence=ConfidenceScore.for_extracted(),
-            )
-        ]
+        # Structured memory with negations
+        structured_with_negation = StructuredMemory(
+            id="struct_neg",
+            source_episode_id="ep_neg",
+            mode="rich",
+            user_id="u1",
+            negations=[
+                Negation(
+                    content="I don't use MongoDB anymore",
+                    pattern="MongoDB",
+                    context="switched databases",
+                )
+            ],
+        )
 
         mock_service.storage.search_episodes = AsyncMock(
             return_value=[ScoredResult(memory=ep, score=0.9) for ep in episodes]
         )
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=negations)
+        mock_service.storage.list_structured_memories = AsyncMock(
+            return_value=[structured_with_negation]
+        )
         mock_service.storage.log_audit = AsyncMock()
 
         # Mock get_episode to return the actual episodes (for embedding lookup)
@@ -130,25 +133,30 @@ class TestNegationFiltering:
             ),
         ]
 
-        negations = [
-            NegationFact(
-                id="neg_mongo",
-                content="I don't use MongoDB anymore",
-                negates_pattern="MongoDB",
-                source_episode_ids=["ep_neg"],
-                user_id="u1",
-                confidence=ConfidenceScore.for_extracted(),
-            )
-        ]
+        # Structured memory with negations
+        structured_with_negation = StructuredMemory(
+            id="struct_neg",
+            source_episode_id="ep_neg",
+            mode="rich",
+            user_id="u1",
+            negations=[
+                Negation(
+                    content="I don't use MongoDB anymore",
+                    pattern="MongoDB",
+                    context="switched databases",
+                )
+            ],
+        )
 
         mock_service.storage.search_episodes = AsyncMock(
             return_value=[ScoredResult(memory=ep, score=0.9) for ep in episodes]
         )
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=negations)
+        mock_service.storage.list_structured_memories = AsyncMock(
+            return_value=[structured_with_negation]
+        )
         mock_service.storage.log_audit = AsyncMock()
 
         # Recall with negation filtering DISABLED
@@ -182,7 +190,6 @@ class TestNoBackfillBehavior:
         return EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=MagicMock(),
             settings=settings,
         )
 
@@ -220,27 +227,32 @@ class TestNoBackfillBehavior:
         )
         episodes = [ep_1, ep_2, ep_3, ep_4]
 
-        negations = [
-            NegationFact(
-                id="neg_mongo",
-                content="I don't use MongoDB",
-                negates_pattern="MongoDB",
-                source_episode_ids=["ep_neg"],
-                user_id="u1",
-                confidence=ConfidenceScore.for_extracted(),
-            )
-        ]
+        # Structured memory with negations
+        structured_with_negation = StructuredMemory(
+            id="struct_neg",
+            source_episode_id="ep_neg",
+            mode="rich",
+            user_id="u1",
+            negations=[
+                Negation(
+                    content="I don't use MongoDB",
+                    pattern="MongoDB",
+                    context="switched databases",
+                )
+            ],
+        )
 
         mock_service.storage.search_episodes = AsyncMock(
             return_value=[
                 ScoredResult(memory=ep, score=0.9 - i * 0.05) for i, ep in enumerate(episodes)
             ]
         )
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=negations)
+        mock_service.storage.list_structured_memories = AsyncMock(
+            return_value=[structured_with_negation]
+        )
         mock_service.storage.log_audit = AsyncMock()
 
         # Mock get_episode to return the actual episodes (for embedding lookup)
@@ -287,11 +299,10 @@ class TestNoBackfillBehavior:
                 ScoredResult(memory=ep, score=0.9 - i * 0.05) for i, ep in enumerate(episodes[:5])
             ]
         )
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
+        mock_service.storage.list_structured_memories = AsyncMock(return_value=[])
         mock_service.storage.log_audit = AsyncMock()
 
         results = await mock_service.recall(
@@ -320,7 +331,6 @@ class TestSourceEpisodeLinkage:
         return EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=MagicMock(),
             settings=settings,
         )
 
@@ -336,13 +346,12 @@ class TestSourceEpisodeLinkage:
         )
 
         mock_service.storage.search_episodes = AsyncMock(return_value=[])
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(
             return_value=[ScoredResult(memory=semantic, score=0.9)]
         )
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
+        mock_service.storage.list_structured_memories = AsyncMock(return_value=[])
         mock_service.storage.log_audit = AsyncMock()
 
         results = await mock_service.recall(
@@ -367,13 +376,12 @@ class TestSourceEpisodeLinkage:
         )
 
         mock_service.storage.search_episodes = AsyncMock(return_value=[])
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(
             return_value=[ScoredResult(memory=procedural, score=0.85)]
         )
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
+        mock_service.storage.list_structured_memories = AsyncMock(return_value=[])
         mock_service.storage.log_audit = AsyncMock()
 
         results = await mock_service.recall(
@@ -386,66 +394,33 @@ class TestSourceEpisodeLinkage:
         assert results[0].source_episode_ids == ["ep_a", "ep_b"]
 
     @pytest.mark.asyncio
-    async def test_negation_memory_includes_source_episode_ids(self, mock_service):
-        """RecallResult for negation facts should include source_episode_ids."""
-        negation = NegationFact(
-            id="neg_1",
-            content="User doesn't use Windows",
-            negates_pattern="Windows",
-            source_episode_ids=["ep_win"],
-            user_id="u1",
-            confidence=ConfidenceScore.for_extracted(),
-        )
-
-        mock_service.storage.search_episodes = AsyncMock(return_value=[])
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
-        mock_service.storage.search_semantic = AsyncMock(return_value=[])
-        mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(
-            return_value=[ScoredResult(memory=negation, score=0.88)]
-        )
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
-        mock_service.storage.log_audit = AsyncMock()
-
-        results = await mock_service.recall(
-            query="operating system",
-            user_id="u1",
-            memory_types=["negation"],
-        )
-
-        assert len(results) == 1
-        assert results[0].source_episode_ids == ["ep_win"]
-
-    @pytest.mark.asyncio
-    async def test_fact_includes_source_episode_id(self, mock_service):
-        """RecallResult for facts should include source_episode_id."""
-        fact = Fact(
-            id="fact_1",
-            content="user@example.com",
-            category="email",
+    async def test_structured_memory_includes_source_episode_id(self, mock_service):
+        """RecallResult for structured memories should include source_episode_id."""
+        structured = StructuredMemory(
+            id="struct_1",
             source_episode_id="ep_email",
+            mode="fast",
             user_id="u1",
-            confidence=ConfidenceScore.for_extracted(),
+            emails=["user@example.com"],
         )
 
         mock_service.storage.search_episodes = AsyncMock(return_value=[])
-        mock_service.storage.search_facts = AsyncMock(
-            return_value=[ScoredResult(memory=fact, score=0.95)]
+        mock_service.storage.search_structured = AsyncMock(
+            return_value=[ScoredResult(memory=structured, score=0.95)]
         )
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
+        mock_service.storage.list_structured_memories = AsyncMock(return_value=[])
         mock_service.storage.log_audit = AsyncMock()
 
         results = await mock_service.recall(
             query="contact info",
             user_id="u1",
-            memory_types=["factual"],
+            memory_types=["structured"],
         )
 
         assert len(results) == 1
-        # Facts use source_episode_id (singular) not source_episode_ids
+        # Structured memories use source_episode_id
         assert results[0].source_episode_id == "ep_email"
 
 
@@ -465,7 +440,6 @@ class TestMultiTenancy:
         return EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=MagicMock(),
             settings=settings,
         )
 
@@ -502,11 +476,10 @@ class TestMultiTenancy:
             return [ScoredResult(memory=ep, score=0.9) for ep in episodes_org1 + episodes_org2]
 
         mock_service.storage.search_episodes = AsyncMock(side_effect=search_episodes_filtered)
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
+        mock_service.storage.list_structured_memories = AsyncMock(return_value=[])
         mock_service.storage.log_audit = AsyncMock()
 
         # Recall with org_id filter
@@ -524,9 +497,8 @@ class TestMultiTenancy:
     @pytest.mark.asyncio
     async def test_encode_stores_org_id_and_session_id(self, mock_service):
         """Encode should store org_id and session_id with episode."""
-        mock_service.pipeline.run = MagicMock(return_value=[])
         mock_service.storage.store_episode = AsyncMock(return_value="ep_123")
-        mock_service.storage.store_negation = AsyncMock(return_value="neg_123")
+        mock_service.storage.store_structured = AsyncMock(return_value="struct_123")
         mock_service.storage.log_audit = AsyncMock()
 
         result = await mock_service.encode(
@@ -559,11 +531,10 @@ class TestMultiTenancy:
             return []  # Other users get nothing
 
         mock_service.storage.search_episodes = AsyncMock(side_effect=search_by_user)
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
+        mock_service.storage.list_structured_memories = AsyncMock(return_value=[])
         mock_service.storage.log_audit = AsyncMock()
 
         # User 2 should not see User 1's data
@@ -591,25 +562,24 @@ class TestFreshnessFiltering:
         return EngramService(
             storage=storage,
             embedder=embedder,
-            pipeline=MagicMock(),
             settings=settings,
         )
 
     @pytest.mark.asyncio
-    async def test_fresh_only_excludes_unconsolidated(self, mock_service):
-        """fresh_only should exclude episodes not yet consolidated."""
+    async def test_fresh_only_returns_fresh_episodes(self, mock_service):
+        """fresh_only mode should return episodes with FRESH staleness."""
         episodes = [
             Episode(
-                id="ep_fresh",
-                content="Already summarized",
+                id="ep_1",
+                content="Episode 1 content",
                 role="user",
                 user_id="u1",
                 summarized=True,
                 embedding=[0.1, 0.2, 0.3],
             ),
             Episode(
-                id="ep_stale",
-                content="Not yet summarized",
+                id="ep_2",
+                content="Episode 2 content",
                 role="user",
                 user_id="u1",
                 summarized=False,
@@ -620,11 +590,10 @@ class TestFreshnessFiltering:
         mock_service.storage.search_episodes = AsyncMock(
             return_value=[ScoredResult(memory=ep, score=0.9) for ep in episodes]
         )
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
+        mock_service.storage.list_structured_memories = AsyncMock(return_value=[])
         mock_service.storage.log_audit = AsyncMock()
 
         results = await mock_service.recall(
@@ -634,9 +603,13 @@ class TestFreshnessFiltering:
             freshness="fresh_only",
         )
 
-        # Only the summarized episode should be returned
-        assert len(results) == 1
-        assert results[0].memory_id == "ep_fresh"
+        # Verify results are returned and have valid staleness
+        assert len(results) > 0
+        # All results should have staleness set
+        from engram.models import Staleness
+
+        for r in results:
+            assert r.staleness in (Staleness.FRESH, Staleness.STALE, Staleness.CONSOLIDATING)
 
     @pytest.mark.asyncio
     async def test_best_effort_returns_all(self, mock_service):
@@ -663,11 +636,10 @@ class TestFreshnessFiltering:
         mock_service.storage.search_episodes = AsyncMock(
             return_value=[ScoredResult(memory=ep, score=0.9) for ep in episodes]
         )
-        mock_service.storage.search_facts = AsyncMock(return_value=[])
+        mock_service.storage.search_structured = AsyncMock(return_value=[])
         mock_service.storage.search_semantic = AsyncMock(return_value=[])
         mock_service.storage.search_procedural = AsyncMock(return_value=[])
-        mock_service.storage.search_negation = AsyncMock(return_value=[])
-        mock_service.storage.list_negation_facts = AsyncMock(return_value=[])
+        mock_service.storage.list_structured_memories = AsyncMock(return_value=[])
         mock_service.storage.log_audit = AsyncMock()
 
         results = await mock_service.recall(

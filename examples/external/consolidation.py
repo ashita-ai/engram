@@ -28,9 +28,8 @@ async def get_memory_counts(storage: EngramStorage, user_id: str) -> dict[str, i
     stats = await storage.get_memory_stats(user_id)
     return {
         "episodic": stats.episodes,
-        "factual": stats.facts,
+        "structured": stats.structured,
         "semantic": stats.semantic,
-        "negation": stats.negation,
         "procedural": stats.procedural,
     }
 
@@ -39,7 +38,7 @@ async def cleanup_demo_data(storage: EngramStorage, user_id: str) -> None:
     """Delete all data for the demo user to ensure clean slate."""
     from qdrant_client import models
 
-    collections = ["episodic", "semantic", "factual", "negation", "procedural"]
+    collections = ["episodic", "semantic", "structured", "procedural"]
     for memory_type in collections:
         collection = f"engram_{memory_type}"
         try:
@@ -109,10 +108,13 @@ async def main() -> None:
             )
             episode_ids.append(result.episode.id)
             extras = []
-            if result.facts:
-                extras.append(f"+fact:{result.facts[0].category}")
-            if result.negations:
-                extras.append("+negation")
+            extract_count = (
+                len(result.structured.emails)
+                + len(result.structured.phones)
+                + len(result.structured.urls)
+            )
+            if extract_count > 0:
+                extras.append(f"+{extract_count} extract(s)")
             extras_str = f"  {' '.join(extras)}" if extras else ""
             print(f"  [{role:9}] {content[:50]}...{extras_str}")
 
@@ -121,14 +123,13 @@ async def main() -> None:
         # =====================================================================
         print("\n\n2. BEFORE CONSOLIDATION")
         print("-" * 70)
-        print("  Episodic + factual/negation available immediately.\n")
+        print("  Episodic + structured available immediately.\n")
 
         counts = await get_memory_counts(engram.storage, user_id)
         print(f"  Episodic (ground truth): {counts['episodic']} episodes")
-        print(f"    └─ Factual (extracted): {counts['factual']} (email pattern)")
-        print(f"    └─ Negation (extracted): {counts['negation']} (Keras pattern)")
-        print(f"    └─ Semantic (LLM):       {counts['semantic']} ← Empty!")
-        print(f"    └─ Procedural (LLM):     {counts['procedural']} ← Empty!")
+        print(f"    └─ Structured (extracted): {counts['structured']} (emails, phones, URLs)")
+        print(f"    └─ Semantic (LLM):         {counts['semantic']} ← Empty!")
+        print(f"    └─ Procedural (LLM):       {counts['procedural']} ← Empty!")
 
         # =====================================================================
         # 3. RUN LLM CONSOLIDATION (N episodes → 1 summary)
@@ -249,10 +250,9 @@ async def main() -> None:
 
         final_counts = await get_memory_counts(engram.storage, user_id)
         print(f"  Episodic (ground truth): {final_counts['episodic']} episodes")
-        print(f"    └─ Factual (extracted): {final_counts['factual']}")
-        print(f"    └─ Negation (extracted): {final_counts['negation']}")
-        print(f"    └─ Semantic (LLM):       {final_counts['semantic']} summaries")
-        print(f"    └─ Procedural (LLM):     {final_counts['procedural']} behavioral profile")
+        print(f"    └─ Structured (extracted): {final_counts['structured']}")
+        print(f"    └─ Semantic (LLM):         {final_counts['semantic']} summaries")
+        print(f"    └─ Procedural (LLM):       {final_counts['procedural']} behavioral profile")
 
         print("\n  HIERARCHICAL COMPRESSION:")
         print(
@@ -265,7 +265,7 @@ async def main() -> None:
     print("""
 Key Concepts:
 1. Episodes are RAW ground truth (immutable, never modified)
-2. Facts/negations are pattern-extracted with high confidence
+2. Structured memories are pattern-extracted with high confidence (emails, phones, URLs)
 3. Consolidation compresses N episodes → 1 semantic summary
 4. Procedural synthesis compresses all semantics → 1 behavioral profile
 5. Bidirectional links: episode.summarized_into ↔ semantic.source_episode_ids

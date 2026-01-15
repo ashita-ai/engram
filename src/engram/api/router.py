@@ -14,7 +14,6 @@ from .schemas import (
     EncodeRequest,
     EncodeResponse,
     EpisodeResponse,
-    FactResponse,
     HealthResponse,
     MemoryCounts,
     MemoryStatsResponse,
@@ -24,6 +23,7 @@ from .schemas import (
     SourceEpisodeDetail,
     SourceEpisodeSummary,
     SourcesResponse,
+    StructuredResponse,
     VerificationResponse,
     WorkingMemoryResponse,
 )
@@ -111,7 +111,7 @@ async def encode(
             org_id=request.org_id,
             session_id=request.session_id,
             importance=request.importance,
-            run_extraction=request.run_extraction,
+            enrich=request.enrich,
         )
 
         # Convert to response models
@@ -126,21 +126,27 @@ async def encode(
             created_at=result.episode.timestamp.isoformat(),
         )
 
-        fact_responses = [
-            FactResponse(
-                id=fact.id,
-                content=fact.content,
-                category=fact.category,
-                confidence=fact.confidence.value,
-                source_episode_id=fact.source_episode_id,
-            )
-            for fact in result.facts
-        ]
+        structured_response = StructuredResponse(
+            id=result.structured.id,
+            source_episode_id=result.structured.source_episode_id,
+            mode=result.structured.mode,
+            enriched=result.structured.enriched,
+            emails=result.structured.emails,
+            phones=result.structured.phones,
+            urls=result.structured.urls,
+            confidence=result.structured.confidence.value,
+        )
+
+        extract_count = (
+            len(result.structured.emails)
+            + len(result.structured.phones)
+            + len(result.structured.urls)
+        )
 
         return EncodeResponse(
             episode=episode_response,
-            facts=fact_responses,
-            fact_count=len(fact_responses),
+            structured=structured_response,
+            extract_count=extract_count,
         )
 
     except ValueError as e:
@@ -286,15 +292,14 @@ async def get_memory_stats(
             org_id=org_id,
             counts=MemoryCounts(
                 episodes=stats.episodes,
-                facts=stats.facts,
+                structured=stats.structured,
                 semantic=stats.semantic,
                 procedural=stats.procedural,
-                negation=stats.negation,
             ),
             confidence=ConfidenceStats(
-                facts_avg=stats.facts_avg_confidence,
-                facts_min=stats.facts_min_confidence,
-                facts_max=stats.facts_max_confidence,
+                structured_avg=stats.structured_avg_confidence,
+                structured_min=stats.structured_min_confidence,
+                structured_max=stats.structured_max_confidence,
                 semantic_avg=stats.semantic_avg_confidence,
             ),
             pending_consolidation=stats.pending_consolidation,
@@ -366,13 +371,13 @@ async def get_sources(
 ) -> SourcesResponse:
     """Get source episodes for a derived memory.
 
-    Traces a derived memory (fact, semantic, procedural, or negation)
+    Traces a derived memory (structured, semantic, or procedural)
     back to the source episode(s) it was extracted from. This enables
     provenance tracking and allows users to verify the origin of any
     derived knowledge.
 
     Args:
-        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or neg_).
+        memory_id: ID of the derived memory (must start with struct_, sem_, or proc_).
         user_id: User ID for multi-tenancy isolation.
         service: Injected EngramService.
 
@@ -384,19 +389,17 @@ async def get_sources(
         HTTPException: 404 if memory not found.
     """
     # Determine memory type from ID prefix
-    if memory_id.startswith("fact_"):
-        memory_type = "factual"
+    if memory_id.startswith("struct_"):
+        memory_type = "structured"
     elif memory_id.startswith("sem_"):
         memory_type = "semantic"
     elif memory_id.startswith("proc_"):
         memory_type = "procedural"
-    elif memory_id.startswith("neg_"):
-        memory_type = "negation"
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid memory ID format: {memory_id}. "
-            "Expected prefix: fact_, sem_, proc_, or neg_",
+            "Expected prefix: struct_, sem_, or proc_",
         )
 
     try:
@@ -444,13 +447,13 @@ async def verify_memory(
 ) -> VerificationResponse:
     """Verify a memory against its source episodes.
 
-    Traces a derived memory (fact, semantic, procedural, or negation)
+    Traces a derived memory (structured, semantic, or procedural)
     back to its source episode(s) and provides a human-readable explanation
     of how it was derived. This is core to Engram's "memory you can trust"
     value proposition.
 
     Args:
-        memory_id: ID of the derived memory (must start with fact_, sem_, proc_, or neg_).
+        memory_id: ID of the derived memory (must start with struct_, sem_, or proc_).
         user_id: User ID for multi-tenancy isolation.
         service: Injected EngramService.
 
@@ -462,12 +465,12 @@ async def verify_memory(
         HTTPException: 404 if memory not found.
 
     Example:
-        GET /memories/fact_abc123/verify?user_id=u1
+        GET /memories/struct_abc123/verify?user_id=u1
 
         Response:
         {
-            "memory_id": "fact_abc123",
-            "memory_type": "factual",
+            "memory_id": "struct_abc123",
+            "memory_type": "structured",
             "content": "email=john@example.com",
             "verified": true,
             "source_episodes": [
@@ -479,12 +482,12 @@ async def verify_memory(
         }
     """
     # Validate memory ID format
-    valid_prefixes = ("fact_", "sem_", "proc_", "inh_")
+    valid_prefixes = ("struct_", "sem_", "proc_")
     if not memory_id.startswith(valid_prefixes):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid memory ID format: {memory_id}. "
-            "Expected prefix: fact_, sem_, proc_, or neg_",
+            "Expected prefix: struct_, sem_, or proc_",
         )
 
     try:

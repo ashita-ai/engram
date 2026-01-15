@@ -99,10 +99,10 @@ openai_key = os.getenv("OPENAI_API_KEY")
 **Collections**:
 ```
 engram_episodic    # Raw interactions, immutable
-engram_factual     # Pattern-extracted facts
-engram_semantic    # LLM-inferred knowledge
+engram_structured  # Per-episode LLM extraction
+engram_semantic    # Cross-episode LLM synthesis
 engram_procedural  # Behavioral patterns
-engram_negation    # What is NOT true (negations)
+engram_audit       # Audit trail
 ```
 
 ## Configuration
@@ -201,14 +201,14 @@ engram/
 │       ├── models/
 │       │   ├── __init__.py
 │       │   ├── episode.py      # Episodic memory model
-│       │   ├── fact.py         # Factual memory model
-│       │   ├── semantic.py     # Semantic memory model
-│       │   ├── procedural.py   # Procedural memory model
-│       │   └── negation.py      # Negation memory model
+│       │   ├── structured.py   # Per-episode structured extraction
+│       │   ├── semantic.py     # Cross-episode semantic synthesis
+│       │   └── procedural.py   # Behavioral patterns
 │       ├── extraction/
 │       │   ├── __init__.py
-│       │   ├── patterns.py     # Deterministic extraction (regex)
-│       │   └── semantic.py     # LLM-based extraction
+│       │   ├── email.py        # Email extraction (regex)
+│       │   ├── phone.py        # Phone extraction (regex)
+│       │   └── url.py          # URL extraction (regex)
 │       ├── storage/
 │       │   ├── __init__.py
 │       │   └── qdrant.py       # Qdrant client wrapper
