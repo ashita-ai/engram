@@ -25,7 +25,10 @@ class ProceduralMemory(MemoryBase):
         source_episode_ids: Episodes where this pattern was observed.
         related_ids: Links to related memories.
         confidence: Composite confidence score.
-        access_count: How often this has been used (reinforcement).
+        consolidation_strength: How well-established (0=new, 1=strong).
+        consolidation_passes: How many times this has been refined.
+        retrieval_count: How often this has been retrieved.
+        last_accessed: When this memory was last retrieved.
     """
 
     id: str = Field(default_factory=lambda: generate_id("proc"))
@@ -54,27 +57,53 @@ class ProceduralMemory(MemoryBase):
         default_factory=lambda: ConfidenceScore.for_inferred(0.6),
         description="Composite confidence score",
     )
-    access_count: int = Field(
+    consolidation_strength: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="How well-established via repeated consolidation (0=new, 1=strong)",
+    )
+    consolidation_passes: int = Field(
         default=0,
         ge=0,
-        description="Usage count for reinforcement learning",
+        description="Number of consolidation passes",
+    )
+    retrieval_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of times this memory has been retrieved",
     )
     last_accessed: datetime | None = Field(
         default=None,
         description="When this memory was last retrieved",
     )
 
-    def reinforce(self) -> None:
-        """Increment access count (pattern was used successfully)."""
-        self.access_count += 1
-        self.last_accessed = datetime.now(UTC)
+    def strengthen(self, delta: float = 0.1) -> None:
+        """Strengthen memory through consolidation involvement.
+
+        Based on Testing Effect research: memories repeatedly involved
+        in retrieval/consolidation become stronger and more stable.
+        See: Roediger & Karpicke (2006), PMC5912918.
+        """
+        self.consolidation_strength = min(1.0, self.consolidation_strength + delta)
+        self.consolidation_passes += 1
+
+    def weaken(self, delta: float = 0.1) -> None:
+        """Weaken memory (pruned or contradicted during consolidation)."""
+        self.consolidation_strength = max(0.0, self.consolidation_strength - delta)
 
     def record_access(self) -> None:
         """Record that this memory was accessed (activation tracking).
 
-        Alias for reinforce() for API consistency with SemanticMemory.
+        Increments retrieval_count and updates last_accessed timestamp.
+        Called by storage layer on search hits.
         """
-        self.reinforce()
+        self.retrieval_count += 1
+        self.last_accessed = datetime.now(UTC)
+
+    def reinforce(self) -> None:
+        """Alias for record_access() for backwards compatibility."""
+        self.record_access()
 
     def add_link(self, memory_id: str) -> None:
         """Add a link to a related memory."""

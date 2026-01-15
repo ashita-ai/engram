@@ -276,7 +276,7 @@ class SearchMixin:
             org_id: Optional org ID filter.
             limit: Maximum results to return.
             min_confidence: Minimum confidence threshold.
-            track_activation: If True, update access_count and last_accessed
+            track_activation: If True, update retrieval_count and last_accessed
                 for returned memories (A-MEM style activation tracking).
 
         Returns:
@@ -314,7 +314,7 @@ class SearchMixin:
     ) -> None:
         """Update activation metadata for searched procedural memories.
 
-        Records access_count and last_accessed for A-MEM style
+        Records retrieval_count and last_accessed for A-MEM style
         activation-based strengthening.
 
         Args:
@@ -326,14 +326,14 @@ class SearchMixin:
 
         for scored in results:
             memory = scored.memory
-            memory.access_count += 1
+            memory.retrieval_count += 1
             memory.last_accessed = datetime.now(UTC)
 
             # Update just the activation fields in storage
             await self.client.set_payload(
                 collection_name=collection,
                 payload={
-                    "access_count": memory.access_count,
+                    "retrieval_count": memory.retrieval_count,
                     "last_accessed": memory.last_accessed.isoformat(),
                 },
                 points=models.FilterSelector(

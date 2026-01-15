@@ -381,7 +381,7 @@ class TestEngramServiceRecall:
             content="User likes code examples",
             user_id="user_123",
             trigger_context="technical discussion",
-            access_count=5,
+            retrieval_count=5,
             embedding=[0.1, 0.2, 0.3],
         )
         mock_service.storage.search_procedural.return_value = [
@@ -397,7 +397,7 @@ class TestEngramServiceRecall:
         assert len(proc_results) == 1
         metadata = proc_results[0].metadata
         assert metadata["trigger_context"] == "technical discussion"
-        assert metadata["access_count"] == 5
+        assert metadata["retrieval_count"] == 5
 
     @pytest.mark.asyncio
     async def test_recall_with_memory_types_array(self, mock_service):
@@ -558,6 +558,10 @@ class TestEngramServiceRecall:
             ScoredResult(memory=mock_semantic, score=0.9)
         ]
 
+        # Mock get_semantic for retrieval strengthening
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic)
+        mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
+
         results = await mock_service.recall(
             query="python preferences",
             user_id="user_123",
@@ -567,8 +571,9 @@ class TestEngramServiceRecall:
         # Should only have original memory, not linked
         assert len(results) == 1
         assert results[0].memory_id == "sem_001"
-        # get_semantic should not be called for link traversal
-        mock_service.storage.get_semantic.assert_not_called()
+        # get_semantic should be called once for retrieval strengthening (sem_001),
+        # but NOT for link traversal (sem_002)
+        mock_service.storage.get_semantic.assert_called_once_with("sem_001", "user_123")
 
 
 class TestRecallResult:

@@ -184,6 +184,18 @@ class Settings(BaseSettings):
         description="Trigger immediate consolidation for episodes at or above this importance",
     )
 
+    # Retrieval Strengthening (Testing Effect)
+    retrieval_strengthening_enabled: bool = Field(
+        default=True,
+        description="Enable Testing Effect: strengthen memories on retrieval",
+    )
+    retrieval_strengthening_delta: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=0.5,
+        description="Strength increase per retrieval (smaller than consolidation's 0.1)",
+    )
+
     # Logging
     log_level: str = Field(
         default="INFO",

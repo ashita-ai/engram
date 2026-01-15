@@ -840,6 +840,53 @@ class CRUDMixin:
 
         return True
 
+    async def update_structured_memory(
+        self,
+        memory: StructuredMemory,
+    ) -> bool:
+        """Update a structured memory.
+
+        Args:
+            memory: StructuredMemory with updated fields.
+
+        Returns:
+            True if updated, False if not found.
+        """
+        collection = self._collection_name("structured")
+
+        # Find the point
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchValue(value=memory.id),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=memory.user_id),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+        )
+
+        if not results:
+            return False
+
+        point = results[0]
+        payload = self._memory_to_payload(memory)
+
+        await self.client.set_payload(
+            collection_name=collection,
+            payload=payload,
+            points=[point.id],
+        )
+
+        return True
+
     async def get_unsummarized_episodes(
         self,
         user_id: str,
