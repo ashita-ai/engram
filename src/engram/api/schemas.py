@@ -405,3 +405,23 @@ class VerificationResponse(BaseModel):
     extraction_method: str = Field(description="How memory was extracted")
     confidence: float = Field(ge=0.0, le=1.0, description="Current confidence score")
     explanation: str = Field(description="Human-readable derivation trace")
+
+
+class BulkDeleteResponse(BaseModel):
+    """Response for bulk delete (GDPR erasure) endpoint.
+
+    Provides counts of deleted memories by type for confirmation.
+
+    Attributes:
+        user_id: User whose memories were deleted.
+        org_id: Optional org filter used.
+        deleted_counts: Count of deleted memories by type.
+        total_deleted: Total number of memories deleted.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(description="User whose memories were deleted")
+    org_id: str | None = Field(default=None, description="Org filter used (if any)")
+    deleted_counts: dict[str, int] = Field(description="Counts by memory type")
+    total_deleted: int = Field(ge=0, description="Total memories deleted")
