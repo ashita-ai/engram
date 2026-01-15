@@ -579,28 +579,28 @@ class TestProceduralMemory:
         assert mem.content == "User prefers Python code examples"
         assert mem.id.startswith("proc_")
 
-    def test_default_access_count(self):
-        """Default access count should be 0."""
+    def test_default_retrieval_count(self):
+        """Default retrieval count should be 0."""
         mem = ProceduralMemory(content="Test", user_id="user_123")
-        assert mem.access_count == 0
+        assert mem.retrieval_count == 0
 
     def test_reinforce(self):
-        """reinforce() should increment access count and update last_accessed."""
+        """reinforce() should increment retrieval count and update last_accessed."""
         mem = ProceduralMemory(content="Test", user_id="user_123")
         assert mem.last_accessed is None
         mem.reinforce()
-        assert mem.access_count == 1
+        assert mem.retrieval_count == 1
         assert mem.last_accessed is not None
         first_access = mem.last_accessed
         mem.reinforce()
-        assert mem.access_count == 2
+        assert mem.retrieval_count == 2
         assert mem.last_accessed >= first_access
 
     def test_record_access_alias(self):
         """record_access() should be an alias for reinforce()."""
         mem = ProceduralMemory(content="Test", user_id="user_123")
         mem.record_access()
-        assert mem.access_count == 1
+        assert mem.retrieval_count == 1
         assert mem.last_accessed is not None
 
     def test_add_link(self):

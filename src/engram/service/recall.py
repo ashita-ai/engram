@@ -18,6 +18,7 @@ from .helpers import cosine_similarity
 from .models import RecallResult, SourceEpisodeSummary
 
 if TYPE_CHECKING:
+    from engram.config import Settings
     from engram.embeddings import Embedder
     from engram.storage import EngramStorage
 
@@ -30,11 +31,13 @@ class RecallMixin:
     Expects these attributes from the base class:
     - storage: EngramStorage
     - embedder: Embedder
+    - settings: Settings
     - _working_memory: list[Episode]
     """
 
     storage: EngramStorage
     embedder: Embedder
+    settings: Settings
     _working_memory: list[Episode]
 
     async def recall(
@@ -157,6 +160,10 @@ class RecallMixin:
         # Include source episodes if requested
         if include_sources:
             final_results = await self._enrich_with_sources(final_results, user_id)
+
+        # Testing Effect: strengthen retrieved memories
+        if self.settings.retrieval_strengthening_enabled:
+            await self._apply_retrieval_strengthening(final_results, user_id)
 
         # Log audit entry
         duration_ms = int((time.monotonic() - start_time) * 1000)
@@ -470,7 +477,7 @@ class RecallMixin:
                     consolidated_at=proc.derived_at.isoformat(),
                     metadata={
                         "trigger_context": proc.trigger_context,
-                        "access_count": proc.access_count,
+                        "retrieval_count": proc.retrieval_count,
                     },
                 )
             )
@@ -813,6 +820,70 @@ class RecallMixin:
             )
 
         return enriched
+
+    async def _apply_retrieval_strengthening(
+        self,
+        results: list[RecallResult],
+        user_id: str,
+    ) -> None:
+        """Apply Testing Effect: strengthen memories that were retrieved.
+
+        Based on Roediger & Karpicke (2006): retrieval strengthens memory
+        more than restudying. Retrieved memories get a small boost to their
+        consolidation_strength.
+
+        Only applies to:
+        - SemanticMemory (has consolidation_strength)
+        - ProceduralMemory (has consolidation_strength)
+        - StructuredMemory (tracks retrieval_count)
+
+        Episodic memories are immutable and not strengthened.
+
+        Args:
+            results: The recall results to strengthen.
+            user_id: User ID for storage access.
+        """
+        delta = self.settings.retrieval_strengthening_delta
+
+        for result in results:
+            try:
+                if result.memory_type == "semantic":
+                    semantic_mem = await self.storage.get_semantic(result.memory_id, user_id)
+                    if semantic_mem:
+                        semantic_mem.strengthen(delta)
+                        semantic_mem.record_access()
+                        await self.storage.update_semantic_memory(semantic_mem)
+                        logger.debug(
+                            f"Strengthened semantic {result.memory_id}: "
+                            f"strength={semantic_mem.consolidation_strength:.2f}"
+                        )
+
+                elif result.memory_type == "procedural":
+                    procedural_mem = await self.storage.get_procedural(result.memory_id, user_id)
+                    if procedural_mem:
+                        procedural_mem.strengthen(delta)
+                        procedural_mem.record_access()
+                        await self.storage.update_procedural_memory(procedural_mem)
+                        logger.debug(
+                            f"Strengthened procedural {result.memory_id}: "
+                            f"strength={procedural_mem.consolidation_strength:.2f}"
+                        )
+
+                elif result.memory_type == "structured":
+                    structured_mem = await self.storage.get_structured(result.memory_id, user_id)
+                    if structured_mem:
+                        structured_mem.record_access()
+                        await self.storage.update_structured_memory(structured_mem)
+                        logger.debug(
+                            f"Recorded access for structured {result.memory_id}: "
+                            f"count={structured_mem.retrieval_count}"
+                        )
+
+                # Episodic memories are immutable - no strengthening
+                # Working memories are volatile - no strengthening
+
+            except Exception as e:
+                logger.warning(f"Failed to strengthen {result.memory_type} {result.memory_id}: {e}")
 
 
 __all__ = ["RecallMixin"]

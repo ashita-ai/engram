@@ -216,6 +216,26 @@ class StructuredMemory(MemoryBase):
         description="ID of the SemanticMemory this was consolidated into",
     )
 
+    # Retrieval tracking (for Testing Effect)
+    retrieval_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of times this memory has been retrieved",
+    )
+    last_accessed: datetime | None = Field(
+        default=None,
+        description="When this memory was last retrieved",
+    )
+
+    def record_access(self) -> None:
+        """Record that this memory was accessed (activation tracking).
+
+        Increments retrieval_count and updates last_accessed timestamp.
+        Called by storage layer on search hits.
+        """
+        self.retrieval_count += 1
+        self.last_accessed = datetime.now(UTC)
+
     @classmethod
     def from_episode_fast(
         cls,
