@@ -7,9 +7,9 @@ Comprehensive examples demonstrating all of Engram's features.
 ```
 examples/
 ├── local/              # No external dependencies
-│   ├── extraction.py   # Pattern extraction + negation detection
+│   ├── extraction.py   # Pattern extraction (email, phone, URL)
 │   ├── confidence.py   # Confidence scoring system
-│   └── memory_types.py # All 4 memory types explained
+│   └── memory_types.py # All 5 memory types explained
 └── external/           # Requires Qdrant + API keys
     ├── quickstart.py   # Core encode/recall/verify workflow
     ├── structured.py   # StructuredMemory + LLM enrichment
@@ -24,7 +24,7 @@ examples/
 Run without any external dependencies:
 
 ```bash
-# Pattern extraction (7 extractors + negation detection)
+# Pattern extraction (3 extractors: email, phone, URL)
 uv run python examples/local/extraction.py
 
 # Confidence scoring system
@@ -72,9 +72,9 @@ uv run python examples/external/consolidation.py
 **`local/extraction.py`**
 
 Demonstrates:
-- All 7 pattern extractors (email, phone, URL, date, quantity, name, ID)
-- Negation detection ("I don't use X", "not interested in Y")
+- 3 pattern extractors (email, phone, URL)
 - Why pattern extraction before LLM matters (no hallucination possible)
+- How extraction feeds into StructuredMemory
 
 ### Confidence Scoring
 **`local/confidence.py`**
@@ -116,10 +116,10 @@ Core workflow demonstrating:
 **`external/structured.py`**
 
 StructuredMemory extraction modes:
-- `enrich=False` (default) - Fast regex-only extraction
-- `enrich=True` - Sync LLM extraction (blocks)
+- `enrich=False` (default) - Fast regex-only extraction (emails, phones, URLs)
+- `enrich=True` - Sync LLM extraction (dates, people, preferences, negations)
 - `enrich="background"` - Queue for background processing
-- Negation detection and filtering
+- Negation detection (requires LLM enrichment) and filtering
 
 ### Advanced Features
 **`external/advanced.py`**
@@ -150,7 +150,7 @@ LLM-powered semantic extraction:
 | Feature | Local Example | External Example |
 |---------|---------------|------------------|
 | Pattern extraction | `extraction.py` | `quickstart.py` |
-| Negation detection | `extraction.py` | `structured.py` |
+| Negation detection | - | `structured.py` (requires enrich=True) |
 | Confidence scoring | `confidence.py` | `quickstart.py` |
 | All 4 memory types | `memory_types.py` | `advanced.py` |
 | encode/recall | - | `quickstart.py` |

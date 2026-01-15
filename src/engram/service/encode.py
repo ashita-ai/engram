@@ -5,7 +5,6 @@ Provides the encode() method for storing memories.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any, Literal
@@ -178,11 +177,18 @@ class EncodeMixin:
 
         # Handle LLM enrichment
         if enrich is True:
-            # Synchronous enrichment - blocks until complete
-            await self._enrich_structured_sync(episode, structured)
+            # Synchronous enrichment - blocks until complete, returns enriched version
+            structured = await self._enrich_structured_sync(episode, structured)
         elif enrich == "background":
-            # Background enrichment - fire and forget
-            asyncio.create_task(self._enrich_structured_background(episode, structured))
+            # Durable background enrichment - uses DBOS/Temporal/Prefect
+            # If process crashes, enrichment will be retried automatically
+            from engram.workflows.structure import schedule_durable_enrichment
+
+            await schedule_durable_enrichment(
+                episode_id=episode.id,
+                user_id=user_id,
+                org_id=org_id,
+            )
 
         # High-importance episodes trigger immediate consolidation
         if calculated_importance >= self.settings.high_importance_threshold:
@@ -241,12 +247,15 @@ class EncodeMixin:
         self,
         episode: Episode,
         structured: StructuredMemory,
-    ) -> None:
+    ) -> StructuredMemory:
         """Enrich a structured memory with LLM extraction (synchronous).
 
         Args:
             episode: The source episode.
             structured: The structured memory to enrich.
+
+        Returns:
+            The enriched StructuredMemory (or original if enrichment fails).
         """
         from engram.workflows.structure import run_structure
 
@@ -257,14 +266,17 @@ class EncodeMixin:
                 embedder=self.embedder,
                 skip_if_structured=False,  # Force re-enrichment
             )
-            if result:
+            if result and result.structured:
                 logger.info(
                     f"Enriched {episode.id}: "
                     f"{result.deterministic_count} regex + {result.llm_count} LLM "
                     f"({result.processing_time_ms:.0f}ms)"
                 )
+                enriched: StructuredMemory = result.structured
+                return enriched
         except Exception as e:
             logger.warning(f"Enrichment failed for {episode.id}: {e}")
+        return structured
 
     async def _enrich_structured_background(
         self,
