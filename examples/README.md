@@ -7,9 +7,9 @@ Comprehensive examples demonstrating all of Engram's features.
 ```
 examples/
 ├── local/              # No external dependencies
-│   ├── extraction.py   # Pattern extraction + negation detection
+│   ├── extraction.py   # Pattern extraction (email, phone, URL)
 │   ├── confidence.py   # Confidence scoring system
-│   └── memory_types.py # All 4 memory types explained
+│   └── memory_types.py # All 5 memory types explained
 └── external/           # Requires Qdrant + API keys
     ├── quickstart.py   # Core encode/recall/verify workflow
     ├── structured.py   # StructuredMemory + LLM enrichment

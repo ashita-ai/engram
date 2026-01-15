@@ -178,8 +178,8 @@ class EncodeMixin:
 
         # Handle LLM enrichment
         if enrich is True:
-            # Synchronous enrichment - blocks until complete
-            await self._enrich_structured_sync(episode, structured)
+            # Synchronous enrichment - blocks until complete, returns enriched version
+            structured = await self._enrich_structured_sync(episode, structured)
         elif enrich == "background":
             # Background enrichment - fire and forget
             asyncio.create_task(self._enrich_structured_background(episode, structured))
@@ -241,12 +241,15 @@ class EncodeMixin:
         self,
         episode: Episode,
         structured: StructuredMemory,
-    ) -> None:
+    ) -> StructuredMemory:
         """Enrich a structured memory with LLM extraction (synchronous).
 
         Args:
             episode: The source episode.
             structured: The structured memory to enrich.
+
+        Returns:
+            The enriched StructuredMemory (or original if enrichment fails).
         """
         from engram.workflows.structure import run_structure
 
@@ -257,14 +260,17 @@ class EncodeMixin:
                 embedder=self.embedder,
                 skip_if_structured=False,  # Force re-enrichment
             )
-            if result:
+            if result and result.structured:
                 logger.info(
                     f"Enriched {episode.id}: "
                     f"{result.deterministic_count} regex + {result.llm_count} LLM "
                     f"({result.processing_time_ms:.0f}ms)"
                 )
+                enriched: StructuredMemory = result.structured
+                return enriched
         except Exception as e:
             logger.warning(f"Enrichment failed for {episode.id}: {e}")
+        return structured
 
     async def _enrich_structured_background(
         self,

@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 if TYPE_CHECKING:
     from engram.embeddings import Embedder
     from engram.models import Episode
+    from engram.models.structured import StructuredMemory
     from engram.storage import EngramStorage
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,7 @@ class StructureResult(BaseModel):
     Attributes:
         episode_id: ID of the Episode that was processed.
         structured_memory_id: ID of the created StructuredMemory.
+        structured: The created StructuredMemory object.
         extracts_count: Total number of entities extracted.
         deterministic_count: Number of regex extractions (emails, phones, URLs).
         llm_count: Number of LLM extractions.
@@ -121,6 +123,7 @@ class StructureResult(BaseModel):
 
     episode_id: str
     structured_memory_id: str
+    structured: StructuredMemory
     extracts_count: int = Field(ge=0)
     deterministic_count: int = Field(ge=0)
     llm_count: int = Field(ge=0)
@@ -179,13 +182,22 @@ The message is from a {role}. Extract:
 7. PREFERENCES: User preferences (what they like/dislike/prefer)
 8. NEGATIONS: Explicit corrections or "not" statements that should filter other information
 
+IMPORTANT: Negations are critical for memory accuracy. Always extract statements about what someone:
+- Does NOT use, like, or want
+- Stopped using or switched away from
+- Is not interested in or avoids
+- Corrects as wrong or outdated
+
 For negations, look for:
-- "I don't like X" → pattern="X"
-- "We switched from X to Y" → pattern="X" (X is no longer used)
-- "I'm not interested in X" → pattern="X"
+- "I don't use X" → pattern="X", content="doesn't use X"
+- "I don't like X" → pattern="X", content="doesn't like X"
+- "We switched from X to Y" → pattern="X", content="switched from X to Y"
+- "I'm not interested in X" → pattern="X", content="not interested in X"
+- "I no longer use X" → pattern="X", content="no longer uses X"
+- "I stopped using X" → pattern="X", content="stopped using X"
 - "That's wrong, I actually..." → pattern for the wrong info
 
-Be conservative - only extract information that is clearly stated.
+Be conservative for other extractions, but be AGGRESSIVE about negations - missing a negation causes incorrect information to surface in recall.
 Today's date is {datetime.now(UTC).strftime("%Y-%m-%d")} for resolving relative dates."""
 
     agent: Agent[None, LLMExtractionOutput] = Agent(
@@ -332,6 +344,7 @@ async def run_structure(
     return StructureResult(
         episode_id=episode.id,
         structured_memory_id=structured.id,
+        structured=structured,
         extracts_count=deterministic_count + llm_count,
         deterministic_count=deterministic_count,
         llm_count=llm_count,

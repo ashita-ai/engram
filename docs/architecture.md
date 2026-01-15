@@ -148,8 +148,8 @@ Expensive LLM work is batched and deferred:
 | Operation | When | Cost |
 |-----------|------|------|
 | Episode storage | Immediate | Low (embed + store) |
-| Factual extraction | Immediate | Low (pattern matching) |
-| Semantic inference | Background | Medium (LLM, durable) |
+| Pattern extraction | Immediate | Low (regex: emails, phones, URLs) |
+| Structure (LLM) | Immediate or Background | Medium (LLM enrichment) |
 | Consolidation | Scheduled | Medium (LLM, batched) |
 | Decay | Scheduled | Low (math) |
 
