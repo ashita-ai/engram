@@ -279,26 +279,85 @@ Be explicit about which are science-inspired and which are engineering additions
 
 ## Scientific Foundations
 
-### Consolidation Strength (Testing Effect)
+Engram is **inspired by** cognitive science research, not a strict implementation of it. Below are the papers we cite and how they inform our design.
+
+### Research Reference Table
+
+| Paper | Year | Key Finding | Engram Implementation |
+|-------|------|-------------|----------------------|
+| [Roediger & Karpicke](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) | 2006 | Retrieval strengthens memory (56% vs 14% retention) | `consolidation_strength`, `consolidation_passes` |
+| [A-MEM](https://arxiv.org/abs/2502.12110) | 2025 | 2x multi-hop reasoning via Zettelkasten linking | `related_ids`, `follow_links` |
+| [Cognitive Workspace](https://arxiv.org/abs/2508.13171) | 2025 | 58.6% memory reuse vs 0% for naive RAG | Hierarchical buffers, working memory |
+| [HaluMem](https://arxiv.org/abs/2511.03506) | 2025 | <56% accuracy without ground truth preservation | Immutable episodes, `verify()` |
+| [Karpicke & Roediger](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081) | 2008 | Retrieval = rapid consolidation | Retrieval-triggered strengthening |
+
+### Testing Effect (Consolidation Strength)
 
 **What it is**: Memories that are repeatedly involved in retrieval and consolidation become stronger and more stable.
 
 **Primary Research**:
-> Roediger, H.L. & Karpicke, J.D. (2006). "The Power of Testing Memory: Basic Research and Implications for Educational Practice." *Perspectives on Psychological Science*, 1(3), 181-210. https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/
+> Roediger, H.L. & Karpicke, J.D. (2006). "The Power of Testing Memory: Basic Research and Implications for Educational Practice." *Perspectives on Psychological Science*, 1(3), 181-210.
 
-**Key finding**: "Repeated remembering strengthens memories much more so than repeated learning."
+**Key experimental results**:
+- After 1 week: Tested group retained **56%**, study-only group retained **14%**
+- Testing produces "rapid consolidation" of memory traces
+- "Repeated remembering strengthens memories much more so than repeated learning"
 
 **How we implement it**: During consolidation, `strengthen()` is called when existing memories:
 1. Get linked to new memories via semantic similarity
 2. Receive LLM-identified links
 3. Undergo evolution (tag/keyword/context updates)
 
-Each call increases `consolidation_strength` by 0.1 and increments `consolidation_passes`. This tracks how well-established a memory is through repeated consolidation involvement.
+Each call increases `consolidation_strength` by 0.1 and increments `consolidation_passes`.
+
+### A-MEM (Dynamic Memory Linking)
+
+**What it is**: Agentic memory architecture using Zettelkasten-style linking for multi-hop reasoning.
+
+**Primary Research**:
+> "A-MEM: Agentic Memory for LLM Agents" (2025). https://arxiv.org/abs/2502.12110
+
+**Key results**:
+- **2x improvement** on multi-hop reasoning benchmarks
+- Dynamic linking outperforms static memory retrieval
+- Links enable contextual relevance across domains
+
+**How we implement it**: `related_ids` field on SemanticMemory and ProceduralMemory stores bidirectional links. During consolidation, `_find_matching_memory()` discovers links via exact, normalized, and substring matching. `follow_links=True` in `recall()` traverses links for multi-hop reasoning.
+
+### HaluMem (Ground Truth Preservation)
+
+**What it is**: Benchmark showing LLM memory systems hallucinate without source preservation.
+
+**Primary Research**:
+> "HaluMem: Evaluating Hallucinations in Memory Systems of Agents" (2025). https://arxiv.org/abs/2511.03506
+
+**Key results**:
+- "All systems achieve answer accuracies below **56%**"
+- "Hallucination rate and omission rate remaining high"
+- "Systems suffer omission rates above 50%"
+
+**How we address it**: Immutable episodic storage preserves ground truth. All derived memories (`StructuredMemory`, `SemanticMemory`) maintain `source_episode_ids` for traceability. `verify()` enables auditing any memory back to its source.
+
+### Cognitive Workspace (Hierarchical Buffers)
+
+**What it is**: Active memory curation using hierarchical buffer management.
+
+**Primary Research**:
+> "Cognitive Workspace for AI Memory" (2025). https://arxiv.org/abs/2508.13171
+
+**Key results**:
+- **58.6% memory reuse** vs 0% for naive RAG
+- Active curation outperforms passive retrieval
+- Hierarchical organization improves recall relevance
+
+**How we implement it**: Working memory → Episodic → StructuredMemory → SemanticMemory → ProceduralMemory hierarchy. Each tier serves different retention and retrieval purposes.
 
 ### What we DON'T implement
 
-- **Exact biological mechanisms**: We use cognitive science as inspiration, not blueprint.
-- **True context selectivity**: Tomé et al. (2024) describes how engrams become more context-specific via inhibitory plasticity. We don't model this — we track consolidation involvement instead.
+- **Exact biological mechanisms**: We use cognitive science as inspiration, not blueprint
+- **True context selectivity**: Tomé et al. (2024) describes how engrams become more context-specific via inhibitory plasticity. We don't model this — we track consolidation involvement instead
+- **Surprise-based importance**: Nagy et al. (2025) adaptive compression uses information-theoretic surprise. Future work (see #106)
+- **Retrieval-induced forgetting**: Removed in v0.x due to context mismatch between human lab experiments and AI systems
 
 ---
 
