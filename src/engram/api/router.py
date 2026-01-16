@@ -927,7 +927,7 @@ async def trigger_structure(
             extracts_count=result.extracts_count,
             deterministic_count=result.deterministic_count,
             llm_count=result.llm_count,
-            processing_time_ms=result.processing_time_ms,
+            processing_time_ms=int(result.processing_time_ms),
             skipped=False,
         )
 
@@ -985,7 +985,7 @@ async def trigger_structure_batch(
                 extracts_count=r.extracts_count,
                 deterministic_count=r.deterministic_count,
                 llm_count=r.llm_count,
-                processing_time_ms=r.processing_time_ms,
+                processing_time_ms=int(r.processing_time_ms),
                 skipped=False,
             )
             for r in results
