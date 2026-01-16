@@ -412,12 +412,6 @@ class TestDurableAgentFactory:
         factory = DurableAgentFactory(settings)
         assert factory.backend == "dbos"
 
-    def test_factory_temporal_backend(self) -> None:
-        """Test factory accepts temporal backend."""
-        settings = Settings(openai_api_key="sk-test", durable_backend="temporal")
-        factory = DurableAgentFactory(settings)
-        assert factory.backend == "temporal"
-
     def test_factory_prefect_backend(self) -> None:
         """Test factory accepts prefect backend."""
         settings = Settings(openai_api_key="sk-test", durable_backend="prefect")

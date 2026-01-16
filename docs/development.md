@@ -147,8 +147,8 @@ Only LLM API keys need to be provided externally.
 ```yaml
 # These are hardcoded in docker-compose.yml - no config needed
 QDRANT_URL: http://qdrant:6333
-DURABLE_BACKEND: temporal
-TEMPORAL_ADDRESS: temporal:7233
+DURABLE_BACKEND: dbos
+DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_dbos
 ```
 
 ### What You Provide
@@ -163,19 +163,22 @@ echo "OPENAI_API_KEY=sk-..." >> .env
 ### Commands
 
 ```bash
-# Infrastructure only (Qdrant + Temporal)
+# Infrastructure only (Qdrant + PostgreSQL)
 docker compose up -d
+
+# Infrastructure + Prefect server
+docker compose --profile prefect up -d
 
 # Infrastructure + Engram app
 docker compose --profile app up -d
 
-# Just Qdrant (for local DBOS dev)
+# Just Qdrant (for local SQLite dev)
 docker compose up -d qdrant
 
 # Verify
 curl http://localhost:6333/health  # Qdrant
 curl http://localhost:6366/health  # Engram API
-open http://localhost:7280         # Temporal UI
+open http://localhost:4200         # Prefect UI (if started)
 ```
 
 ### Service Ports
@@ -186,9 +189,9 @@ open http://localhost:7280         # Temporal UI
 |---------|------|-----|
 | Qdrant REST | 6333 | http://localhost:6333 |
 | Qdrant gRPC | 6334 | - |
+| PostgreSQL | 5432 | - |
 | **Engram API** | **6366** | http://localhost:6366 |
-| Temporal gRPC | 7233 | - |
-| Temporal UI | 7280 | http://localhost:7280 |
+| Prefect UI | 4200 | http://localhost:4200 |
 
 ## Project Structure
 

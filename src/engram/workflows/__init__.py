@@ -3,8 +3,7 @@
 This module provides durable workflows for background processing tasks
 like consolidation and decay. Supports multiple backends:
 
-- **DBOS** (default): SQLite-based, no infrastructure needed
-- **Temporal**: Production-grade, requires Temporal server
+- **DBOS** (default): SQLite/PostgreSQL-based durability
 - **Prefect**: Cloud-native workflow orchestration
 
 Example:
@@ -25,8 +24,7 @@ Example:
 
 Configuration:
     Set ENGRAM_DURABLE_BACKEND environment variable:
-    - "dbos" (default): Local SQLite-based durability
-    - "temporal": Requires Temporal server (see docker-compose.yml)
+    - "dbos" (default): Local SQLite or PostgreSQL durability
     - "prefect": Requires Prefect server or Prefect Cloud
 """
 
@@ -40,6 +38,16 @@ from pydantic_ai import Agent
 
 from engram.config import Settings
 
+from .backend import (
+    DBOSBackend,
+    InProcessBackend,
+    PrefectBackend,
+    WorkflowBackend,
+    WorkflowState,
+    WorkflowStatus,
+    get_inprocess_backend,
+    get_workflow_backend,
+)
 from .consolidation import (
     ConsolidationResult,
     ExtractedFact,
@@ -63,7 +71,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Type alias for supported backends
-DurableBackend = Literal["dbos", "temporal", "prefect"]
+DurableBackend = Literal["inprocess", "dbos", "prefect"]
 
 
 @dataclass
@@ -89,9 +97,9 @@ class DurableAgentFactory:
     def backend(self) -> DurableBackend:
         """Get the configured durable execution backend."""
         backend = self.settings.durable_backend.lower()
-        if backend not in ("dbos", "temporal", "prefect"):
+        if backend not in ("dbos", "prefect", "inprocess"):
             raise ValueError(
-                f"Unknown durable backend: {backend}. Use 'dbos', 'temporal', or 'prefect'."
+                f"Unknown durable backend: {backend}. Use 'dbos', 'prefect', or 'inprocess'."
             )
         return backend  # type: ignore[return-value]
 
@@ -136,12 +144,6 @@ Apply conservative decay - when uncertain, retain.""",
 
         return DBOSAgent(agent)
 
-    def _wrap_agent_temporal(self, agent: Agent[None, Any]) -> Any:
-        """Wrap agent with Temporal durable execution."""
-        from pydantic_ai.durable_exec.temporal import TemporalAgent
-
-        return TemporalAgent(agent)
-
     def _wrap_agent_prefect(self, agent: Agent[None, Any]) -> Any:
         """Wrap agent with Prefect durable execution."""
         from pydantic_ai.durable_exec.prefect import PrefectAgent
@@ -152,10 +154,10 @@ Apply conservative decay - when uncertain, retain.""",
         """Wrap agent with the configured durable execution backend."""
         if self.backend == "dbos":
             return self._wrap_agent_dbos(agent)
-        elif self.backend == "temporal":
-            return self._wrap_agent_temporal(agent)
         elif self.backend == "prefect":
             return self._wrap_agent_prefect(agent)
+        elif self.backend == "inprocess":
+            return agent  # No wrapping for in-process
         else:
             raise ValueError(f"Unknown backend: {self.backend}")
 
@@ -163,7 +165,7 @@ Apply conservative decay - when uncertain, retain.""",
         """Initialize the durable execution backend.
 
         For DBOS, this configures and launches DBOS.
-        For Temporal/Prefect, this is a no-op (external setup required).
+        For Prefect, this is a no-op (external setup required).
 
         Must be called AFTER creating agents but BEFORE using them (for DBOS).
         """
@@ -189,17 +191,17 @@ Apply conservative decay - when uncertain, retain.""",
             DBOS.launch()
             logger.info("DBOS backend initialized")
 
-        elif self.backend == "temporal":
-            # Temporal agents can be created anytime
-            self._consolidation_agent = self._wrap_agent(self._create_base_consolidation_agent())
-            self._decay_agent = self._wrap_agent(self._create_base_decay_agent())
-            logger.info("Temporal backend initialized (worker must be started separately)")
-
         elif self.backend == "prefect":
             # Prefect agents can be created anytime
             self._consolidation_agent = self._wrap_agent(self._create_base_consolidation_agent())
             self._decay_agent = self._wrap_agent(self._create_base_decay_agent())
             logger.info("Prefect backend initialized (server must be configured separately)")
+
+        elif self.backend == "inprocess":
+            # In-process agents don't need special initialization
+            self._consolidation_agent = self._wrap_agent(self._create_base_consolidation_agent())
+            self._decay_agent = self._wrap_agent(self._create_base_decay_agent())
+            logger.info("In-process backend initialized (no durability)")
 
         self._initialized = True
 
@@ -285,12 +287,23 @@ def get_decay_agent() -> Any:
 
 
 __all__ = [
+    # Workflow backend abstraction
+    "WorkflowBackend",
+    "WorkflowState",
+    "WorkflowStatus",
+    "InProcessBackend",
+    "DBOSBackend",
+    "PrefectBackend",
+    "get_workflow_backend",
+    "get_inprocess_backend",
+    # Legacy DurableAgentFactory (for Pydantic AI agent wrapping)
     "DurableAgentFactory",
     "DurableBackend",
     "init_workflows",
     "shutdown_workflows",
     "get_consolidation_agent",
     "get_decay_agent",
+    # Workflow results
     "ConsolidationResult",
     "DecayResult",
     "PromotionResult",
@@ -299,6 +312,7 @@ __all__ = [
     "LLMExtractionResult",
     "LLMExtractionOutput",
     "StructureResult",
+    # Workflow functions (for direct use)
     "run_consolidation",
     "run_consolidation_from_structured",
     "run_decay",

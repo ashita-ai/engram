@@ -17,9 +17,9 @@ Engram is a memory system for LLM applications built on Pydantic AI with durable
 │              Agents with structured outputs                   │
 ├─────────────────────────────────────────────────────────────┤
 │               Durable Execution                              │
-│    ┌──────────────┬──────────────┬──────────────┐            │
-│    │ DBOS (local) │   Temporal   │   Prefect    │            │
-│    └──────────────┴──────────────┴──────────────┘            │
+│    ┌──────────────────────┬──────────────────────┐           │
+│    │ DBOS (SQLite/PgSQL)  │   Prefect (Flows)    │           │
+│    └──────────────────────┴──────────────────────┘           │
 ├─────────────────────────────────────────────────────────────┤
 │                       Qdrant                                 │
 │              Vector storage for all memory types             │
@@ -149,9 +149,9 @@ Expensive LLM work is batched and deferred:
 |-----------|------|------|---------|
 | Episode storage | Immediate | Low (embed + store) | N/A |
 | Pattern extraction | Immediate | Low (regex: emails, phones, URLs) | N/A |
-| Structure (LLM) | Immediate or Background | Medium (LLM enrichment) | Yes (DBOS/Temporal) |
-| Consolidation | Scheduled | Medium (LLM, batched) | Yes (DBOS/Temporal) |
-| Decay | Scheduled | Low (math) | Yes (DBOS/Temporal) |
+| Structure (LLM) | Immediate or Background | Medium (LLM enrichment) | Yes (DBOS/Prefect) |
+| Consolidation | Scheduled | Medium (LLM, batched) | Yes (DBOS/Prefect) |
+| Decay | Scheduled | Low (math) | Yes (DBOS/Prefect) |
 
 ### 8. Hierarchical Memory Compression
 
@@ -626,32 +626,19 @@ async def consolidate_workflow(episode_ids: list[str]):
     await store_results(result.data)
 ```
 
-### Temporal (Production)
+### Prefect (Flow Orchestration)
 
 ```python
-from temporalio import workflow, activity
+from prefect import flow
 
-@activity.defn
-async def extract_and_link(episode_ids: list[str]) -> ConsolidationResult:
-    episodes = await get_episodes(episode_ids)
+@flow(name="engram-consolidation")
+async def consolidation_flow(user_id: str, org_id: str | None = None):
+    episodes = await get_episodes(user_id, org_id)
     result = await consolidation_agent.run(format_episodes(episodes))
-    return result.data
-
-@workflow.defn
-class ConsolidateWorkflow:
-    @workflow.run
-    async def run(self, episode_ids: list[str]):
-        result = await workflow.execute_activity(
-            extract_and_link,
-            episode_ids,
-            start_to_close_timeout=timedelta(minutes=5),
-        )
-        await workflow.execute_activity(
-            store_results,
-            result,
-            start_to_close_timeout=timedelta(seconds=30),
-        )
+    await store_results(result.data)
+    return result
 ```
+
 
 ## Research Foundations
 

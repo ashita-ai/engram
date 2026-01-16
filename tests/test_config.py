@@ -77,7 +77,7 @@ class TestSettings:
         assert settings.collection_prefix == "engram"
         assert settings.embedding_provider == "openai"
         # durable_backend may be set by environment variable, check it's a valid value
-        assert settings.durable_backend in ("dbos", "temporal", "prefect")
+        assert settings.durable_backend in ("dbos", "prefect", "inprocess")
         assert settings.log_level == "INFO"
 
     def test_embedding_providers(self):
@@ -90,7 +90,7 @@ class TestSettings:
 
     def test_durable_backends(self):
         """Only valid durable backends should be accepted."""
-        for backend in ["dbos", "temporal", "prefect"]:
+        for backend in ["dbos", "prefect", "inprocess"]:
             settings = Settings(durable_backend=backend)
             assert settings.durable_backend == backend
 
@@ -120,13 +120,6 @@ class TestSettings:
         settings = Settings()
         assert isinstance(settings.confidence_weights, ConfidenceWeights)
         assert settings.confidence_weights.validate_weights_sum()
-
-    def test_temporal_settings(self):
-        """Temporal settings should have defaults."""
-        settings = Settings()
-        assert settings.temporal_address == "localhost:7233"
-        assert settings.temporal_namespace == "default"
-        assert settings.temporal_task_queue == "engram-consolidation"
 
     def test_env_prefix(self):
         """Settings should use ENGRAM_ prefix for environment variables."""

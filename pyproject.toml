@@ -76,7 +76,6 @@ cohere = ["cohere>=5.0"]
 sentence-transformers = ["sentence-transformers>=2.3"]
 
 # Durable execution backends
-temporal = ["temporalio>=1.4"]
 prefect = ["prefect>=2.0"]
 
 # All providers
