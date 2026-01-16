@@ -24,6 +24,11 @@ def mock_service():
     service.recall = AsyncMock()
     # Add storage mock for delete endpoints
     service.storage = MagicMock()
+    # Add embedder and settings for workflow endpoints
+    service.embedder = MagicMock()
+    service.settings = MagicMock()
+    # Add workflow_backend for workflow endpoints
+    service.workflow_backend = MagicMock()
     return service
 
 
@@ -563,5 +568,321 @@ class TestBulkDeleteEndpoint:
         test_client = TestClient(app)
 
         response = test_client.delete("/api/v1/users/user_123/memories")
+
+        assert response.status_code == 503
+
+
+class TestWorkflowEndpoints:
+    """Tests for workflow trigger endpoints."""
+
+    def test_consolidate_success(self, client, mock_service):
+        """Should trigger consolidation and return results."""
+        from engram.workflows import ConsolidationResult
+
+        mock_result = ConsolidationResult(
+            episodes_processed=10,
+            semantic_memories_created=3,
+            links_created=5,
+            compression_ratio=3.33,
+        )
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.run_consolidation = AsyncMock(return_value=mock_result)
+
+        response = client.post(
+            "/api/v1/workflows/consolidate",
+            json={
+                "user_id": "user_123",
+                "consolidation_passes": 2,
+                "similarity_threshold": 0.8,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["episodes_processed"] == 10
+        assert data["semantic_memories_created"] == 3
+        assert data["links_created"] == 5
+        assert data["compression_ratio"] == 3.33
+
+    def test_consolidate_with_org_filter(self, client, mock_service):
+        """Should pass org_id to consolidation."""
+        from engram.workflows import ConsolidationResult
+
+        mock_result = ConsolidationResult(
+            episodes_processed=5,
+            semantic_memories_created=1,
+            links_created=2,
+            compression_ratio=5.0,
+        )
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.run_consolidation = AsyncMock(return_value=mock_result)
+
+        response = client.post(
+            "/api/v1/workflows/consolidate",
+            json={
+                "user_id": "user_123",
+                "org_id": "org_456",
+            },
+        )
+
+        assert response.status_code == 200
+        mock_service.workflow_backend.run_consolidation.assert_called_once()
+        call_kwargs = mock_service.workflow_backend.run_consolidation.call_args.kwargs
+        assert call_kwargs["user_id"] == "user_123"
+        assert call_kwargs["org_id"] == "org_456"
+
+    def test_decay_success(self, client, mock_service):
+        """Should trigger decay and return results."""
+        from engram.workflows import DecayResult
+
+        mock_result = DecayResult(
+            memories_updated=15,
+            memories_archived=3,
+            memories_deleted=1,
+            procedural_promoted=2,
+        )
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.run_decay = AsyncMock(return_value=mock_result)
+        mock_service.settings = MagicMock()
+
+        response = client.post(
+            "/api/v1/workflows/decay",
+            json={
+                "user_id": "user_123",
+                "run_promotion": True,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["memories_updated"] == 15
+        assert data["memories_archived"] == 3
+        assert data["memories_deleted"] == 1
+        assert data["procedural_promoted"] == 2
+
+    def test_decay_without_promotion(self, client, mock_service):
+        """Should pass run_promotion=False to decay."""
+        from engram.workflows import DecayResult
+
+        mock_result = DecayResult(
+            memories_updated=10,
+            memories_archived=2,
+            memories_deleted=0,
+            procedural_promoted=0,
+        )
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.run_decay = AsyncMock(return_value=mock_result)
+        mock_service.settings = MagicMock()
+
+        response = client.post(
+            "/api/v1/workflows/decay",
+            json={
+                "user_id": "user_123",
+                "run_promotion": False,
+            },
+        )
+
+        assert response.status_code == 200
+        call_kwargs = mock_service.workflow_backend.run_decay.call_args.kwargs
+        assert call_kwargs["run_promotion"] is False
+
+    def test_promote_success(self, client, mock_service):
+        """Should trigger promotion and return results."""
+        from engram.workflows.promotion import SynthesisResult
+
+        mock_result = SynthesisResult(
+            semantics_analyzed=8,
+            procedural_created=True,
+            procedural_updated=False,
+            procedural_id="proc_123",
+        )
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.run_promotion = AsyncMock(return_value=mock_result)
+
+        response = client.post(
+            "/api/v1/workflows/promote",
+            json={"user_id": "user_123"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["semantics_analyzed"] == 8
+        assert data["procedural_created"] is True
+        assert data["procedural_updated"] is False
+        assert data["procedural_id"] == "proc_123"
+
+    def test_structure_success(self, client, mock_service):
+        """Should trigger structure for a single episode."""
+        from engram.models import Episode, StructuredMemory
+        from engram.workflows import StructureResult
+
+        mock_episode = Episode(
+            content="My email is test@example.com",
+            role="user",
+            user_id="user_123",
+            embedding=[0.1] * 1536,
+        )
+        mock_structured = StructuredMemory(
+            source_episode_id=mock_episode.id,
+            mode="rich",
+            user_id="user_123",
+            emails=["test@example.com"],
+        )
+        mock_result = StructureResult(
+            episode_id=mock_episode.id,
+            structured_memory_id=mock_structured.id,
+            structured=mock_structured,
+            extracts_count=1,
+            deterministic_count=1,
+            llm_count=0,
+            processing_time_ms=150,
+        )
+        mock_service.storage.get_episode = AsyncMock(return_value=mock_episode)
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.run_structure = AsyncMock(return_value=mock_result)
+
+        response = client.post(
+            "/api/v1/workflows/structure",
+            json={
+                "episode_id": mock_episode.id,
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["episode_id"] == mock_episode.id
+        assert data["extracts_count"] == 1
+        assert data["skipped"] is False
+
+    def test_structure_episode_not_found(self, client, mock_service):
+        """Should return 404 when episode not found."""
+        mock_service.storage.get_episode = AsyncMock(return_value=None)
+        mock_service.workflow_backend = MagicMock()
+
+        response = client.post(
+            "/api/v1/workflows/structure",
+            json={
+                "episode_id": "ep_nonexistent",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    def test_structure_skipped_already_processed(self, client, mock_service):
+        """Should return skipped=True when already structured."""
+        from engram.models import Episode
+
+        mock_episode = Episode(
+            content="Already processed",
+            role="user",
+            user_id="user_123",
+            embedding=[0.1] * 1536,
+        )
+        mock_service.storage.get_episode = AsyncMock(return_value=mock_episode)
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.run_structure = AsyncMock(return_value=None)
+
+        response = client.post(
+            "/api/v1/workflows/structure",
+            json={
+                "episode_id": mock_episode.id,
+                "user_id": "user_123",
+                "skip_if_structured": True,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["skipped"] is True
+        assert data["extracts_count"] == 0
+
+    def test_structure_batch_success(self, client, mock_service):
+        """Should process batch of episodes."""
+        from engram.models import StructuredMemory
+        from engram.workflows import StructureResult
+
+        mock_results = [
+            StructureResult(
+                episode_id=f"ep_{i}",
+                structured_memory_id=f"struct_{i}",
+                structured=StructuredMemory(
+                    source_episode_id=f"ep_{i}",
+                    mode="rich",
+                    user_id="user_123",
+                ),
+                extracts_count=i,
+                deterministic_count=i,
+                llm_count=0,
+                processing_time_ms=100,
+            )
+            for i in range(3)
+        ]
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.run_structure_batch = AsyncMock(return_value=mock_results)
+
+        response = client.post(
+            "/api/v1/workflows/structure/batch",
+            json={
+                "user_id": "user_123",
+                "limit": 10,
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["episodes_processed"] == 3
+        assert data["total_extracts"] == 3  # 0 + 1 + 2
+        assert len(data["results"]) == 3
+
+    def test_workflow_status_success(self, client, mock_service):
+        """Should return workflow status."""
+        from datetime import datetime
+
+        from engram.workflows import WorkflowState, WorkflowStatus
+
+        mock_status = WorkflowStatus(
+            workflow_id="wf_123",
+            workflow_type="consolidation",
+            state=WorkflowState.COMPLETED,
+            started_at=datetime(2024, 1, 1, 12, 0, 0),
+            completed_at=datetime(2024, 1, 1, 12, 5, 0),
+            result={"episodes_processed": 10},
+        )
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.get_workflow_status = AsyncMock(return_value=mock_status)
+
+        response = client.get("/api/v1/workflows/wf_123/status")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["workflow_id"] == "wf_123"
+        assert data["workflow_type"] == "consolidation"
+        assert data["state"] == "completed"
+        assert data["result"]["episodes_processed"] == 10
+
+    def test_workflow_status_not_found(self, client, mock_service):
+        """Should return 404 when workflow not found."""
+        mock_service.workflow_backend = MagicMock()
+        mock_service.workflow_backend.get_workflow_status = AsyncMock(return_value=None)
+
+        response = client.get("/api/v1/workflows/wf_nonexistent/status")
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    def test_workflow_service_not_initialized(self):
+        """Should return 503 when service not initialized."""
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        set_service(None)  # type: ignore[arg-type]
+        test_client = TestClient(app)
+
+        response = test_client.post(
+            "/api/v1/workflows/consolidate",
+            json={"user_id": "user_123"},
+        )
 
         assert response.status_code == 503

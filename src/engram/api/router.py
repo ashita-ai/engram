@@ -14,20 +14,31 @@ from engram.service import EngramService
 from .schemas import (
     BulkDeleteResponse,
     ConfidenceStats,
+    ConsolidateRequest,
+    ConsolidateResponse,
+    DecayRequest,
+    DecayResponse,
     EncodeRequest,
     EncodeResponse,
     EpisodeResponse,
     HealthResponse,
     MemoryCounts,
     MemoryStatsResponse,
+    PromoteRequest,
+    PromoteResponse,
     RecallRequest,
     RecallResponse,
     RecallResultResponse,
     SourceEpisodeDetail,
     SourceEpisodeSummary,
     SourcesResponse,
+    StructureBatchRequest,
+    StructureBatchResponse,
     StructuredResponse,
+    StructureRequest,
+    StructureResponse,
     VerificationResponse,
+    WorkflowStatusResponse,
     WorkingMemoryResponse,
 )
 
@@ -690,4 +701,363 @@ async def delete_all_user_memories(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while deleting user memories",
+        ) from e
+
+
+# ============================================================================
+# Workflow Trigger Endpoints
+# ============================================================================
+
+
+@router.post(
+    "/workflows/consolidate",
+    response_model=ConsolidateResponse,
+    tags=["workflows"],
+)
+async def trigger_consolidation(
+    request: ConsolidateRequest,
+    service: ServiceDep,
+) -> ConsolidateResponse:
+    """Trigger memory consolidation workflow.
+
+    Consolidates episodic memories into semantic memories by:
+    1. Grouping related episodes
+    2. Extracting lasting knowledge via LLM
+    3. Creating semantic memories with links
+
+    Args:
+        request: Consolidation request with user filters and options.
+        service: Injected EngramService.
+
+    Returns:
+        Consolidation results including counts and compression ratio.
+
+    Raises:
+        HTTPException: If consolidation fails.
+    """
+    try:
+        assert service.workflow_backend is not None, "workflow_backend not initialized"
+        result = await service.workflow_backend.run_consolidation(
+            storage=service.storage,
+            embedder=service.embedder,
+            user_id=request.user_id,
+            org_id=request.org_id,
+            consolidation_passes=request.consolidation_passes,
+            similarity_threshold=request.similarity_threshold,
+        )
+
+        return ConsolidateResponse(
+            episodes_processed=result.episodes_processed,
+            semantic_memories_created=result.semantic_memories_created,
+            links_created=result.links_created,
+            compression_ratio=result.compression_ratio,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to run consolidation for user %s", request.user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred during consolidation",
+        ) from e
+
+
+@router.post(
+    "/workflows/decay",
+    response_model=DecayResponse,
+    tags=["workflows"],
+)
+async def trigger_decay(
+    request: DecayRequest,
+    service: ServiceDep,
+) -> DecayResponse:
+    """Trigger memory decay workflow.
+
+    Applies time-based confidence decay to memories:
+    1. Reduces confidence based on age and access patterns
+    2. Archives memories below threshold
+    3. Deletes memories below delete threshold
+    4. Optionally runs promotion for behavioral patterns
+
+    Args:
+        request: Decay request with user filters and options.
+        service: Injected EngramService.
+
+    Returns:
+        Decay results including update/archive/delete counts.
+
+    Raises:
+        HTTPException: If decay fails.
+    """
+    try:
+        assert service.workflow_backend is not None, "workflow_backend not initialized"
+        result = await service.workflow_backend.run_decay(
+            storage=service.storage,
+            settings=service.settings,
+            user_id=request.user_id,
+            org_id=request.org_id,
+            embedder=service.embedder,
+            run_promotion=request.run_promotion,
+        )
+
+        return DecayResponse(
+            memories_updated=result.memories_updated,
+            memories_archived=result.memories_archived,
+            memories_deleted=result.memories_deleted,
+            procedural_promoted=result.procedural_promoted,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to run decay for user %s", request.user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred during decay",
+        ) from e
+
+
+@router.post(
+    "/workflows/promote",
+    response_model=PromoteResponse,
+    tags=["workflows"],
+)
+async def trigger_promotion(
+    request: PromoteRequest,
+    service: ServiceDep,
+) -> PromoteResponse:
+    """Trigger promotion/synthesis workflow.
+
+    Promotes semantic memories to procedural memories:
+    1. Analyzes semantic memories for behavioral patterns
+    2. Synthesizes procedural knowledge
+    3. Creates/updates procedural memory for user
+
+    Args:
+        request: Promotion request with user filters.
+        service: Injected EngramService.
+
+    Returns:
+        Promotion results including procedural memory created/updated.
+
+    Raises:
+        HTTPException: If promotion fails.
+    """
+    try:
+        assert service.workflow_backend is not None, "workflow_backend not initialized"
+        result = await service.workflow_backend.run_promotion(
+            storage=service.storage,
+            embedder=service.embedder,
+            user_id=request.user_id,
+            org_id=request.org_id,
+        )
+
+        return PromoteResponse(
+            semantics_analyzed=result.semantics_analyzed,
+            procedural_created=result.procedural_created,
+            procedural_updated=result.procedural_updated,
+            procedural_id=result.procedural_id,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to run promotion for user %s", request.user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred during promotion",
+        ) from e
+
+
+@router.post(
+    "/workflows/structure",
+    response_model=StructureResponse,
+    tags=["workflows"],
+)
+async def trigger_structure(
+    request: StructureRequest,
+    service: ServiceDep,
+) -> StructureResponse:
+    """Trigger structure workflow for a specific episode.
+
+    Extracts structured data from an episode via LLM:
+    1. Runs deterministic extraction (emails, phones, URLs)
+    2. Runs LLM extraction (dates, people, preferences, negations)
+    3. Creates StructuredMemory linked to episode
+
+    Args:
+        request: Structure request with episode ID.
+        service: Injected EngramService.
+
+    Returns:
+        Structure results including extraction counts.
+
+    Raises:
+        HTTPException: 404 if episode not found.
+        HTTPException: If structure fails.
+    """
+    try:
+        # Get the episode
+        episode = await service.storage.get_episode(request.episode_id, request.user_id)
+        if episode is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Episode not found: {request.episode_id}",
+            )
+
+        assert service.workflow_backend is not None, "workflow_backend not initialized"
+        result = await service.workflow_backend.run_structure(
+            episode=episode,
+            storage=service.storage,
+            embedder=service.embedder,
+            model=request.model,
+            skip_if_structured=request.skip_if_structured,
+        )
+
+        if result is None:
+            # Episode was skipped (already structured)
+            return StructureResponse(
+                episode_id=request.episode_id,
+                structured_memory_id=None,
+                extracts_count=0,
+                deterministic_count=0,
+                llm_count=0,
+                processing_time_ms=0,
+                skipped=True,
+            )
+
+        return StructureResponse(
+            episode_id=result.episode_id,
+            structured_memory_id=result.structured_memory_id,
+            extracts_count=result.extracts_count,
+            deterministic_count=result.deterministic_count,
+            llm_count=result.llm_count,
+            processing_time_ms=result.processing_time_ms,
+            skipped=False,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to run structure for episode %s", request.episode_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred during structure",
+        ) from e
+
+
+@router.post(
+    "/workflows/structure/batch",
+    response_model=StructureBatchResponse,
+    tags=["workflows"],
+)
+async def trigger_structure_batch(
+    request: StructureBatchRequest,
+    service: ServiceDep,
+) -> StructureBatchResponse:
+    """Trigger batch structure workflow.
+
+    Processes multiple unstructured episodes at once:
+    1. Finds episodes without StructuredMemory
+    2. Runs LLM extraction on each
+    3. Returns aggregated results
+
+    Args:
+        request: Batch structure request with user filters and limit.
+        service: Injected EngramService.
+
+    Returns:
+        Batch results including total extracts and per-episode details.
+
+    Raises:
+        HTTPException: If batch structure fails.
+    """
+    try:
+        assert service.workflow_backend is not None, "workflow_backend not initialized"
+        results = await service.workflow_backend.run_structure_batch(
+            storage=service.storage,
+            embedder=service.embedder,
+            user_id=request.user_id,
+            org_id=request.org_id,
+            limit=request.limit,
+            model=request.model,
+        )
+
+        response_results = [
+            StructureResponse(
+                episode_id=r.episode_id,
+                structured_memory_id=r.structured_memory_id,
+                extracts_count=r.extracts_count,
+                deterministic_count=r.deterministic_count,
+                llm_count=r.llm_count,
+                processing_time_ms=r.processing_time_ms,
+                skipped=False,
+            )
+            for r in results
+        ]
+
+        total_extracts = sum(r.extracts_count for r in results)
+
+        return StructureBatchResponse(
+            episodes_processed=len(results),
+            total_extracts=total_extracts,
+            results=response_results,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to run batch structure for user %s", request.user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred during batch structure",
+        ) from e
+
+
+@router.get(
+    "/workflows/{workflow_id}/status",
+    response_model=WorkflowStatusResponse,
+    tags=["workflows"],
+)
+async def get_workflow_status(
+    workflow_id: str,
+    service: ServiceDep,
+) -> WorkflowStatusResponse:
+    """Get status of a workflow execution.
+
+    Polls the status of an async workflow execution.
+    Only available when async_execution=True was used.
+
+    Args:
+        workflow_id: The workflow execution ID.
+        service: Injected EngramService.
+
+    Returns:
+        Current workflow status including state and result if completed.
+
+    Raises:
+        HTTPException: 404 if workflow not found.
+    """
+    try:
+        assert service.workflow_backend is not None, "workflow_backend not initialized"
+        status_result = await service.workflow_backend.get_workflow_status(workflow_id)
+
+        if status_result is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workflow not found: {workflow_id}",
+            )
+
+        return WorkflowStatusResponse(
+            workflow_id=status_result.workflow_id,
+            workflow_type=status_result.workflow_type,
+            state=status_result.state.value,
+            started_at=status_result.started_at.isoformat() if status_result.started_at else None,
+            completed_at=(
+                status_result.completed_at.isoformat() if status_result.completed_at else None
+            ),
+            error=status_result.error,
+            result=status_result.result,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get workflow status for %s", workflow_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while getting workflow status",
         ) from e
