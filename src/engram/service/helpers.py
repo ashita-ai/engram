@@ -113,8 +113,80 @@ def calculate_importance(
     return max(0.0, min(1.0, score))
 
 
+def mmr_rerank(
+    candidates: list[tuple[float, list[float], int]],
+    limit: int,
+    diversity: float = 0.3,
+) -> list[int]:
+    """Rerank candidates using Maximal Marginal Relevance (MMR).
+
+    MMR balances relevance with diversity by penalizing candidates
+    that are too similar to already-selected results.
+
+    MMR(d) = (1-λ) * Sim(d, query) - λ * max(Sim(d, selected))
+
+    Where:
+    - First term: relevance to query (the original score)
+    - Second term: maximum similarity to any already-selected result
+    - λ (diversity): trade-off parameter (0.0 = pure relevance, 1.0 = max diversity)
+
+    Args:
+        candidates: List of tuples (relevance_score, embedding, original_index).
+        limit: Maximum number of results to select.
+        diversity: Trade-off parameter (0.0-1.0). Higher = more diverse.
+
+    Returns:
+        List of original indices in MMR-ranked order.
+
+    Example:
+        >>> candidates = [(0.9, [0.1, 0.2], 0), (0.85, [0.15, 0.25], 1), (0.8, [0.9, 0.1], 2)]
+        >>> mmr_rerank(candidates, limit=2, diversity=0.3)
+        [0, 2]  # Selects most relevant, then diversifies
+    """
+    if not candidates or limit <= 0:
+        return []
+
+    if diversity == 0.0:
+        # No diversity needed, return by relevance (original indices)
+        sorted_by_relevance = sorted(candidates, key=lambda c: c[0], reverse=True)
+        return [c[2] for c in sorted_by_relevance[:limit]]
+
+    selected_indices: list[int] = []
+    selected_embeddings: list[list[float]] = []
+    remaining = list(range(len(candidates)))
+
+    while len(selected_indices) < limit and remaining:
+        best_idx = -1
+        best_mmr = float("-inf")
+
+        for idx in remaining:
+            score, embedding, _ = candidates[idx]
+
+            # Calculate max similarity to already-selected
+            max_sim_to_selected = 0.0
+            if selected_embeddings:
+                max_sim_to_selected = max(
+                    cosine_similarity(embedding, sel_emb) for sel_emb in selected_embeddings
+                )
+
+            # MMR score: balance relevance and diversity
+            mmr_score = (1 - diversity) * score - diversity * max_sim_to_selected
+
+            if mmr_score > best_mmr:
+                best_mmr = mmr_score
+                best_idx = idx
+
+        if best_idx >= 0:
+            selected_indices.append(candidates[best_idx][2])  # original index
+            selected_embeddings.append(candidates[best_idx][1])
+            remaining.remove(best_idx)
+
+    return selected_indices
+
+
 __all__ = [
     "IMPORTANCE_KEYWORDS",
     "calculate_importance",
     "cosine_similarity",
+    "mmr_rerank",
 ]

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from engram.models import AuditEntry, Episode, Staleness
 
-from .helpers import cosine_similarity
+from .helpers import cosine_similarity, mmr_rerank
 from .models import RecallResult, SourceEpisodeSummary
 
 if TYPE_CHECKING:
@@ -56,11 +56,12 @@ class RecallMixin:
         apply_negation_filter: bool = True,
         negation_similarity_threshold: float | None = 0.75,
         include_system_prompts: bool = False,
+        diversity: float = 0.0,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
         Searches across memory types and returns unified results
-        sorted by similarity score.
+        sorted by similarity score, with optional diversity reranking.
 
         Memory types:
         - episodic: Raw interactions (ground truth)
@@ -86,9 +87,12 @@ class RecallMixin:
             apply_negation_filter: Filter out memories that match negated patterns.
             negation_similarity_threshold: Semantic similarity threshold for negation filtering.
             include_system_prompts: Include system prompt episodes in results (default False).
+            diversity: Diversity parameter for MMR reranking (0.0-1.0). Higher values
+                return more diverse results at the cost of some relevance. 0.0 = no
+                diversity reranking (default), 0.3 = recommended balance.
 
         Returns:
-            List of RecallResult sorted by similarity score.
+            List of RecallResult sorted by similarity score (or MMR score if diversity > 0).
         """
         start_time = time.monotonic()
 
@@ -146,7 +150,16 @@ class RecallMixin:
         if freshness == "fresh_only":
             results = [r for r in results if r.staleness == Staleness.FRESH]
 
-        final_results = results[:limit]
+        # Apply MMR diversity reranking if diversity > 0
+        if diversity > 0 and len(results) > limit:
+            final_results = await self._apply_diversity_reranking(
+                results=results,
+                user_id=user_id,
+                limit=limit,
+                diversity=diversity,
+            )
+        else:
+            final_results = results[:limit]
 
         # Multi-hop reasoning: follow links to related memories
         if follow_links and max_hops > 0:
@@ -884,6 +897,52 @@ class RecallMixin:
 
             except Exception as e:
                 logger.warning(f"Failed to strengthen {result.memory_type} {result.memory_id}: {e}")
+
+    async def _apply_diversity_reranking(
+        self,
+        results: list[RecallResult],
+        user_id: str,
+        limit: int,
+        diversity: float,
+    ) -> list[RecallResult]:
+        """Apply MMR diversity reranking to results.
+
+        Uses Maximal Marginal Relevance to select results that balance
+        relevance with diversity, preventing redundant/similar results.
+
+        Args:
+            results: List of recall results to rerank.
+            user_id: User ID for fetching embeddings.
+            limit: Maximum results to return.
+            diversity: Diversity parameter (0.0-1.0).
+
+        Returns:
+            Reranked list of results with diverse selection.
+        """
+        if not results:
+            return []
+
+        # Fetch embeddings for each result
+        candidates: list[tuple[float, list[float], int]] = []
+
+        for i, result in enumerate(results):
+            embedding = await self._get_result_embedding(result, user_id)
+            if embedding:
+                candidates.append((result.score, embedding, i))
+            else:
+                # If no embedding, use original index with zero embedding
+                # This ensures we don't lose results that lack embeddings
+                candidates.append((result.score, [0.0] * 1536, i))
+                logger.debug(
+                    f"No embedding for {result.memory_type} {result.memory_id}, "
+                    "using placeholder for diversity"
+                )
+
+        # Apply MMR reranking
+        selected_indices = mmr_rerank(candidates, limit=limit, diversity=diversity)
+
+        # Return results in MMR order
+        return [results[i] for i in selected_indices]
 
 
 __all__ = ["RecallMixin"]
