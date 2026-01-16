@@ -425,3 +425,237 @@ class BulkDeleteResponse(BaseModel):
     org_id: str | None = Field(default=None, description="Org filter used (if any)")
     deleted_counts: dict[str, int] = Field(description="Counts by memory type")
     total_deleted: int = Field(ge=0, description="Total memories deleted")
+
+
+# ============================================================================
+# Workflow Trigger Schemas
+# ============================================================================
+
+
+class WorkflowTriggerRequest(BaseModel):
+    """Base request for triggering a workflow.
+
+    Attributes:
+        user_id: User ID for multi-tenancy isolation.
+        org_id: Optional organization ID filter.
+        async_execution: If True, run in background and return workflow ID for polling.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(min_length=1, description="User ID for isolation")
+    org_id: str | None = Field(default=None, description="Optional org ID filter")
+    async_execution: bool = Field(
+        default=False,
+        description="If True, run in background and return workflow ID for status polling",
+    )
+
+
+class ConsolidateRequest(WorkflowTriggerRequest):
+    """Request for triggering consolidation workflow.
+
+    Attributes:
+        consolidation_passes: Number of LLM passes for iterative refinement.
+        similarity_threshold: Threshold for semantic similarity matching.
+    """
+
+    consolidation_passes: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description="Number of LLM passes for refinement",
+    )
+    similarity_threshold: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for memory linking",
+    )
+
+
+class DecayRequest(WorkflowTriggerRequest):
+    """Request for triggering decay workflow.
+
+    Attributes:
+        run_promotion: Whether to run promotion after decay.
+    """
+
+    run_promotion: bool = Field(
+        default=True,
+        description="Run promotion workflow after decay completes",
+    )
+
+
+class PromoteRequest(WorkflowTriggerRequest):
+    """Request for triggering promotion/synthesis workflow."""
+
+    pass
+
+
+class StructureRequest(BaseModel):
+    """Request for triggering structure workflow on a specific episode.
+
+    Attributes:
+        episode_id: ID of the episode to structure.
+        user_id: User ID for multi-tenancy isolation.
+        model: Optional model override for LLM extraction.
+        skip_if_structured: Skip if already has StructuredMemory.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    episode_id: str = Field(min_length=1, description="Episode ID to structure")
+    user_id: str = Field(min_length=1, description="User ID for isolation")
+    model: str | None = Field(default=None, description="Optional model override")
+    skip_if_structured: bool = Field(
+        default=True,
+        description="Skip if episode already has StructuredMemory",
+    )
+
+
+class StructureBatchRequest(WorkflowTriggerRequest):
+    """Request for batch structure workflow.
+
+    Attributes:
+        limit: Maximum episodes to process.
+        model: Optional model override for LLM extraction.
+    """
+
+    limit: int | None = Field(
+        default=None,
+        ge=1,
+        description="Maximum episodes to process (None = all unstructured)",
+    )
+    model: str | None = Field(default=None, description="Optional model override")
+
+
+class WorkflowStatusResponse(BaseModel):
+    """Response for workflow status queries.
+
+    Attributes:
+        workflow_id: Unique workflow execution ID.
+        workflow_type: Type of workflow (consolidate, decay, promote, structure).
+        state: Current state (pending, running, completed, failed, cancelled).
+        started_at: When the workflow started.
+        completed_at: When the workflow completed (if finished).
+        error: Error message if failed.
+        result: Workflow result data if completed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str = Field(description="Unique workflow execution ID")
+    workflow_type: str = Field(description="Type of workflow")
+    state: Literal["pending", "running", "completed", "failed", "cancelled"] = Field(
+        description="Current workflow state"
+    )
+    started_at: str | None = Field(default=None, description="ISO timestamp of start")
+    completed_at: str | None = Field(default=None, description="ISO timestamp of completion")
+    error: str | None = Field(default=None, description="Error message if failed")
+    result: dict[str, Any] | None = Field(default=None, description="Workflow result if completed")
+
+
+class ConsolidateResponse(BaseModel):
+    """Response for consolidation workflow.
+
+    Attributes:
+        workflow_id: Workflow execution ID (for async tracking).
+        episodes_processed: Number of episodes consolidated.
+        semantic_memories_created: Number of semantic memories created.
+        links_created: Number of memory links created.
+        compression_ratio: Compression ratio achieved.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str | None = Field(default=None, description="Workflow ID for async tracking")
+    episodes_processed: int = Field(ge=0, description="Episodes consolidated")
+    semantic_memories_created: int = Field(ge=0, description="Semantic memories created")
+    links_created: int = Field(ge=0, description="Memory links created")
+    compression_ratio: float = Field(ge=0.0, description="Compression ratio")
+
+
+class DecayResponse(BaseModel):
+    """Response for decay workflow.
+
+    Attributes:
+        workflow_id: Workflow execution ID (for async tracking).
+        memories_updated: Memories with updated confidence.
+        memories_archived: Memories moved to archive.
+        memories_deleted: Memories permanently deleted.
+        procedural_promoted: Memories promoted to procedural.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str | None = Field(default=None, description="Workflow ID for async tracking")
+    memories_updated: int = Field(ge=0, description="Memories with updated confidence")
+    memories_archived: int = Field(ge=0, description="Memories archived")
+    memories_deleted: int = Field(ge=0, description="Memories deleted")
+    procedural_promoted: int = Field(ge=0, description="Memories promoted to procedural")
+
+
+class PromoteResponse(BaseModel):
+    """Response for promotion/synthesis workflow.
+
+    Attributes:
+        workflow_id: Workflow execution ID (for async tracking).
+        semantics_analyzed: Number of semantic memories analyzed.
+        procedural_created: Whether a new procedural was created.
+        procedural_updated: Whether an existing procedural was updated.
+        procedural_id: ID of the created/updated procedural memory.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str | None = Field(default=None, description="Workflow ID for async tracking")
+    semantics_analyzed: int = Field(ge=0, description="Semantic memories analyzed")
+    procedural_created: bool = Field(description="Whether new procedural was created")
+    procedural_updated: bool = Field(description="Whether existing procedural was updated")
+    procedural_id: str | None = Field(default=None, description="Procedural memory ID")
+
+
+class StructureResponse(BaseModel):
+    """Response for structure workflow.
+
+    Attributes:
+        episode_id: Episode that was structured.
+        structured_memory_id: ID of the created StructuredMemory.
+        extracts_count: Total entities extracted.
+        deterministic_count: Regex extractions (emails, phones, URLs).
+        llm_count: LLM extractions.
+        processing_time_ms: Processing time in milliseconds.
+        skipped: Whether processing was skipped (already structured).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    episode_id: str = Field(description="Episode that was structured")
+    structured_memory_id: str | None = Field(
+        default=None, description="Created StructuredMemory ID"
+    )
+    extracts_count: int = Field(ge=0, description="Total entities extracted")
+    deterministic_count: int = Field(ge=0, description="Regex extractions")
+    llm_count: int = Field(ge=0, description="LLM extractions")
+    processing_time_ms: int = Field(ge=0, description="Processing time in ms")
+    skipped: bool = Field(default=False, description="Whether processing was skipped")
+
+
+class StructureBatchResponse(BaseModel):
+    """Response for batch structure workflow.
+
+    Attributes:
+        workflow_id: Workflow execution ID (for async tracking).
+        episodes_processed: Number of episodes processed.
+        total_extracts: Total entities extracted across all episodes.
+        results: Individual results per episode.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str | None = Field(default=None, description="Workflow ID for async tracking")
+    episodes_processed: int = Field(ge=0, description="Episodes processed")
+    total_extracts: int = Field(ge=0, description="Total entities extracted")
+    results: list[StructureResponse] = Field(
+        default_factory=list, description="Individual episode results"
+    )
