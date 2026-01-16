@@ -410,7 +410,7 @@ async def schedule_durable_enrichment(
     """Schedule durable background enrichment for an episode.
 
     This function schedules the enrichment to run via the configured
-    durable backend (DBOS, Temporal, or Prefect). If the process crashes,
+    durable backend (DBOS or Prefect). If the process crashes,
     the enrichment will be retried automatically.
 
     Args:
@@ -424,10 +424,13 @@ async def schedule_durable_enrichment(
 
     if backend == "dbos":
         await _schedule_dbos_enrichment(episode_id, user_id, org_id)
-    elif backend == "temporal":
-        await _schedule_temporal_enrichment(episode_id, user_id, org_id)
     elif backend == "prefect":
         await _schedule_prefect_enrichment(episode_id, user_id, org_id)
+    elif backend == "inprocess":
+        # In-process mode: run directly without durability
+        import asyncio
+
+        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
     else:
         # Fallback to non-durable asyncio (logs warning)
         logger.warning(
@@ -519,39 +522,6 @@ async def _schedule_dbos_enrichment(
         asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
 
 
-async def _schedule_temporal_enrichment(
-    episode_id: str,
-    user_id: str,
-    org_id: str | None = None,
-) -> None:
-    """Schedule enrichment via Temporal workflow."""
-    try:
-        from temporalio.client import Client
-
-        from engram.config import settings
-
-        # Connect to Temporal and start workflow
-        client = await Client.connect(settings.temporal_address)
-        await client.start_workflow(
-            "enrich_episode",
-            args=[episode_id, user_id, org_id],
-            id=f"enrich-{episode_id}",
-            task_queue=settings.temporal_task_queue,
-        )
-        logger.debug(f"Scheduled Temporal enrichment for {episode_id}")
-
-    except ImportError:
-        logger.warning("Temporal not available, falling back to asyncio")
-        import asyncio
-
-        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
-    except Exception as e:
-        logger.error(f"Failed to schedule Temporal enrichment: {e}")
-        import asyncio
-
-        asyncio.create_task(_run_enrichment_task(episode_id, user_id, org_id))
-
-
 async def _schedule_prefect_enrichment(
     episode_id: str,
     user_id: str,
@@ -559,10 +529,10 @@ async def _schedule_prefect_enrichment(
 ) -> None:
     """Schedule enrichment via Prefect task."""
     try:
-        from prefect import flow  # type: ignore[import-not-found]
+        from prefect import flow
 
         # Create and run Prefect flow
-        @flow(name=f"enrich-{episode_id}")  # type: ignore[untyped-decorator]
+        @flow(name=f"enrich-{episode_id}")
         async def enrich_flow() -> None:
             await _run_enrichment_task(episode_id, user_id, org_id)
 

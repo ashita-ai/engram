@@ -16,6 +16,7 @@ from .models import EncodeResult
 if TYPE_CHECKING:
     from engram.embeddings import Embedder
     from engram.storage import EngramStorage
+    from engram.workflows.backend import WorkflowBackend
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +28,14 @@ class EncodeMixin:
     - storage: EngramStorage
     - embedder: Embedder
     - settings: Settings
+    - workflow_backend: WorkflowBackend
     - _working_memory: list[Episode]
     """
 
     storage: EngramStorage
     embedder: Embedder
     settings: Any
+    workflow_backend: WorkflowBackend | None  # Always set after __post_init__
     _working_memory: list[Episode]
 
     async def encode(
@@ -250,6 +253,8 @@ class EncodeMixin:
     ) -> StructuredMemory:
         """Enrich a structured memory with LLM extraction (synchronous).
 
+        Uses the configured workflow backend for execution.
+
         Args:
             episode: The source episode.
             structured: The structured memory to enrich.
@@ -257,10 +262,9 @@ class EncodeMixin:
         Returns:
             The enriched StructuredMemory (or original if enrichment fails).
         """
-        from engram.workflows.structure import run_structure
-
+        assert self.workflow_backend is not None, "workflow_backend not initialized"
         try:
-            result = await run_structure(
+            result = await self.workflow_backend.run_structure(
                 episode=episode,
                 storage=self.storage,
                 embedder=self.embedder,
@@ -305,6 +309,9 @@ class EncodeMixin:
         Processes all structured memories that haven't been enriched yet.
         Call this at end of session or as a batch job.
 
+        Uses the configured workflow backend for execution, which may provide
+        durability guarantees depending on the backend (DBOS, Temporal, Prefect).
+
         Args:
             user_id: User ID for multi-tenancy.
             org_id: Optional organization ID filter.
@@ -320,9 +327,8 @@ class EncodeMixin:
             print(f"Enriched {count} memories")
             ```
         """
-        from engram.workflows.structure import run_structure_batch
-
-        results = await run_structure_batch(
+        assert self.workflow_backend is not None, "workflow_backend not initialized"
+        results = await self.workflow_backend.run_structure_batch(
             storage=self.storage,
             embedder=self.embedder,
             user_id=user_id,
@@ -345,14 +351,15 @@ class EncodeMixin:
     ) -> None:
         """Trigger consolidation for high-importance episodes.
 
+        Uses the configured workflow backend for execution.
+
         Args:
             user_id: User ID for multi-tenancy.
             org_id: Optional organization ID.
         """
-        from engram.workflows.consolidation import run_consolidation
-
+        assert self.workflow_backend is not None, "workflow_backend not initialized"
         try:
-            result = await run_consolidation(
+            result = await self.workflow_backend.run_consolidation(
                 storage=self.storage,
                 embedder=self.embedder,
                 user_id=user_id,

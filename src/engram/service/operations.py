@@ -16,6 +16,7 @@ from .models import RecallResult, SourceEpisodeSummary, VerificationResult
 if TYPE_CHECKING:
     from engram.embeddings import Embedder
     from engram.storage import EngramStorage
+    from engram.workflows.backend import WorkflowBackend
     from engram.workflows.consolidation import ConsolidationResult
     from engram.workflows.promotion import SynthesisResult
 
@@ -26,11 +27,13 @@ class OperationsMixin:
     Expects these attributes from the base class:
     - storage: EngramStorage
     - embedder: Embedder
+    - workflow_backend: WorkflowBackend
     - _working_memory: list[Episode]
     """
 
     storage: EngramStorage
     embedder: Embedder
+    workflow_backend: WorkflowBackend | None  # Always set after __post_init__
     _working_memory: list[Episode]
 
     async def get_sources(
@@ -249,6 +252,9 @@ class OperationsMixin:
         Based on Complementary Learning Systems (McClelland et al., 1995):
         hippocampus (episodic) → neocortex (semantic) transfer with compression.
 
+        Uses the configured workflow backend for execution, which may provide
+        durability guarantees depending on the backend (DBOS, Temporal, Prefect).
+
         Args:
             user_id: User ID for multi-tenancy isolation.
             org_id: Optional organization ID for further isolation.
@@ -268,9 +274,8 @@ class OperationsMixin:
             print(f"Compression ratio: {result.compression_ratio:.1f}:1")
             ```
         """
-        from engram.workflows.consolidation import run_consolidation
-
-        return await run_consolidation(
+        assert self.workflow_backend is not None, "workflow_backend not initialized"
+        return await self.workflow_backend.run_consolidation(
             storage=self.storage,
             embedder=self.embedder,
             user_id=user_id,
@@ -295,6 +300,9 @@ class OperationsMixin:
 
         Design decision: ONE procedural per user (replaces existing).
 
+        Uses the configured workflow backend for execution, which may provide
+        durability guarantees depending on the backend (DBOS, Temporal, Prefect).
+
         Args:
             user_id: User ID for multi-tenancy isolation.
             org_id: Optional organization ID for further isolation.
@@ -316,9 +324,8 @@ class OperationsMixin:
                 print(f"Updated procedural: {result.procedural_id}")
             ```
         """
-        from engram.workflows.promotion import run_synthesis
-
-        return await run_synthesis(
+        assert self.workflow_backend is not None, "workflow_backend not initialized"
+        return await self.workflow_backend.run_promotion(
             storage=self.storage,
             embedder=self.embedder,
             user_id=user_id,

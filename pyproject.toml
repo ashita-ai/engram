@@ -76,7 +76,6 @@ cohere = ["cohere>=5.0"]
 sentence-transformers = ["sentence-transformers>=2.3"]
 
 # Durable execution backends
-temporal = ["temporalio>=1.4"]
 prefect = ["prefect>=2.0"]
 
 # All providers
@@ -117,6 +116,21 @@ warn_return_any = true
 warn_unused_ignores = true
 disallow_untyped_defs = true
 plugins = ["pydantic.mypy"]
+
+# Prefect is an optional dependency - ignore missing imports when not installed
+[[tool.mypy.overrides]]
+module = "prefect.*"
+ignore_missing_imports = true
+
+# Workflow modules use optional Prefect - relax checks when Prefect types unavailable
+[[tool.mypy.overrides]]
+module = [
+    "engram.workflows.backend",
+    "engram.workflows.structure",
+]
+# When Prefect not installed, @flow decorator is untyped
+disallow_untyped_decorators = false
+warn_return_any = false
 
 [tool.ruff]
 line-length = 100

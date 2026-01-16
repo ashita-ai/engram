@@ -36,6 +36,11 @@ from engram.config import Settings
 from engram.embeddings import Embedder, get_embedder
 from engram.models import Episode
 from engram.storage import EngramStorage
+from engram.workflows.backend import (
+    InProcessBackend,
+    WorkflowBackend,
+    get_workflow_backend,
+)
 
 from .encode import EncodeMixin
 from .operations import OperationsMixin
@@ -55,21 +60,28 @@ class EngramService(EncodeMixin, RecallMixin, OperationsMixin):
     - get_working_memory(): Get current session's episodes
     - clear_working_memory(): Clear session context
 
-    Uses dependency injection for storage and embeddings,
+    Uses dependency injection for storage, embeddings, and workflow backend,
     making it easy to test and configure.
 
     Attributes:
         storage: Storage backend (Qdrant).
         embedder: Embedding provider (OpenAI or FastEmbed).
         settings: Configuration settings.
+        workflow_backend: Backend for durable workflow execution (optional, defaults to InProcessBackend).
     """
 
     storage: EngramStorage
     embedder: Embedder
     settings: Settings
+    workflow_backend: WorkflowBackend | None = field(default=None)
 
     # Working memory: in-memory episodes for current session (not persisted separately)
     _working_memory: list[Episode] = field(default_factory=list, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Initialize optional fields after dataclass construction."""
+        if self.workflow_backend is None:
+            self.workflow_backend = InProcessBackend(self.settings)
 
     @classmethod
     def create(cls, settings: Settings | None = None) -> EngramService:
@@ -80,12 +92,27 @@ class EngramService(EncodeMixin, RecallMixin, OperationsMixin):
 
         Returns:
             Configured EngramService instance.
+
+        Example:
+            ```python
+            # Use default settings (ENGRAM_DURABLE_BACKEND env var)
+            async with EngramService.create() as engram:
+                ...
+
+            # Use specific workflow backend
+            settings = Settings(durable_backend="dbos")
+            async with EngramService.create(settings) as engram:
+                ...
+            ```
         """
         if settings is None:
             settings = Settings()
 
         # Create embedder first to get dimensions
         embedder = get_embedder(settings)
+
+        # Create workflow backend based on settings
+        workflow_backend = get_workflow_backend(settings)
 
         return cls(
             storage=EngramStorage(
@@ -96,6 +123,7 @@ class EngramService(EncodeMixin, RecallMixin, OperationsMixin):
             ),
             embedder=embedder,
             settings=settings,
+            workflow_backend=workflow_backend,
         )
 
     async def initialize(self) -> None:

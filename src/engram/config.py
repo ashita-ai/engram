@@ -125,23 +125,12 @@ class Settings(BaseSettings):
     )
 
     # Durable execution
-    durable_backend: Literal["dbos", "temporal", "prefect"] = Field(
-        default="dbos",
-        description="Workflow backend for durable execution",
-    )
-
-    # Temporal settings (only used if durable_backend == "temporal")
-    temporal_address: str = Field(
-        default="localhost:7233",
-        description="Temporal server address",
-    )
-    temporal_namespace: str = Field(
-        default="default",
-        description="Temporal namespace",
-    )
-    temporal_task_queue: str = Field(
-        default="engram-consolidation",
-        description="Temporal task queue name",
+    durable_backend: Literal["inprocess", "dbos", "prefect"] = Field(
+        default="inprocess",
+        description=(
+            "Workflow backend: 'inprocess' (no durability), 'dbos' (SQLite/PostgreSQL), "
+            "or 'prefect' (flow orchestration)"
+        ),
     )
 
     # Prefect settings (only used if durable_backend == "prefect")
