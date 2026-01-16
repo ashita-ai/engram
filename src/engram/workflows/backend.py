@@ -795,7 +795,7 @@ def get_workflow_backend(settings: Settings) -> WorkflowBackend:
         return PrefectBackend(settings)
     else:
         raise ValueError(
-            f"Unknown workflow backend: {backend_type}. " "Use 'inprocess', 'dbos', or 'prefect'."
+            f"Unknown workflow backend: {backend_type}. Use 'inprocess', 'dbos', or 'prefect'."
         )
 
 
