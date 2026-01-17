@@ -45,25 +45,14 @@ async def cleanup_user(client: httpx.AsyncClient) -> None:
         print(f"Cleaned up {data.get('total_deleted', 0)} existing memories")
 
 
-async def encode_memories(client: httpx.AsyncClient) -> list[str]:
-    """Encode test memories for demonstration."""
-    memories = [
-        # Related memories about preferences
-        ("I love drinking coffee every morning", "user"),
-        ("My favorite coffee is Ethiopian single-origin", "user"),
-        ("I usually have two cups of coffee before noon", "user"),
-        # Contradictory memory
-        ("I hate coffee, it makes me jittery", "user"),
-        # Different topic - work
-        ("I work as a software engineer at a startup", "user"),
-        ("My team uses Python and TypeScript", "user"),
-        # Another different topic - hobbies
-        ("I enjoy hiking on weekends", "user"),
-        ("Photography is my main hobby", "user"),
-    ]
-
+async def encode_batch(
+    client: httpx.AsyncClient,
+    memories: list[tuple[str, str]],
+    batch_name: str,
+) -> list[str]:
+    """Encode a batch of memories."""
     episode_ids = []
-    print("\n=== ENCODING MEMORIES ===")
+    print(f"\n--- Encoding {batch_name} ---")
     for content, role in memories:
         response = await client.post(
             f"{BASE_URL}/encode",
@@ -71,7 +60,7 @@ async def encode_memories(client: httpx.AsyncClient) -> list[str]:
                 "content": content,
                 "role": role,
                 "user_id": USER_ID,
-                "enrich": True,  # Enable LLM enrichment
+                "enrich": True,
             },
         )
         if response.status_code == 201:
@@ -80,8 +69,68 @@ async def encode_memories(client: httpx.AsyncClient) -> list[str]:
             print(f"  Encoded: {content[:50]}...")
         else:
             print(f"  ERROR encoding: {response.text}")
-
     return episode_ids
+
+
+async def consolidate(client: httpx.AsyncClient) -> int:
+    """Run consolidation and return number of semantic memories created."""
+    response = await client.post(
+        f"{BASE_URL}/workflows/consolidate",
+        json={"user_id": USER_ID},
+    )
+    if response.status_code == 200:
+        data = response.json()
+        created = data.get("semantic_memories_created", 0)
+        print(f"  Consolidation: created {created} semantic memories")
+        return created
+    print(f"  Consolidation error: {response.status_code}")
+    return 0
+
+
+async def encode_memories(client: httpx.AsyncClient) -> list[str]:
+    """Encode test memories for demonstration."""
+    # For contradiction detection to work, we need MULTIPLE semantic memories.
+    # We'll encode in batches with consolidation between them.
+    all_episode_ids = []
+
+    print("\n=== ENCODING MEMORIES ===")
+
+    # Batch 1: Coffee lover (will become semantic memory 1)
+    batch1 = [
+        ("I love drinking coffee every morning", "user"),
+        ("My favorite coffee is Ethiopian single-origin", "user"),
+        ("I usually have two cups of coffee before noon", "user"),
+    ]
+    all_episode_ids.extend(await encode_batch(client, batch1, "Batch 1: Coffee lover"))
+
+    # Consolidate to create first semantic memory
+    print("\n  Running consolidation after batch 1...")
+    await consolidate(client)
+
+    # Batch 2: Coffee hater (contradicts batch 1 - will become semantic memory 2)
+    batch2 = [
+        ("I hate coffee, it makes me jittery", "user"),
+        ("I've completely quit drinking coffee", "user"),
+        ("Tea is my preferred beverage, never coffee", "user"),
+    ]
+    all_episode_ids.extend(await encode_batch(client, batch2, "Batch 2: Coffee hater"))
+
+    # Consolidate to create second semantic memory (contradicts first)
+    print("\n  Running consolidation after batch 2...")
+    await consolidate(client)
+
+    # Batch 3: Work and hobbies (different topics for diversity demo)
+    batch3 = [
+        ("I work as a software engineer at a startup", "user"),
+        ("My team uses Python and TypeScript", "user"),
+        ("I enjoy hiking on weekends", "user"),
+        ("Photography is my main hobby", "user"),
+    ]
+    all_episode_ids.extend(await encode_batch(client, batch3, "Batch 3: Work & hobbies"))
+
+    # Don't consolidate batch 3 yet - we want some episodic memories for other demos
+
+    return all_episode_ids
 
 
 async def demo_query_expansion(client: httpx.AsyncClient) -> None:
@@ -192,39 +241,51 @@ async def demo_contradiction_detection(client: httpx.AsyncClient) -> None:
     print("CONTRADICTION DETECTION DEMO")
     print("=" * 60)
     print("\nContradiction detection finds conflicting memories using")
-    print("semantic similarity + LLM analysis.\n")
+    print("semantic similarity + LLM analysis.")
+    print("\nWe created 2 semantic memories during encoding:")
+    print("  1. 'Coffee lover' - loves coffee, drinks it every morning")
+    print("  2. 'Coffee hater' - hates coffee, quit drinking it")
+    print("\nThese should conflict!\n")
 
-    # First, trigger consolidation to create semantic memories
-    print("Triggering consolidation to create semantic memories...")
+    # First, list the semantic memories we have
+    print("--- Current Semantic Memories ---")
     response = await client.post(
-        f"{BASE_URL}/workflows/consolidate",
-        json={"user_id": USER_ID},
+        f"{BASE_URL}/recall",
+        json={
+            "query": "coffee",
+            "user_id": USER_ID,
+            "limit": 10,
+            "memory_types": ["semantic"],
+        },
     )
     if response.status_code == 200:
         data = response.json()
-        print(f"  Created {data.get('semantic_memories_created', 0)} semantic memories")
-    else:
-        print(f"  Consolidation response: {response.status_code}")
+        print(f"Found {data['count']} semantic memories about coffee:")
+        for r in data["results"]:
+            if r["memory_type"] == "semantic":
+                print(f"  - {r['content'][:80]}...")
 
     # Detect conflicts
-    print("\nDetecting contradictions in semantic memories...")
+    print("\n--- Detecting Contradictions ---")
     response = await client.post(
         f"{BASE_URL}/conflicts/detect",
         json={
             "user_id": USER_ID,
             "memory_type": "semantic",
-            "similarity_threshold": 0.3,  # Lower threshold to find more potential conflicts
+            "similarity_threshold": 0.3,
         },
     )
     if response.status_code == 200:
         data = response.json()
         print(f"\nConflicts found: {data['conflicts_found']}")
+        if data["conflicts_found"] == 0:
+            print("  (No conflicts detected - memories may not be similar enough)")
         for conflict in data["conflicts"]:
             print(f"\n  Conflict ID: {conflict['id']}")
             print(f"  Type: {conflict['conflict_type']}")
             print(f"  Confidence: {conflict['confidence']:.2f}")
-            print(f"  Memory A: {conflict['memory_a_content'][:50]}...")
-            print(f"  Memory B: {conflict['memory_b_content'][:50]}...")
+            print(f"  Memory A: {conflict['memory_a_content'][:70]}...")
+            print(f"  Memory B: {conflict['memory_b_content'][:70]}...")
             print(f"  Explanation: {conflict['explanation']}")
     else:
         print(f"ERROR: {response.text}")
