@@ -303,6 +303,38 @@ class TestRecallEndpoint:
 
         assert response.status_code == 422
 
+    def test_recall_with_expand_query(self, client, mock_service):
+        """Should pass expand_query parameter to service."""
+        mock_service.recall.return_value = []
+
+        response = client.post(
+            "/api/v1/recall",
+            json={
+                "query": "email address",
+                "user_id": "user_123",
+                "expand_query": True,
+            },
+        )
+
+        assert response.status_code == 200
+        mock_service.recall.assert_called_once()
+        call_kwargs = mock_service.recall.call_args.kwargs
+        assert call_kwargs["expand_query"] is True
+
+    def test_recall_expand_query_default_false(self, client, mock_service):
+        """Should default expand_query to False."""
+        mock_service.recall.return_value = []
+
+        response = client.post(
+            "/api/v1/recall",
+            json={"query": "hello", "user_id": "user_123"},
+        )
+
+        assert response.status_code == 200
+        mock_service.recall.assert_called_once()
+        call_kwargs = mock_service.recall.call_args.kwargs
+        assert call_kwargs["expand_query"] is False
+
     def test_recall_service_not_initialized(self):
         """Should return 503 when service not initialized."""
         app = FastAPI()

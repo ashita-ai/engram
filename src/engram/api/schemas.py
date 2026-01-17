@@ -177,6 +177,10 @@ class RecallRequest(BaseModel):
         le=1.0,
         description="Diversity parameter for MMR reranking (0.0-1.0). Higher values return more diverse results.",
     )
+    expand_query: bool = Field(
+        default=False,
+        description="Expand query with LLM-generated related terms for better recall",
+    )
 
 
 class SourceEpisodeSummary(BaseModel):

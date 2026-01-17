@@ -16,6 +16,7 @@ from engram.models import AuditEntry, Episode, Staleness
 
 from .helpers import cosine_similarity, mmr_rerank
 from .models import RecallResult, SourceEpisodeSummary
+from .query_expansion import get_combined_embedding
 
 if TYPE_CHECKING:
     from engram.config import Settings
@@ -57,6 +58,7 @@ class RecallMixin:
         negation_similarity_threshold: float | None = 0.75,
         include_system_prompts: bool = False,
         diversity: float = 0.0,
+        expand_query: bool = False,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
@@ -90,6 +92,7 @@ class RecallMixin:
             diversity: Diversity parameter for MMR reranking (0.0-1.0). Higher values
                 return more diverse results at the cost of some relevance. 0.0 = no
                 diversity reranking (default), 0.3 = recommended balance.
+            expand_query: Expand query with LLM-generated related terms for better recall.
 
         Returns:
             List of RecallResult sorted by similarity score (or MMR score if diversity > 0).
@@ -100,8 +103,12 @@ class RecallMixin:
         all_types = {"episodic", "structured", "semantic", "procedural", "working"}
         types_to_search = set(memory_types) if memory_types is not None else all_types
 
-        # Generate query embedding
-        query_vector = await self.embedder.embed(query)
+        # Generate query embedding (with optional expansion)
+        query_vector = await get_combined_embedding(
+            query=query,
+            embedder=self.embedder,
+            expand=expand_query,
+        )
 
         # Use larger search limit when negation filtering is enabled
         search_limit = limit * 3 if apply_negation_filter else limit
