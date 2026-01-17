@@ -84,7 +84,9 @@ Search memories by semantic similarity.
   "follow_links": true,
   "max_hops": 2,
   "freshness": "best_effort",
-  "as_of": "2025-01-01T00:00:00Z"
+  "as_of": "2025-01-01T00:00:00Z",
+  "expand_query": false,
+  "diversity": 0.0
 }
 ```
 
@@ -102,6 +104,8 @@ Search memories by semantic similarity.
 | `max_hops` | int | No | `2` | Max link traversal depth (1-5) |
 | `freshness` | string | No | `"best_effort"` | `best_effort` or `fresh_only` |
 | `as_of` | datetime | No | `null` | Bi-temporal query: only memories derived before this time |
+| `expand_query` | bool | No | `false` | Use LLM to expand query with related terms |
+| `diversity` | float | No | `0.0` | Result diversity via MMR reranking (0.0-1.0) |
 
 **Response (200 OK):**
 ```json

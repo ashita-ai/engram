@@ -233,6 +233,7 @@ async def recall(
                 max_hops=request.max_hops,
                 freshness=request.freshness,
                 include_system_prompts=request.include_system_prompts,
+                diversity=request.diversity,
             )
 
         result_responses = [

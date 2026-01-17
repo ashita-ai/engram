@@ -171,6 +171,12 @@ class RecallRequest(BaseModel):
         default=False,
         description="Include system prompt episodes in results (default False)",
     )
+    diversity: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Diversity parameter for MMR reranking (0.0-1.0). Higher values return more diverse results.",
+    )
 
 
 class SourceEpisodeSummary(BaseModel):
