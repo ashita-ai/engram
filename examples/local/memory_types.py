@@ -218,14 +218,14 @@ def main() -> None:
         org_id="demo_org",
         confidence=ConfidenceScore.for_inferred(supporting_episodes=3),
         trigger_context="code style, formatting, linting",
-        access_count=5,
+        retrieval_count=5,
     )
 
     print("  Example ProceduralMemory:")
     print(f"    ID: {procedural.id}")
     print(f'    Content: "{procedural.content[:60]}..."')
     print(f'    Trigger Context: "{procedural.trigger_context}"')
-    print(f"    Access Count: {procedural.access_count}")
+    print(f"    Retrieval Count: {procedural.retrieval_count}")
     print(f"    Confidence: {procedural.confidence.value:.0%}")
 
     print("""
@@ -234,7 +234,7 @@ def main() -> None:
   - Synthesized from all semantic memories for a user
   - One per user (holistic profile)
   - Trigger context specifies when to activate
-  - Access count tracks usage
+  - Retrieval count tracks usage
     """)
 
     # =========================================================================
