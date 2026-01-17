@@ -6,6 +6,78 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
+class RerankWeights(BaseModel):
+    """Configurable weights for context-aware reranking.
+
+    The rerank formula combines multiple signals:
+        final_score = (
+            similarity * similarity_weight +
+            recency_score * recency_weight +
+            confidence * confidence_weight +
+            session_match * session_weight +
+            access_boost * access_weight
+        )
+
+    Weights should sum to 1.0 for normalized scores.
+
+    Attributes:
+        similarity: Weight for vector similarity (0.50 default).
+        recency: Weight for time decay (0.20 default).
+        confidence: Weight for memory confidence (0.15 default).
+        session: Weight for same-session bonus (0.10 default).
+        access: Weight for frequently accessed memories (0.05 default).
+        recency_half_life_hours: Hours for recency score to halve (24 default).
+        max_access_boost: Maximum boost for high-access memories (0.1 default).
+    """
+
+    similarity: float = Field(
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Weight for vector similarity score",
+    )
+    recency: float = Field(
+        default=0.20,
+        ge=0.0,
+        le=1.0,
+        description="Weight for recency/time decay",
+    )
+    confidence: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        description="Weight for memory confidence score",
+    )
+    session: float = Field(
+        default=0.10,
+        ge=0.0,
+        le=1.0,
+        description="Weight for same-session bonus",
+    )
+    access: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Weight for frequently accessed memories",
+    )
+    recency_half_life_hours: float = Field(
+        default=24.0,
+        ge=0.1,
+        description="Hours for recency score to halve",
+    )
+    max_access_boost: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Maximum boost for high-access memories",
+    )
+
+    def validate_weights_sum(self) -> bool:
+        """Check if weights sum to approximately 1.0."""
+        total = self.similarity + self.recency + self.confidence + self.session + self.access
+        return abs(total - 1.0) < 0.01
+
+
 class ConfidenceWeights(BaseModel):
     """Configurable weights for composite confidence scoring.
 
@@ -201,6 +273,16 @@ class Settings(BaseSettings):
         ge=1,
         le=20,
         description="Number of similar memories to check for surprise calculation",
+    )
+
+    # Context-aware Reranking
+    rerank_enabled: bool = Field(
+        default=True,
+        description="Enable context-aware reranking of recall results",
+    )
+    rerank_weights: RerankWeights = Field(
+        default_factory=RerankWeights,
+        description="Weights for context-aware reranking signals",
     )
 
     # Logging

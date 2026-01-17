@@ -266,6 +266,7 @@ class TestEngramServiceRecall:
         results = await mock_service.recall(
             query="hello",
             user_id="user_123",
+            rerank=False,  # Disable reranking to test raw similarity score
         )
 
         assert len(results) >= 1
@@ -290,6 +291,7 @@ class TestEngramServiceRecall:
         results = await mock_service.recall(
             query="email",
             user_id="user_123",
+            rerank=False,  # Disable reranking to test raw similarity score
         )
 
         struct_results = [r for r in results if r.memory_type == "structured"]
@@ -355,6 +357,7 @@ class TestEngramServiceRecall:
         results = await mock_service.recall(
             query="response preferences",
             user_id="user_123",
+            rerank=False,  # Disable reranking to test raw similarity score
         )
 
         proc_results = [r for r in results if r.memory_type == "procedural"]
