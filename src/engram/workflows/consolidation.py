@@ -76,11 +76,6 @@ class ConsolidationResult(BaseModel):
     semantic_memories_created: int = Field(ge=0)
     links_created: int = Field(ge=0, default=0)
     compression_ratio: float = Field(ge=0.0, default=0.0)
-    # Legacy fields for backwards compatibility
-    negations_created: int = Field(ge=0, default=0)
-    evolutions_applied: int = Field(ge=0, default=0)
-    memories_strengthened: int = Field(ge=0, default=0)
-    contradictions_found: list[str] = Field(default_factory=list)
 
 
 def format_episodes_for_llm(episodes: list[dict[str, str]]) -> str:

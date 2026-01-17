@@ -57,7 +57,7 @@ from .consolidation import (
     run_consolidation_from_structured,
 )
 from .decay import DecayResult, run_decay
-from .promotion import PromotionResult, run_promotion
+from .promotion import SynthesisResult, run_synthesis
 from .structure import (
     LLMExtractionOutput,
     StructureResult,
@@ -232,7 +232,7 @@ Apply conservative decay - when uncertain, retain.""",
         return self._decay_agent
 
 
-# Convenience functions for simple usage (maintain backward compatibility)
+# Global factory instance for simple usage
 _factory: DurableAgentFactory | None = None
 
 
@@ -296,7 +296,7 @@ __all__ = [
     "PrefectBackend",
     "get_workflow_backend",
     "get_inprocess_backend",
-    # Legacy DurableAgentFactory (for Pydantic AI agent wrapping)
+    # Agent factory (for Pydantic AI agent wrapping)
     "DurableAgentFactory",
     "DurableBackend",
     "init_workflows",
@@ -306,7 +306,7 @@ __all__ = [
     # Workflow results
     "ConsolidationResult",
     "DecayResult",
-    "PromotionResult",
+    "SynthesisResult",
     "ExtractedFact",
     "IdentifiedLink",
     "LLMExtractionResult",
@@ -316,7 +316,7 @@ __all__ = [
     "run_consolidation",
     "run_consolidation_from_structured",
     "run_decay",
-    "run_promotion",
+    "run_synthesis",
     "run_structure",
     "run_structure_batch",
 ]

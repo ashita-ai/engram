@@ -7,46 +7,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from engram.workflows.promotion import (
-    PromotionResult,
     SynthesisOutput,
     SynthesisResult,
     _format_semantics_for_llm,
-    run_promotion,
     run_synthesis,
 )
-
-
-class TestPromotionResult:
-    """Tests for PromotionResult model (legacy)."""
-
-    def test_create_result(self) -> None:
-        """Test creating promotion result."""
-        result = PromotionResult(
-            memories_analyzed=10,
-            procedural_created=1,
-            patterns_detected=["Pattern A"],
-        )
-        assert result.memories_analyzed == 10
-        assert result.procedural_created == 1
-        assert len(result.patterns_detected) == 1
-
-    def test_create_empty_result(self) -> None:
-        """Test creating empty result."""
-        result = PromotionResult(
-            memories_analyzed=0,
-            procedural_created=0,
-        )
-        assert result.memories_analyzed == 0
-        assert result.procedural_created == 0
-        assert result.patterns_detected == []
-
-    def test_counts_non_negative(self) -> None:
-        """Test counts cannot be negative."""
-        with pytest.raises(ValueError):
-            PromotionResult(
-                memories_analyzed=-1,
-                procedural_created=0,
-            )
 
 
 class TestSynthesisResult:
@@ -320,62 +285,3 @@ class TestRunSynthesis:
         call_args = mock_storage.store_procedural.call_args
         procedural = call_args[0][0]
         assert set(procedural.source_episode_ids) == {"ep_001", "ep_002", "ep_003"}
-
-
-class TestRunPromotionLegacy:
-    """Tests for legacy run_promotion wrapper."""
-
-    @pytest.mark.asyncio
-    async def test_returns_promotion_result(self) -> None:
-        """Test that run_promotion returns PromotionResult."""
-        mock_storage = AsyncMock()
-        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
-
-        mock_embedder = AsyncMock()
-
-        result = await run_promotion(
-            storage=mock_storage,
-            embedder=mock_embedder,
-            user_id="test_user",
-        )
-
-        assert isinstance(result, PromotionResult)
-        assert result.memories_analyzed == 0
-        assert result.procedural_created == 0
-
-    @pytest.mark.asyncio
-    async def test_converts_synthesis_result(self) -> None:
-        """Test conversion from SynthesisResult to PromotionResult."""
-        from engram.models import SemanticMemory
-
-        memories = [
-            SemanticMemory(
-                content="User prefers Python",
-                user_id="test_user",
-                embedding=[0.1] * 384,
-            ),
-        ]
-
-        mock_storage = AsyncMock()
-        mock_storage.list_semantic_memories = AsyncMock(return_value=memories)
-        mock_storage.list_procedural_memories = AsyncMock(return_value=[])
-        mock_storage.store_procedural = AsyncMock(return_value="proc_123")
-
-        mock_embedder = AsyncMock()
-        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
-
-        mock_synthesis = SynthesisOutput(behavioral_profile="Profile.")
-
-        with patch(
-            "engram.workflows.promotion._synthesize_behavioral_profile",
-            return_value=mock_synthesis,
-        ):
-            result = await run_promotion(
-                storage=mock_storage,
-                embedder=mock_embedder,
-                user_id="test_user",
-            )
-
-        assert isinstance(result, PromotionResult)
-        assert result.memories_analyzed == 1
-        assert result.procedural_created == 1  # Created = 1

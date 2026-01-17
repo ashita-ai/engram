@@ -26,9 +26,6 @@ from .models import (
     VerificationResult,
 )
 
-# Backwards compatibility alias
-_calculate_importance = calculate_importance
-
 __all__ = [
     "ConflictDetection",
     "IMPORTANCE_KEYWORDS",
@@ -37,7 +34,6 @@ __all__ = [
     "RecallResult",
     "SourceEpisodeSummary",
     "VerificationResult",
-    "_calculate_importance",
     "calculate_importance",
     "cosine_similarity",
 ]

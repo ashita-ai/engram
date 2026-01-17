@@ -106,7 +106,11 @@ class ProceduralMemory(MemoryBase):
         self.last_accessed = datetime.now(UTC)
 
     def reinforce(self) -> None:
-        """Alias for record_access() for backwards compatibility."""
+        """Reinforce this memory through retrieval or synthesis.
+
+        Semantic alias for record_access() used in consolidation workflows
+        when procedural patterns are strengthened through repeated use.
+        """
         self.record_access()
 
     def add_link(self, memory_id: str, link_type: str = "related") -> None:

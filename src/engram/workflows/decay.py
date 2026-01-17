@@ -166,21 +166,25 @@ async def run_decay(
         f"{low_access_archived} low-access archived, {deleted} deleted"
     )
 
-    # 5. Run promotion workflow if requested
+    # 5. Run synthesis workflow if requested
     procedural_promoted = 0
     if run_promotion and embedder is not None:
-        from engram.workflows.promotion import run_promotion as _run_promotion
+        from engram.workflows.promotion import run_synthesis
 
-        promotion_result = await _run_promotion(
+        synthesis_result = await run_synthesis(
             storage=storage,
             embedder=embedder,
             user_id=user_id,
             org_id=org_id,
         )
-        procedural_promoted = promotion_result.procedural_created
-        logger.info(f"Promotion complete: {procedural_promoted} procedural memories created")
+        procedural_promoted = (
+            1 if synthesis_result.procedural_created or synthesis_result.procedural_updated else 0
+        )
+        logger.info(
+            f"Synthesis complete: {procedural_promoted} procedural memories created/updated"
+        )
     elif run_promotion and embedder is None:
-        logger.warning("Skipping promotion: embedder not provided")
+        logger.warning("Skipping synthesis: embedder not provided")
 
     return DecayResult(
         memories_updated=updated,

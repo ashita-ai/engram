@@ -352,11 +352,21 @@ Each call increases `consolidation_strength` by 0.1 and increments `consolidatio
 
 **How we implement it**: Working memory → Episodic → StructuredMemory → SemanticMemory → ProceduralMemory hierarchy. Each tier serves different retention and retrieval purposes.
 
+### Surprise-Based Importance (Adaptive Compression)
+
+**What it is**: Novel information receives higher importance scores than redundant content.
+
+**Primary Research**:
+> Nagy et al. (2025). "Adaptive Compression for Memory-Augmented Language Models." https://arxiv.org/abs/2502.14842
+
+**Key insight**: Information-theoretic surprise (low similarity to existing memories) indicates novel, valuable content worth retaining.
+
+**How we implement it**: During episode encoding, `_calculate_surprise()` computes novelty by comparing embeddings to existing memories. Low similarity = high surprise = boosted importance score. Controlled by `surprise_scoring_enabled`, `surprise_weight` (default 0.15), and `surprise_search_limit` settings.
+
 ### What we DON'T implement
 
 - **Exact biological mechanisms**: We use cognitive science as inspiration, not blueprint
 - **True context selectivity**: Tomé et al. (2024) describes how engrams become more context-specific via inhibitory plasticity. We don't model this — we track consolidation involvement instead
-- **Surprise-based importance**: Nagy et al. (2025) adaptive compression uses information-theoretic surprise. Future work (see #106)
 - **Retrieval-induced forgetting**: Removed in v0.x due to context mismatch between human lab experiments and AI systems
 
 ---

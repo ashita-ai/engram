@@ -263,40 +263,8 @@ async def run_synthesis(
         )
 
 
-# Legacy exports for backwards compatibility
-class PromotionResult(BaseModel):
-    """Legacy result class for backwards compatibility."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    memories_analyzed: int = Field(ge=0)
-    procedural_created: int = Field(ge=0)
-    patterns_detected: list[str] = Field(default_factory=list)
-
-
-async def run_promotion(
-    storage: EngramStorage,
-    embedder: Embedder,
-    user_id: str,
-    org_id: str | None = None,
-) -> PromotionResult:
-    """Legacy function - calls run_synthesis internally.
-
-    Deprecated: Use run_synthesis() instead.
-    """
-    result = await run_synthesis(storage, embedder, user_id, org_id)
-
-    return PromotionResult(
-        memories_analyzed=result.semantics_analyzed,
-        procedural_created=1 if result.procedural_created or result.procedural_updated else 0,
-        patterns_detected=[],
-    )
-
-
 __all__ = [
-    "PromotionResult",
     "SynthesisOutput",
     "SynthesisResult",
-    "run_promotion",
     "run_synthesis",
 ]

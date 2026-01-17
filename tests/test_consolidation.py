@@ -211,13 +211,11 @@ class TestConsolidationResult:
             semantic_memories_created=1,
             links_created=3,
             compression_ratio=10.0,
-            contradictions_found=["Conflict A", "Conflict B"],
         )
         assert result.episodes_processed == 10
         assert result.semantic_memories_created == 1
         assert result.links_created == 3
         assert result.compression_ratio == 10.0
-        assert len(result.contradictions_found) == 2
 
     def test_counts_non_negative(self) -> None:
         """Test counts cannot be negative."""
@@ -228,16 +226,14 @@ class TestConsolidationResult:
                 links_created=0,
             )
 
-    def test_legacy_fields_have_defaults(self) -> None:
-        """Test legacy fields have zero defaults."""
+    def test_default_values(self) -> None:
+        """Test default values for optional fields."""
         result = ConsolidationResult(
             episodes_processed=5,
             semantic_memories_created=1,
-            links_created=0,
         )
-        assert result.negations_created == 0
-        assert result.evolutions_applied == 0
-        assert result.memories_strengthened == 0
+        assert result.links_created == 0
+        assert result.compression_ratio == 0.0
 
 
 class TestFormatEpisodesForLLM:
@@ -691,26 +687,6 @@ class TestConsolidationLinking:
 
 class TestConsolidationStrengthening:
     """Tests for memory strengthening during consolidation (Testing Effect)."""
-
-    def test_consolidation_result_has_strengthened_field(self) -> None:
-        """Test ConsolidationResult includes memories_strengthened field."""
-        result = ConsolidationResult(
-            episodes_processed=5,
-            semantic_memories_created=1,
-            links_created=2,
-            evolutions_applied=1,
-            memories_strengthened=4,
-        )
-        assert result.memories_strengthened == 4
-
-    def test_consolidation_result_strengthened_default_zero(self) -> None:
-        """Test memories_strengthened defaults to 0."""
-        result = ConsolidationResult(
-            episodes_processed=1,
-            semantic_memories_created=1,
-            links_created=0,
-        )
-        assert result.memories_strengthened == 0
 
     @pytest.mark.asyncio
     async def test_existing_memory_strengthened_on_link(self) -> None:

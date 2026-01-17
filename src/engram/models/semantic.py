@@ -211,25 +211,6 @@ class SemanticMemory(MemoryBase):
         """Weaken memory (pruned or contradicted during consolidation)."""
         self.consolidation_strength = max(0.0, self.consolidation_strength - delta)
 
-    # Backwards compatibility aliases
-    def increase_selectivity(self, delta: float = 0.1) -> None:
-        """Deprecated: Use strengthen() instead."""
-        self.strengthen(delta)
-
-    def decrease_selectivity(self, delta: float = 0.1) -> None:
-        """Deprecated: Use weaken() instead."""
-        self.weaken(delta)
-
-    @property
-    def selectivity_score(self) -> float:
-        """Deprecated: Use consolidation_strength instead."""
-        return self.consolidation_strength
-
-    @selectivity_score.setter
-    def selectivity_score(self, value: float) -> None:
-        """Deprecated: Use consolidation_strength instead."""
-        self.consolidation_strength = value
-
     def record_access(self) -> None:
         """Record that this memory was accessed (activation tracking).
 

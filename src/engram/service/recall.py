@@ -452,7 +452,7 @@ class RecallMixin:
                     staleness=Staleness.FRESH,
                     consolidated_at=sem.derived_at.isoformat(),
                     metadata={
-                        "selectivity": sem.selectivity_score,
+                        "consolidation_strength": sem.consolidation_strength,
                         "derived_at": sem.derived_at.isoformat(),
                     },
                 )

@@ -430,20 +430,6 @@ class TestSemanticMemory:
         mem.weaken(delta=0.1)
         assert mem.consolidation_strength == 0.0
 
-    def test_backwards_compat_selectivity_property(self):
-        """Deprecated selectivity_score property should work for backwards compat."""
-        mem = SemanticMemory(content="Test", user_id="user_123")
-        mem.consolidation_strength = 0.5
-        assert mem.selectivity_score == 0.5  # Read via deprecated property
-        mem.selectivity_score = 0.7  # Write via deprecated property
-        assert mem.consolidation_strength == 0.7
-
-    def test_backwards_compat_increase_selectivity(self):
-        """Deprecated increase_selectivity should work for backwards compat."""
-        mem = SemanticMemory(content="Test", user_id="user_123")
-        mem.increase_selectivity()
-        assert mem.consolidation_strength == 0.1
-
     def test_str_representation(self):
         """String representation should show content preview."""
         mem = SemanticMemory(content="Short content", user_id="user_123")
