@@ -45,6 +45,15 @@ class ProceduralMemory(MemoryBase):
         default_factory=list,
         description="Semantic memories this was synthesized from",
     )
+    # Provenance tracking
+    derivation_method: str = Field(
+        default="synthesis:unknown",
+        description="How this memory was derived (e.g., 'synthesis:gpt-4o-mini')",
+    )
+    derivation_reasoning: str | None = Field(
+        default=None,
+        description="LLM's explanation for the behavioral pattern",
+    )
     related_ids: list[str] = Field(
         default_factory=list,
         description="Links to related memories",

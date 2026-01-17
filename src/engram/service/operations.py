@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Any
 
-from engram.models import Episode, Staleness
+from engram.models import Episode, ProvenanceChain, ProvenanceEvent, Staleness
 
 from .helpers import cosine_similarity
 from .models import RecallResult, SourceEpisodeSummary, VerificationResult
@@ -105,6 +105,252 @@ class OperationsMixin:
         episodes.sort(key=lambda e: e.timestamp)
 
         return episodes
+
+    async def get_provenance(
+        self,
+        memory_id: str,
+        user_id: str,
+    ) -> ProvenanceChain:
+        """Get complete provenance chain for a derived memory.
+
+        Traces a derived memory back through its entire derivation chain,
+        from source episodes through intermediate memories, recording
+        how and when each derivation occurred.
+
+        Args:
+            memory_id: ID of the memory to trace.
+            user_id: User ID for multi-tenancy isolation.
+
+        Returns:
+            ProvenanceChain with complete derivation history.
+
+        Raises:
+            ValueError: If memory type cannot be determined from ID prefix.
+            KeyError: If memory not found.
+
+        Example:
+            ```python
+            # Get full provenance for a semantic memory
+            chain = await engram.get_provenance("sem_abc123", user_id="u1")
+            print(f"Derived via: {chain.derivation_method}")
+            print(f"Source episodes: {len(chain.source_episodes)}")
+            for event in chain.timeline:
+                print(f"  {event.timestamp}: {event.description}")
+            ```
+        """
+        timeline: list[ProvenanceEvent] = []
+        source_episodes: list[dict[str, Any]] = []
+        intermediate_memories: list[dict[str, Any]] = []
+
+        if memory_id.startswith("struct_"):
+            structured = await self.storage.get_structured(memory_id, user_id)
+            if structured is None:
+                raise KeyError(f"StructuredMemory not found: {memory_id}")
+
+            # Get source episode
+            episode = await self.storage.get_episode(structured.source_episode_id, user_id)
+            if episode:
+                source_episodes.append(
+                    {
+                        "id": episode.id,
+                        "content": episode.content,
+                        "role": episode.role,
+                        "timestamp": episode.timestamp.isoformat(),
+                    }
+                )
+                timeline.append(
+                    ProvenanceEvent(
+                        timestamp=episode.timestamp,
+                        event_type="stored",
+                        description=f"Episode stored: {episode.id}",
+                        memory_id=episode.id,
+                    )
+                )
+
+            # Extraction event
+            timeline.append(
+                ProvenanceEvent(
+                    timestamp=structured.derived_at,
+                    event_type="extracted",
+                    description=f"StructuredMemory extracted via {structured.derivation_method}",
+                    memory_id=structured.id,
+                    metadata={
+                        "mode": structured.mode,
+                        "enriched": structured.enriched,
+                        "extract_counts": {
+                            "emails": len(structured.emails),
+                            "phones": len(structured.phones),
+                            "urls": len(structured.urls),
+                            "people": len(structured.people),
+                            "preferences": len(structured.preferences),
+                            "negations": len(structured.negations),
+                        },
+                    },
+                )
+            )
+
+            return ProvenanceChain(
+                memory_id=memory_id,
+                memory_type="structured",
+                derivation_method=structured.derivation_method,
+                derivation_reasoning=None,
+                derived_at=structured.derived_at,
+                source_episodes=source_episodes,
+                intermediate_memories=[],
+                timeline=sorted(timeline, key=lambda e: e.timestamp),
+            )
+
+        elif memory_id.startswith("sem_"):
+            semantic = await self.storage.get_semantic(memory_id, user_id)
+            if semantic is None:
+                raise KeyError(f"SemanticMemory not found: {memory_id}")
+
+            # Get source episodes
+            for ep_id in semantic.source_episode_ids:
+                episode = await self.storage.get_episode(ep_id, user_id)
+                if episode:
+                    source_episodes.append(
+                        {
+                            "id": episode.id,
+                            "content": episode.content,
+                            "role": episode.role,
+                            "timestamp": episode.timestamp.isoformat(),
+                        }
+                    )
+                    timeline.append(
+                        ProvenanceEvent(
+                            timestamp=episode.timestamp,
+                            event_type="stored",
+                            description=f"Episode stored: {episode.id}",
+                            memory_id=episode.id,
+                        )
+                    )
+
+            # Check if there are intermediate structured memories
+            for ep_id in semantic.source_episode_ids:
+                struct = await self.storage.get_structured_for_episode(ep_id, user_id)
+                if struct:
+                    intermediate_memories.append(
+                        {
+                            "id": struct.id,
+                            "type": "structured",
+                            "summary": struct.summary,
+                            "derivation_method": struct.derivation_method,
+                            "derived_at": struct.derived_at.isoformat(),
+                        }
+                    )
+                    timeline.append(
+                        ProvenanceEvent(
+                            timestamp=struct.derived_at,
+                            event_type="extracted",
+                            description=f"StructuredMemory extracted: {struct.id}",
+                            memory_id=struct.id,
+                        )
+                    )
+
+            # Consolidation event
+            timeline.append(
+                ProvenanceEvent(
+                    timestamp=semantic.derived_at,
+                    event_type="inferred",
+                    description=f"SemanticMemory consolidated via {semantic.derivation_method}",
+                    memory_id=semantic.id,
+                    metadata={
+                        "source_count": len(semantic.source_episode_ids),
+                        "consolidation_strength": semantic.consolidation_strength,
+                    },
+                )
+            )
+
+            return ProvenanceChain(
+                memory_id=memory_id,
+                memory_type="semantic",
+                derivation_method=semantic.derivation_method,
+                derivation_reasoning=semantic.derivation_reasoning,
+                derived_at=semantic.derived_at,
+                source_episodes=source_episodes,
+                intermediate_memories=intermediate_memories,
+                timeline=sorted(timeline, key=lambda e: e.timestamp),
+            )
+
+        elif memory_id.startswith("proc_"):
+            procedural = await self.storage.get_procedural(memory_id, user_id)
+            if procedural is None:
+                raise KeyError(f"ProceduralMemory not found: {memory_id}")
+
+            # Get source episodes
+            for ep_id in procedural.source_episode_ids:
+                episode = await self.storage.get_episode(ep_id, user_id)
+                if episode:
+                    source_episodes.append(
+                        {
+                            "id": episode.id,
+                            "content": episode.content,
+                            "role": episode.role,
+                            "timestamp": episode.timestamp.isoformat(),
+                        }
+                    )
+                    timeline.append(
+                        ProvenanceEvent(
+                            timestamp=episode.timestamp,
+                            event_type="stored",
+                            description=f"Episode stored: {episode.id}",
+                            memory_id=episode.id,
+                        )
+                    )
+
+            # Get intermediate semantic memories
+            for sem_id in procedural.source_semantic_ids:
+                semantic = await self.storage.get_semantic(sem_id, user_id)
+                if semantic:
+                    intermediate_memories.append(
+                        {
+                            "id": semantic.id,
+                            "type": "semantic",
+                            "content": semantic.content,
+                            "derivation_method": semantic.derivation_method,
+                            "derived_at": semantic.derived_at.isoformat(),
+                        }
+                    )
+                    timeline.append(
+                        ProvenanceEvent(
+                            timestamp=semantic.derived_at,
+                            event_type="inferred",
+                            description=f"SemanticMemory consolidated: {semantic.id}",
+                            memory_id=semantic.id,
+                        )
+                    )
+
+            # Synthesis event
+            timeline.append(
+                ProvenanceEvent(
+                    timestamp=procedural.derived_at,
+                    event_type="synthesized",
+                    description=f"ProceduralMemory synthesized via {procedural.derivation_method}",
+                    memory_id=procedural.id,
+                    metadata={
+                        "source_semantic_count": len(procedural.source_semantic_ids),
+                        "consolidation_strength": procedural.consolidation_strength,
+                    },
+                )
+            )
+
+            return ProvenanceChain(
+                memory_id=memory_id,
+                memory_type="procedural",
+                derivation_method=procedural.derivation_method,
+                derivation_reasoning=procedural.derivation_reasoning,
+                derived_at=procedural.derived_at,
+                source_episodes=source_episodes,
+                intermediate_memories=intermediate_memories,
+                timeline=sorted(timeline, key=lambda e: e.timestamp),
+            )
+
+        else:
+            raise ValueError(
+                f"Cannot determine memory type from ID: {memory_id}. "
+                "Expected prefix: struct_, sem_, or proc_"
+            )
 
     async def verify(
         self,

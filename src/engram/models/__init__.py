@@ -13,6 +13,7 @@ Supporting Types:
     - ExtractionMethod: How memory was extracted
     - QuickExtracts: Immediate regex extractions on Episode
     - ResolvedDate, Person, Preference, Negation: Structured extraction sub-types
+    - ProvenanceChain, ProvenanceEvent: Derivation tracking
     - AuditEntry: Operation logging
 """
 
@@ -20,6 +21,7 @@ from .audit import AuditEntry
 from .base import ConfidenceScore, ExtractionMethod, MemoryBase, Staleness, generate_id
 from .episode import Episode, QuickExtracts
 from .procedural import ProceduralMemory
+from .provenance import ProvenanceChain, ProvenanceEvent
 from .semantic import EvolutionEntry, SemanticMemory
 from .structured import Negation, Person, Preference, ResolvedDate, StructuredMemory
 
@@ -43,6 +45,9 @@ __all__ = [
     "Negation",
     # Supporting types
     "EvolutionEntry",
+    # Provenance
+    "ProvenanceChain",
+    "ProvenanceEvent",
     # Audit
     "AuditEntry",
 ]

@@ -222,12 +222,16 @@ async def run_synthesis(
     # 7. Create or update procedural memory
     source_semantic_ids = [sem.id for sem in semantics]
 
+    # Get derivation method from settings
+    from engram.config import settings
+
     if existing_procedural:
         # Update existing procedural memory
         existing_procedural.content = full_content
         existing_procedural.source_episode_ids = unique_episode_ids
         existing_procedural.source_semantic_ids = source_semantic_ids
         existing_procedural.embedding = embedding
+        existing_procedural.derivation_method = f"synthesis:{settings.consolidation_model}"
         existing_procedural.reinforce()  # Reinforce through synthesis
 
         await storage.update_procedural_memory(existing_procedural)
@@ -250,6 +254,7 @@ async def run_synthesis(
             user_id=user_id,
             org_id=org_id,
             embedding=embedding,
+            derivation_method=f"synthesis:{settings.consolidation_model}",
         )
 
         await storage.store_procedural(procedural)

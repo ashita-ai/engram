@@ -141,6 +141,12 @@ class StructuredMemory(MemoryBase):
     id: str = Field(default_factory=lambda: generate_id("struct"))
     source_episode_id: str = Field(description="ID of the Episode this was extracted from")
 
+    # Provenance tracking
+    derivation_method: str = Field(
+        default="fast:regex",
+        description="How this was extracted (e.g., 'fast:regex', 'rich:llm:gpt-4o-mini')",
+    )
+
     # Deterministic extraction (regex-based, 0.9 confidence)
     emails: list[str] = Field(default_factory=list, description="Email addresses (regex)")
     phones: list[str] = Field(default_factory=list, description="Phone numbers (regex)")
@@ -309,6 +315,8 @@ class StructuredMemory(MemoryBase):
         summary: str = "",
         keywords: list[str] | None = None,
         embedding: list[float] | None = None,
+        # Provenance
+        derivation_method: str | None = None,
     ) -> "StructuredMemory":
         """Create a rich-mode StructuredMemory (regex + LLM extracts).
 
@@ -337,6 +345,7 @@ class StructuredMemory(MemoryBase):
             summary: Episode summary.
             keywords: Key terms.
             embedding: Vector embedding.
+            derivation_method: How this was extracted (e.g., 'rich:llm:gpt-4o-mini').
 
         Returns:
             StructuredMemory instance in rich mode.
@@ -385,6 +394,7 @@ class StructuredMemory(MemoryBase):
             embedding=embedding,
             mode="rich",
             enriched=True,
+            derivation_method=derivation_method or "rich:llm:unknown",
             confidence=ConfidenceScore(
                 value=confidence_value,
                 extraction_method=ExtractionMethod.INFERRED,
