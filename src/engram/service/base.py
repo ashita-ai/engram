@@ -42,6 +42,8 @@ from engram.workflows.backend import (
     get_workflow_backend,
 )
 
+from .conflict_ops import ConflictMixin
+from .contradiction import ConflictDetection
 from .encode import EncodeMixin
 from .operations import OperationsMixin
 from .recall import RecallMixin
@@ -51,7 +53,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class EngramService(EncodeMixin, RecallMixin, OperationsMixin):
+class EngramService(EncodeMixin, RecallMixin, OperationsMixin, ConflictMixin):
     """High-level Engram service for encoding and recalling memories.
 
     This service provides a simple interface for:
@@ -59,6 +61,8 @@ class EngramService(EncodeMixin, RecallMixin, OperationsMixin):
     - recall(): Search memories by semantic similarity
     - get_working_memory(): Get current session's episodes
     - clear_working_memory(): Clear session context
+    - get_conflicts(): Get detected memory conflicts
+    - detect_conflicts_in_semantic(): Detect conflicts in semantic memories
 
     Uses dependency injection for storage, embeddings, and workflow backend,
     making it easy to test and configure.
@@ -77,6 +81,9 @@ class EngramService(EncodeMixin, RecallMixin, OperationsMixin):
 
     # Working memory: in-memory episodes for current session (not persisted separately)
     _working_memory: list[Episode] = field(default_factory=list, init=False, repr=False)
+
+    # Detected conflicts: in-memory storage for conflict detection results
+    _conflicts: dict[str, ConflictDetection] = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize optional fields after dataclass construction."""
