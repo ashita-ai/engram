@@ -449,8 +449,13 @@ class TestDeleteEndpoint:
 
     def test_delete_structured_success(self, client, mock_service):
         """Should delete a structured memory."""
+        # Mock memory retrieval for history logging
+        mock_memory = MagicMock()
+        mock_memory.model_dump.return_value = {"id": "struct_456", "summary": "test"}
+        mock_service.storage.get_structured = AsyncMock(return_value=mock_memory)
         mock_service.storage.delete_structured = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
+        mock_service.storage.log_history = AsyncMock()
 
         response = client.delete(
             "/api/v1/memories/struct_456",
@@ -462,8 +467,13 @@ class TestDeleteEndpoint:
 
     def test_delete_semantic_success(self, client, mock_service):
         """Should delete a semantic memory."""
+        # Mock memory retrieval for history logging
+        mock_memory = MagicMock()
+        mock_memory.model_dump.return_value = {"id": "sem_789", "content": "test"}
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_memory)
         mock_service.storage.delete_semantic = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
+        mock_service.storage.log_history = AsyncMock()
 
         response = client.delete(
             "/api/v1/memories/sem_789",
@@ -475,8 +485,13 @@ class TestDeleteEndpoint:
 
     def test_delete_procedural_success(self, client, mock_service):
         """Should delete a procedural memory."""
+        # Mock memory retrieval for history logging
+        mock_memory = MagicMock()
+        mock_memory.model_dump.return_value = {"id": "proc_abc", "content": "test"}
+        mock_service.storage.get_procedural = AsyncMock(return_value=mock_memory)
         mock_service.storage.delete_procedural = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
+        mock_service.storage.log_history = AsyncMock()
 
         response = client.delete(
             "/api/v1/memories/proc_abc",
@@ -659,6 +674,7 @@ class TestUpdateMemoryEndpoint:
         mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
         mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
+        mock_service.storage.log_history = AsyncMock()
 
         response = client.patch(
             "/api/v1/memories/sem_test123",
@@ -682,6 +698,7 @@ class TestUpdateMemoryEndpoint:
         mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
         mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
+        mock_service.storage.log_history = AsyncMock()
 
         response = client.patch(
             "/api/v1/memories/sem_test123",
@@ -703,6 +720,7 @@ class TestUpdateMemoryEndpoint:
         mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
         mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
+        mock_service.storage.log_history = AsyncMock()
 
         response = client.patch(
             "/api/v1/memories/sem_test123",
@@ -724,6 +742,7 @@ class TestUpdateMemoryEndpoint:
         mock_service.storage.get_structured = AsyncMock(return_value=mock_structured_memory)
         mock_service.storage.update_structured_memory = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
+        mock_service.storage.log_history = AsyncMock()
 
         response = client.patch(
             "/api/v1/memories/struct_test123",

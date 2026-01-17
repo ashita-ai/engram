@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .audit import AuditMixin
 from .base import COLLECTION_NAMES, DEFAULT_EMBEDDING_DIM, StorageBase
 from .crud import CRUDMixin
+from .history import HistoryMixin
 from .search import SearchMixin
 from .store import StoreMixin
 
@@ -55,7 +56,7 @@ class MemoryStats(BaseModel):
     )
 
 
-class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase):
+class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, HistoryMixin, StorageBase):
     """Async Qdrant storage client for Engram memories.
 
     Handles collection management, multi-tenancy isolation, and CRUD operations
@@ -66,6 +67,7 @@ class EngramStorage(StoreMixin, SearchMixin, CRUDMixin, AuditMixin, StorageBase)
     - SearchMixin: search_episodes, search_facts, search_semantic, etc.
     - CRUDMixin: get_episode, delete_episode, get_fact, delete_fact, etc.
     - AuditMixin: log_audit, get_audit_log
+    - HistoryMixin: log_history, get_memory_history, get_user_history
 
     Attributes:
         client: Async Qdrant client instance.

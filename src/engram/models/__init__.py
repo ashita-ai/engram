@@ -20,6 +20,7 @@ Supporting Types:
 from .audit import AuditEntry
 from .base import ConfidenceScore, ExtractionMethod, MemoryBase, Staleness, generate_id
 from .episode import Episode, QuickExtracts
+from .history import ChangeType, HistoryEntry, TriggerType
 from .procedural import ProceduralMemory
 from .provenance import ProvenanceChain, ProvenanceEvent
 from .semantic import EvolutionEntry, SemanticMemory
@@ -50,4 +51,8 @@ __all__ = [
     "ProvenanceEvent",
     # Audit
     "AuditEntry",
+    # History
+    "HistoryEntry",
+    "ChangeType",
+    "TriggerType",
 ]
