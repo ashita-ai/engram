@@ -234,6 +234,7 @@ async def recall(
                 freshness=request.freshness,
                 include_system_prompts=request.include_system_prompts,
                 diversity=request.diversity,
+                expand_query=request.expand_query,
             )
 
         result_responses = [
