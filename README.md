@@ -319,7 +319,7 @@ Engram isn't just storage—it's a system that learns:
 
 - **Irrelevant stuff fades away** — Memories decay over time. Unimportant memories fade; important ones persist. This keeps the store relevant.
 
-- **Retrieval suppresses competitors** — Based on [Anderson et al. (1994)](https://pubmed.ncbi.nlm.nih.gov/7931095/), when memories are retrieved, similar non-retrieved memories are suppressed. Enable with `rif_enabled=True` on recall to naturally prune redundant memories.
+- **Novel memories get priority** — Based on [Nagy et al. (2025)](https://arxiv.org/abs/2502.14842) adaptive compression, information-theoretic surprise increases importance scores. Content similar to existing memories is naturally deprioritized.
 
 ### Fast Path Stays Fast
 

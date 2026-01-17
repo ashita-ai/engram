@@ -207,10 +207,10 @@ class SearchMixin:
             if r.payload is not None
         ]
 
-        # Filter by selectivity if specified
+        # Filter by consolidation strength if specified
         if min_selectivity > 0.0:
             scored_results = [
-                sr for sr in scored_results if sr.memory.selectivity_score >= min_selectivity
+                sr for sr in scored_results if sr.memory.consolidation_strength >= min_selectivity
             ][:limit]
 
         # A-MEM style activation tracking
