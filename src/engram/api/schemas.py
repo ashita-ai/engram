@@ -759,3 +759,70 @@ class DeleteLinkResponse(BaseModel):
     target_id: str = Field(description="ID of the removed link target")
     removed: bool = Field(description="Whether the link was removed")
     reverse_removed: bool = Field(description="Whether reverse link was also removed")
+
+
+# ============================================================================
+# Memory Update Schemas
+# ============================================================================
+
+
+class UpdateMemoryRequest(BaseModel):
+    """Request to update a memory.
+
+    All fields are optional - only provided fields are updated.
+
+    Attributes:
+        content: New content (triggers re-embedding).
+        confidence: New confidence value (0.0-1.0).
+        tags: New tags list (semantic/procedural only).
+        keywords: New keywords list (semantic only).
+        context: New context description (semantic only).
+        user_id: User ID for multi-tenancy isolation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str | None = Field(default=None, description="New content (triggers re-embedding)")
+    confidence: float | None = Field(
+        default=None, ge=0.0, le=1.0, description="New confidence value"
+    )
+    tags: list[str] | None = Field(default=None, description="New tags list")
+    keywords: list[str] | None = Field(default=None, description="New keywords list")
+    context: str | None = Field(default=None, description="New context description")
+    user_id: str = Field(min_length=1, description="User ID for isolation")
+
+
+class UpdateChange(BaseModel):
+    """Record of a single field change.
+
+    Attributes:
+        field: Name of the changed field.
+        old_value: Previous value (as string for audit).
+        new_value: New value (as string for audit).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    field: str = Field(description="Name of the changed field")
+    old_value: str = Field(description="Previous value")
+    new_value: str = Field(description="New value")
+
+
+class UpdateMemoryResponse(BaseModel):
+    """Response for memory update operation.
+
+    Attributes:
+        memory_id: ID of the updated memory.
+        memory_type: Type of memory (structured, semantic, procedural).
+        updated: Whether any changes were made.
+        re_embedded: Whether content was re-embedded.
+        changes: List of field changes for audit trail.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(description="ID of the updated memory")
+    memory_type: str = Field(description="Type of memory")
+    updated: bool = Field(description="Whether any changes were made")
+    re_embedded: bool = Field(default=False, description="Whether content was re-embedded")
+    changes: list[UpdateChange] = Field(default_factory=list, description="List of field changes")

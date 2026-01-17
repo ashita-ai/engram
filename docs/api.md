@@ -277,6 +277,66 @@ Verify a memory against its source episodes with explanation.
 
 ---
 
+### PATCH /memories/{memory_id}
+
+Update a memory's content, confidence, or metadata.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `memory_id` | string | Memory ID (must be `struct_*`, `sem_*`, or `proc_*`) |
+
+**Request Body:**
+```json
+{
+  "content": "Updated content",
+  "confidence": 0.85,
+  "tags": ["updated", "new-tag"],
+  "keywords": ["keyword1", "keyword2"],
+  "context": "New context",
+  "user_id": "user_123"
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `content` | string | No | New content (triggers re-embedding) |
+| `confidence` | float | No | New confidence value (0.0-1.0) |
+| `tags` | array | No | New tags list (semantic/procedural only) |
+| `keywords` | array | No | New keywords list (semantic only) |
+| `context` | string | No | New context description (semantic only) |
+| `user_id` | string | Yes | User ID for isolation |
+
+**Supported Fields by Memory Type:**
+- `structured (struct_*)`: content (updates summary), confidence
+- `semantic (sem_*)`: content, confidence, tags, keywords, context
+- `procedural (proc_*)`: content, confidence
+
+**Response (200 OK):**
+```json
+{
+  "memory_id": "sem_abc123",
+  "memory_type": "semantic",
+  "updated": true,
+  "re_embedded": true,
+  "changes": [
+    {
+      "field": "content",
+      "old_value": "Original content",
+      "new_value": "Updated content"
+    }
+  ]
+}
+```
+
+**Errors:**
+- 400: Invalid memory ID format, or attempt to update episodic memory
+- 404: Memory not found
+
+**Note:** Episodic memories (`ep_*`) are immutable and cannot be updated.
+
+---
+
 ### DELETE /memories/{memory_id}
 
 Delete a specific memory by ID.

@@ -42,6 +42,9 @@ from .schemas import (
     StructuredResponse,
     StructureRequest,
     StructureResponse,
+    UpdateChange,
+    UpdateMemoryRequest,
+    UpdateMemoryResponse,
     VerificationResponse,
     WorkflowStatusResponse,
     WorkingMemoryResponse,
@@ -638,6 +641,254 @@ async def delete_memory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while deleting the memory",
+        ) from e
+
+
+@router.patch(
+    "/memories/{memory_id}",
+    response_model=UpdateMemoryResponse,
+    tags=["memory"],
+)
+async def update_memory(
+    memory_id: str,
+    request: UpdateMemoryRequest,
+    service: ServiceDep,
+) -> UpdateMemoryResponse:
+    """Update a memory's content, confidence, or metadata.
+
+    Allows updating structured, semantic, or procedural memories.
+    Episodic memories are immutable and cannot be updated.
+
+    Supported updates by memory type:
+    - structured (struct_*): content, confidence
+    - semantic (sem_*): content, confidence, tags, keywords, context
+    - procedural (proc_*): content, confidence, tags
+
+    If content is changed, the memory is re-embedded automatically.
+    All changes are logged for audit trail.
+
+    Args:
+        memory_id: ID of the memory to update.
+        request: Update request with fields to change.
+        service: Injected EngramService.
+
+    Returns:
+        Update result with changes and re-embedding status.
+
+    Raises:
+        HTTPException: 400 if memory type doesn't support updates or invalid request.
+        HTTPException: 404 if memory not found.
+    """
+    start_time = time.time()
+
+    # Episodic memories are immutable
+    if memory_id.startswith("ep_"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Episodic memories are immutable and cannot be updated. "
+            "Create a new episode or use derived memory types instead.",
+        )
+
+    # Determine memory type from ID prefix
+    if memory_id.startswith("struct_"):
+        memory_type = "structured"
+    elif memory_id.startswith("sem_"):
+        memory_type = "semantic"
+    elif memory_id.startswith("proc_"):
+        memory_type = "procedural"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Expected prefix: struct_, sem_, or proc_",
+        )
+
+    try:
+        changes: list[UpdateChange] = []
+        re_embedded = False
+
+        # Get and update memory based on type
+        if memory_type == "structured":
+            memory = await service.storage.get_structured(memory_id, request.user_id)
+            if memory is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+
+            # Update content (summary for structured memories)
+            if request.content is not None and request.content != memory.summary:
+                changes.append(
+                    UpdateChange(
+                        field="summary",
+                        old_value=memory.summary,
+                        new_value=request.content,
+                    )
+                )
+                memory.summary = request.content
+                # Re-embed the memory
+                memory.embedding = await service.embedder.embed(request.content)
+                re_embedded = True
+
+            # Update confidence
+            if request.confidence is not None and request.confidence != memory.confidence.value:
+                changes.append(
+                    UpdateChange(
+                        field="confidence",
+                        old_value=str(memory.confidence.value),
+                        new_value=str(request.confidence),
+                    )
+                )
+                memory.confidence.value = request.confidence
+
+            if changes:
+                await service.storage.update_structured_memory(memory)
+
+        elif memory_type == "semantic":
+            memory_sem = await service.storage.get_semantic(memory_id, request.user_id)
+            if memory_sem is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+
+            # Update content
+            if request.content is not None and request.content != memory_sem.content:
+                changes.append(
+                    UpdateChange(
+                        field="content",
+                        old_value=memory_sem.content,
+                        new_value=request.content,
+                    )
+                )
+                memory_sem.content = request.content
+                # Re-embed the memory
+                memory_sem.embedding = await service.embedder.embed(request.content)
+                re_embedded = True
+
+            # Update confidence
+            if request.confidence is not None and request.confidence != memory_sem.confidence.value:
+                changes.append(
+                    UpdateChange(
+                        field="confidence",
+                        old_value=str(memory_sem.confidence.value),
+                        new_value=str(request.confidence),
+                    )
+                )
+                memory_sem.confidence.value = request.confidence
+
+            # Update tags
+            if request.tags is not None and request.tags != memory_sem.tags:
+                changes.append(
+                    UpdateChange(
+                        field="tags",
+                        old_value=",".join(memory_sem.tags),
+                        new_value=",".join(request.tags),
+                    )
+                )
+                memory_sem.tags = request.tags
+
+            # Update keywords
+            if request.keywords is not None and request.keywords != memory_sem.keywords:
+                changes.append(
+                    UpdateChange(
+                        field="keywords",
+                        old_value=",".join(memory_sem.keywords),
+                        new_value=",".join(request.keywords),
+                    )
+                )
+                memory_sem.keywords = request.keywords
+
+            # Update context
+            if request.context is not None and request.context != memory_sem.context:
+                changes.append(
+                    UpdateChange(
+                        field="context",
+                        old_value=memory_sem.context,
+                        new_value=request.context,
+                    )
+                )
+                memory_sem.context = request.context
+
+            if changes:
+                await service.storage.update_semantic_memory(memory_sem)
+
+        else:  # procedural
+            memory_proc = await service.storage.get_procedural(memory_id, request.user_id)
+            if memory_proc is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+
+            # Update content
+            if request.content is not None and request.content != memory_proc.content:
+                changes.append(
+                    UpdateChange(
+                        field="content",
+                        old_value=memory_proc.content,
+                        new_value=request.content,
+                    )
+                )
+                memory_proc.content = request.content
+                # Re-embed the memory
+                memory_proc.embedding = await service.embedder.embed(request.content)
+                re_embedded = True
+
+            # Update confidence
+            if (
+                request.confidence is not None
+                and request.confidence != memory_proc.confidence.value
+            ):
+                changes.append(
+                    UpdateChange(
+                        field="confidence",
+                        old_value=str(memory_proc.confidence.value),
+                        new_value=str(request.confidence),
+                    )
+                )
+                memory_proc.confidence.value = request.confidence
+
+            if changes:
+                await service.storage.update_procedural_memory(memory_proc)
+
+        # Log audit entry for update
+        if changes:
+            duration_ms = int((time.time() - start_time) * 1000)
+            audit_entry = AuditEntry.for_update(
+                user_id=request.user_id,
+                memory_id=memory_id,
+                memory_type=memory_type,
+                changes=[
+                    {"field": c.field, "old": c.old_value, "new": c.new_value} for c in changes
+                ],
+                duration_ms=duration_ms,
+            )
+            await service.storage.log_audit(audit_entry)
+
+            logger.info(
+                "Updated %s memory %s for user %s: %d changes",
+                memory_type,
+                memory_id,
+                request.user_id,
+                len(changes),
+            )
+
+        return UpdateMemoryResponse(
+            memory_id=memory_id,
+            memory_type=memory_type,
+            updated=len(changes) > 0,
+            re_embedded=re_embedded,
+            changes=changes,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update memory %s", memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while updating the memory",
         ) from e
 
 

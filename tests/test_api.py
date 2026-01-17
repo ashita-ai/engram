@@ -572,6 +572,201 @@ class TestBulkDeleteEndpoint:
         assert response.status_code == 503
 
 
+class TestUpdateMemoryEndpoint:
+    """Tests for memory update endpoint."""
+
+    @pytest.fixture
+    def client(self, mock_service):
+        """Create test client with mock service."""
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        set_service(mock_service)
+        return TestClient(app)
+
+    @pytest.fixture
+    def mock_service(self):
+        """Create mock EngramService."""
+        from engram.service import EngramService
+
+        service = MagicMock(spec=EngramService)
+        service.storage = MagicMock()
+        service.embedder = MagicMock()
+        service.embedder.embed = AsyncMock(return_value=[0.1] * 1536)
+        return service
+
+    @pytest.fixture
+    def mock_semantic_memory(self):
+        """Create a mock semantic memory."""
+        from engram.models import SemanticMemory
+
+        return SemanticMemory(
+            id="sem_test123",
+            content="Original content",
+            user_id="user_123",
+            embedding=[0.1] * 1536,
+            tags=["original"],
+            keywords=["test"],
+            context="test context",
+        )
+
+    @pytest.fixture
+    def mock_structured_memory(self):
+        """Create a mock structured memory."""
+        from engram.models import StructuredMemory
+
+        return StructuredMemory(
+            id="struct_test123",
+            source_episode_id="ep_source123",
+            user_id="user_123",
+            embedding=[0.1] * 1536,
+            summary="Original summary",
+        )
+
+    def test_update_semantic_content(self, client, mock_service, mock_semantic_memory):
+        """Should update semantic memory content and re-embed."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
+        mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.patch(
+            "/api/v1/memories/sem_test123",
+            json={
+                "content": "Updated content",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["memory_id"] == "sem_test123"
+        assert data["memory_type"] == "semantic"
+        assert data["updated"] is True
+        assert data["re_embedded"] is True
+        assert len(data["changes"]) == 1
+        assert data["changes"][0]["field"] == "content"
+
+    def test_update_semantic_tags(self, client, mock_service, mock_semantic_memory):
+        """Should update semantic memory tags without re-embedding."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
+        mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.patch(
+            "/api/v1/memories/sem_test123",
+            json={
+                "tags": ["updated", "new-tag"],
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated"] is True
+        assert data["re_embedded"] is False
+        assert len(data["changes"]) == 1
+        assert data["changes"][0]["field"] == "tags"
+
+    def test_update_semantic_confidence(self, client, mock_service, mock_semantic_memory):
+        """Should update confidence without re-embedding."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
+        mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.patch(
+            "/api/v1/memories/sem_test123",
+            json={
+                "confidence": 0.95,
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated"] is True
+        assert data["re_embedded"] is False
+        assert len(data["changes"]) == 1
+        assert data["changes"][0]["field"] == "confidence"
+
+    def test_update_structured_summary(self, client, mock_service, mock_structured_memory):
+        """Should update structured memory summary and re-embed."""
+        mock_service.storage.get_structured = AsyncMock(return_value=mock_structured_memory)
+        mock_service.storage.update_structured_memory = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.patch(
+            "/api/v1/memories/struct_test123",
+            json={
+                "content": "Updated summary",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["memory_id"] == "struct_test123"
+        assert data["memory_type"] == "structured"
+        assert data["updated"] is True
+        assert data["re_embedded"] is True
+        assert data["changes"][0]["field"] == "summary"
+
+    def test_update_episodic_rejected(self, client, mock_service):
+        """Should reject updates to episodic memories."""
+        response = client.patch(
+            "/api/v1/memories/ep_test123",
+            json={
+                "content": "Cannot update",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "immutable" in response.json()["detail"].lower()
+
+    def test_update_memory_not_found(self, client, mock_service):
+        """Should return 404 when memory not found."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=None)
+
+        response = client.patch(
+            "/api/v1/memories/sem_nonexistent",
+            json={
+                "content": "Updated",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 404
+
+    def test_update_no_changes(self, client, mock_service, mock_semantic_memory):
+        """Should return updated=False when no changes made."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
+
+        response = client.patch(
+            "/api/v1/memories/sem_test123",
+            json={
+                "content": "Original content",  # Same as existing
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated"] is False
+        assert len(data["changes"]) == 0
+
+    def test_update_invalid_prefix(self, client, mock_service):
+        """Should reject invalid memory ID prefix."""
+        response = client.patch(
+            "/api/v1/memories/invalid_test123",
+            json={
+                "content": "Updated",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "struct_" in response.json()["detail"] or "sem_" in response.json()["detail"]
+
+
 class TestWorkflowEndpoints:
     """Tests for workflow trigger endpoints."""
 

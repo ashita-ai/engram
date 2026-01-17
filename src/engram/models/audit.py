@@ -169,6 +169,39 @@ class AuditEntry(BaseModel):
         )
 
     @classmethod
+    def for_update(
+        cls,
+        user_id: str,
+        memory_id: str,
+        memory_type: str,
+        changes: list[dict[str, str]],
+        org_id: str | None = None,
+        duration_ms: int | None = None,
+    ) -> "AuditEntry":
+        """Create audit entry for a memory update operation.
+
+        Args:
+            user_id: User who performed the update.
+            memory_id: ID of the updated memory.
+            memory_type: Type of memory (structured, semantic, procedural).
+            changes: List of changes, each with field, old, new values.
+            org_id: Optional organization ID.
+            duration_ms: Processing duration in milliseconds.
+        """
+        return cls(
+            event="update",
+            user_id=user_id,
+            org_id=org_id,
+            details={
+                "memory_id": memory_id,
+                "memory_type": memory_type,
+                "changes": changes,
+                "change_count": len(changes),
+            },
+            duration_ms=duration_ms,
+        )
+
+    @classmethod
     def for_bulk_delete(
         cls,
         user_id: str,
