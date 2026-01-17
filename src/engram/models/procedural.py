@@ -49,6 +49,10 @@ class ProceduralMemory(MemoryBase):
         default_factory=list,
         description="Links to related memories",
     )
+    link_types: dict[str, str] = Field(
+        default_factory=dict,
+        description="Maps memory_id to link type (related, supersedes, contradicts)",
+    )
     derived_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         description="When this pattern was identified",
@@ -105,10 +109,42 @@ class ProceduralMemory(MemoryBase):
         """Alias for record_access() for backwards compatibility."""
         self.record_access()
 
-    def add_link(self, memory_id: str) -> None:
-        """Add a link to a related memory."""
+    def add_link(self, memory_id: str, link_type: str = "related") -> None:
+        """Add a link to a related memory.
+
+        Args:
+            memory_id: ID of the memory to link to.
+            link_type: Type of link (related, supersedes, contradicts).
+        """
         if memory_id not in self.related_ids:
             self.related_ids.append(memory_id)
+        self.link_types[memory_id] = link_type
+
+    def remove_link(self, memory_id: str) -> bool:
+        """Remove a link to a related memory.
+
+        Args:
+            memory_id: ID of the memory to unlink.
+
+        Returns:
+            True if the link was removed, False if it didn't exist.
+        """
+        if memory_id in self.related_ids:
+            self.related_ids.remove(memory_id)
+            self.link_types.pop(memory_id, None)
+            return True
+        return False
+
+    def get_link_type(self, memory_id: str) -> str | None:
+        """Get the link type for a related memory.
+
+        Args:
+            memory_id: ID of the linked memory.
+
+        Returns:
+            Link type or None if not linked.
+        """
+        return self.link_types.get(memory_id)
 
     def __str__(self) -> str:
         """String representation showing pattern content."""

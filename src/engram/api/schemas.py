@@ -659,3 +659,97 @@ class StructureBatchResponse(BaseModel):
     results: list[StructureResponse] = Field(
         default_factory=list, description="Individual episode results"
     )
+
+
+# ============================================================================
+# Memory Link Schemas
+# ============================================================================
+
+# Valid link types
+LinkType = Literal["related", "supersedes", "contradicts"]
+
+
+class CreateLinkRequest(BaseModel):
+    """Request to create a link between memories.
+
+    Attributes:
+        target_id: ID of the memory to link to.
+        link_type: Type of link (related, supersedes, contradicts).
+        user_id: User ID for multi-tenancy isolation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: str = Field(min_length=1, description="ID of the memory to link to")
+    link_type: LinkType = Field(
+        default="related",
+        description="Type of link: related (bidirectional), supersedes (directional), contradicts (bidirectional)",
+    )
+    user_id: str = Field(min_length=1, description="User ID for isolation")
+
+
+class LinkDetail(BaseModel):
+    """Details about a memory link.
+
+    Attributes:
+        target_id: ID of the linked memory.
+        link_type: Type of the link.
+        created_at: When the link was created (if available).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_id: str = Field(description="ID of the linked memory")
+    link_type: str = Field(description="Type of link")
+
+
+class CreateLinkResponse(BaseModel):
+    """Response for link creation.
+
+    Attributes:
+        source_id: ID of the source memory.
+        target_id: ID of the target memory.
+        link_type: Type of link created.
+        bidirectional: Whether a reverse link was also created.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(description="ID of the source memory")
+    target_id: str = Field(description="ID of the target memory")
+    link_type: str = Field(description="Type of link")
+    bidirectional: bool = Field(description="Whether reverse link was created")
+
+
+class LinksListResponse(BaseModel):
+    """Response for listing memory links.
+
+    Attributes:
+        memory_id: ID of the memory.
+        links: List of links from this memory.
+        count: Number of links.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(description="ID of the memory")
+    links: list[LinkDetail] = Field(default_factory=list, description="Links from this memory")
+    count: int = Field(ge=0, description="Number of links")
+
+
+class DeleteLinkResponse(BaseModel):
+    """Response for link deletion.
+
+    Attributes:
+        source_id: ID of the source memory.
+        target_id: ID of the removed link target.
+        removed: Whether the link was removed.
+        reverse_removed: Whether the reverse link was also removed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: str = Field(description="ID of the source memory")
+    target_id: str = Field(description="ID of the removed link target")
+    removed: bool = Field(description="Whether the link was removed")
+    reverse_removed: bool = Field(description="Whether reverse link was also removed")
