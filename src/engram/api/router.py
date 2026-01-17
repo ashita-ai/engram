@@ -16,12 +16,17 @@ from .schemas import (
     ConfidenceStats,
     ConsolidateRequest,
     ConsolidateResponse,
+    CreateLinkRequest,
+    CreateLinkResponse,
     DecayRequest,
     DecayResponse,
+    DeleteLinkResponse,
     EncodeRequest,
     EncodeResponse,
     EpisodeResponse,
     HealthResponse,
+    LinkDetail,
+    LinksListResponse,
     MemoryCounts,
     MemoryStatsResponse,
     PromoteRequest,
@@ -1060,4 +1065,302 @@ async def get_workflow_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while getting workflow status",
+        ) from e
+
+
+# ============================================================================
+# Memory Link Endpoints
+# ============================================================================
+
+
+@router.post(
+    "/memories/{memory_id}/links",
+    response_model=CreateLinkResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["memory"],
+)
+async def create_link(
+    memory_id: str,
+    request: CreateLinkRequest,
+    service: ServiceDep,
+) -> CreateLinkResponse:
+    """Create a link between memories.
+
+    Links can be:
+    - `related`: General association (bidirectional)
+    - `supersedes`: This memory replaces another (directional)
+    - `contradicts`: These memories conflict (bidirectional)
+
+    For bidirectional links (related, contradicts), a reverse link is
+    automatically created from target to source.
+
+    Args:
+        memory_id: ID of the source memory (must start with sem_ or proc_).
+        request: Link creation request with target_id and link_type.
+        service: Injected EngramService.
+
+    Returns:
+        Link creation result including whether reverse link was created.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if source or target memory not found.
+    """
+    # Validate source memory ID format
+    if not (memory_id.startswith("sem_") or memory_id.startswith("proc_")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid source memory ID format: {memory_id}. "
+            "Only semantic (sem_) and procedural (proc_) memories support links.",
+        )
+
+    # Validate target memory ID format
+    target_id = request.target_id
+    valid_target_prefixes = ("sem_", "proc_", "struct_", "ep_")
+    if not target_id.startswith(valid_target_prefixes):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid target memory ID format: {target_id}. "
+            "Expected prefix: sem_, proc_, struct_, or ep_",
+        )
+
+    try:
+        # Get and update source memory
+        if memory_id.startswith("sem_"):
+            source_semantic = await service.storage.get_semantic(memory_id, request.user_id)
+            if source_semantic is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Source memory not found: {memory_id}",
+                )
+            source_semantic.add_link(target_id, request.link_type)
+            await service.storage.update_semantic_memory(source_semantic)
+        else:
+            source_procedural = await service.storage.get_procedural(memory_id, request.user_id)
+            if source_procedural is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Source memory not found: {memory_id}",
+                )
+            source_procedural.add_link(target_id, request.link_type)
+            await service.storage.update_procedural_memory(source_procedural)
+
+        # Handle bidirectional linking for related and contradicts
+        reverse_created = False
+        if request.link_type in ("related", "contradicts"):
+            # Only create reverse link if target is sem_ or proc_
+            if target_id.startswith("sem_"):
+                target_semantic = await service.storage.get_semantic(target_id, request.user_id)
+                if target_semantic is not None:
+                    target_semantic.add_link(memory_id, request.link_type)
+                    await service.storage.update_semantic_memory(target_semantic)
+                    reverse_created = True
+            elif target_id.startswith("proc_"):
+                target_procedural = await service.storage.get_procedural(target_id, request.user_id)
+                if target_procedural is not None:
+                    target_procedural.add_link(memory_id, request.link_type)
+                    await service.storage.update_procedural_memory(target_procedural)
+                    reverse_created = True
+
+        logger.info(
+            "Created %s link from %s to %s (bidirectional=%s)",
+            request.link_type,
+            memory_id,
+            target_id,
+            reverse_created,
+        )
+
+        return CreateLinkResponse(
+            source_id=memory_id,
+            target_id=target_id,
+            link_type=request.link_type,
+            bidirectional=reverse_created,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to create link from %s to %s", memory_id, request.target_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while creating the link",
+        ) from e
+
+
+@router.get(
+    "/memories/{memory_id}/links",
+    response_model=LinksListResponse,
+    tags=["memory"],
+)
+async def list_links(
+    memory_id: str,
+    user_id: str,
+    service: ServiceDep,
+) -> LinksListResponse:
+    """List all links from a memory.
+
+    Returns all links from the specified memory, including link types.
+
+    Args:
+        memory_id: ID of the memory (must start with sem_ or proc_).
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+
+    Returns:
+        List of links with their types.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if memory not found.
+    """
+    # Validate memory ID format
+    if not (memory_id.startswith("sem_") or memory_id.startswith("proc_")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Only semantic (sem_) and procedural (proc_) memories support links.",
+        )
+
+    try:
+        # Get memory and build links list
+        links: list[LinkDetail] = []
+        if memory_id.startswith("sem_"):
+            semantic_mem = await service.storage.get_semantic(memory_id, user_id)
+            if semantic_mem is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+            for tid in semantic_mem.related_ids:
+                link_type = semantic_mem.link_types.get(tid, "related")
+                links.append(LinkDetail(target_id=tid, link_type=link_type))
+        else:
+            procedural_mem = await service.storage.get_procedural(memory_id, user_id)
+            if procedural_mem is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+            for tid in procedural_mem.related_ids:
+                link_type = procedural_mem.link_types.get(tid, "related")
+                links.append(LinkDetail(target_id=tid, link_type=link_type))
+
+        return LinksListResponse(
+            memory_id=memory_id,
+            links=links,
+            count=len(links),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to list links for %s", memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while listing links",
+        ) from e
+
+
+@router.delete(
+    "/memories/{memory_id}/links/{target_id}",
+    response_model=DeleteLinkResponse,
+    tags=["memory"],
+)
+async def delete_link(
+    memory_id: str,
+    target_id: str,
+    user_id: str,
+    service: ServiceDep,
+) -> DeleteLinkResponse:
+    """Remove a link between memories.
+
+    Removes the link from source to target. If the link was bidirectional
+    (related or contradicts), the reverse link is also removed.
+
+    Args:
+        memory_id: ID of the source memory (must start with sem_ or proc_).
+        target_id: ID of the target memory to unlink.
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+
+    Returns:
+        Deletion result including whether reverse link was also removed.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if memory not found.
+    """
+    # Validate source memory ID format
+    if not (memory_id.startswith("sem_") or memory_id.startswith("proc_")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid source memory ID format: {memory_id}. "
+            "Only semantic (sem_) and procedural (proc_) memories support links.",
+        )
+
+    try:
+        # Get source memory and remove link
+        removed = False
+        link_type = "related"
+
+        if memory_id.startswith("sem_"):
+            source_semantic = await service.storage.get_semantic(memory_id, user_id)
+            if source_semantic is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Source memory not found: {memory_id}",
+                )
+            link_type = source_semantic.link_types.get(target_id, "related")
+            removed = source_semantic.remove_link(target_id)
+            if removed:
+                await service.storage.update_semantic_memory(source_semantic)
+        else:
+            source_procedural = await service.storage.get_procedural(memory_id, user_id)
+            if source_procedural is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Source memory not found: {memory_id}",
+                )
+            link_type = source_procedural.link_types.get(target_id, "related")
+            removed = source_procedural.remove_link(target_id)
+            if removed:
+                await service.storage.update_procedural_memory(source_procedural)
+
+        # Handle reverse link removal for bidirectional links
+        reverse_removed = False
+        if link_type in ("related", "contradicts"):
+            if target_id.startswith("sem_"):
+                target_semantic = await service.storage.get_semantic(target_id, user_id)
+                if target_semantic is not None:
+                    if target_semantic.remove_link(memory_id):
+                        await service.storage.update_semantic_memory(target_semantic)
+                        reverse_removed = True
+            elif target_id.startswith("proc_"):
+                target_procedural = await service.storage.get_procedural(target_id, user_id)
+                if target_procedural is not None:
+                    if target_procedural.remove_link(memory_id):
+                        await service.storage.update_procedural_memory(target_procedural)
+                        reverse_removed = True
+
+        logger.info(
+            "Removed link from %s to %s (reverse_removed=%s)",
+            memory_id,
+            target_id,
+            reverse_removed,
+        )
+
+        return DeleteLinkResponse(
+            source_id=memory_id,
+            target_id=target_id,
+            removed=removed,
+            reverse_removed=reverse_removed,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete link from %s to %s", memory_id, target_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while deleting the link",
         ) from e

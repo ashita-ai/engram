@@ -886,3 +886,245 @@ class TestWorkflowEndpoints:
         )
 
         assert response.status_code == 503
+
+
+class TestLinkEndpoints:
+    """Tests for memory link endpoints."""
+
+    @pytest.fixture
+    def client(self, mock_service):
+        """Create test client with mock service."""
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1")
+        set_service(mock_service)
+        return TestClient(app)
+
+    @pytest.fixture
+    def mock_service(self):
+        """Create mock EngramService."""
+        from engram.service import EngramService
+
+        service = MagicMock(spec=EngramService)
+        service.storage = MagicMock()
+        return service
+
+    @pytest.fixture
+    def mock_semantic_memory(self):
+        """Create a mock semantic memory."""
+        from engram.models import SemanticMemory
+
+        return SemanticMemory(
+            id="sem_test123",
+            content="Test semantic memory",
+            user_id="user_123",
+            embedding=[0.1] * 1536,
+            related_ids=[],
+            link_types={},
+        )
+
+    @pytest.fixture
+    def mock_semantic_memory_2(self):
+        """Create a second mock semantic memory."""
+        from engram.models import SemanticMemory
+
+        return SemanticMemory(
+            id="sem_target456",
+            content="Target semantic memory",
+            user_id="user_123",
+            embedding=[0.1] * 1536,
+            related_ids=[],
+            link_types={},
+        )
+
+    def test_create_link_success(
+        self, client, mock_service, mock_semantic_memory, mock_semantic_memory_2
+    ):
+        """Should create link between memories."""
+        mock_service.storage.get_semantic = AsyncMock(
+            side_effect=lambda id, _: mock_semantic_memory
+            if id == "sem_test123"
+            else mock_semantic_memory_2
+        )
+        mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        response = client.post(
+            "/api/v1/memories/sem_test123/links",
+            json={
+                "target_id": "sem_target456",
+                "link_type": "related",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["source_id"] == "sem_test123"
+        assert data["target_id"] == "sem_target456"
+        assert data["link_type"] == "related"
+        assert data["bidirectional"] is True
+
+    def test_create_supersedes_link(
+        self, client, mock_service, mock_semantic_memory, mock_semantic_memory_2
+    ):
+        """Should create directional supersedes link."""
+        mock_service.storage.get_semantic = AsyncMock(
+            side_effect=lambda id, _: mock_semantic_memory
+            if id == "sem_test123"
+            else mock_semantic_memory_2
+        )
+        mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        response = client.post(
+            "/api/v1/memories/sem_test123/links",
+            json={
+                "target_id": "sem_target456",
+                "link_type": "supersedes",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["link_type"] == "supersedes"
+        assert data["bidirectional"] is False  # supersedes is directional
+
+    def test_create_link_invalid_source(self, client, mock_service):
+        """Should reject invalid source memory ID format."""
+        response = client.post(
+            "/api/v1/memories/ep_episode123/links",
+            json={
+                "target_id": "sem_target456",
+                "link_type": "related",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 400
+        assert "sem_" in response.json()["detail"] or "proc_" in response.json()["detail"]
+
+    def test_create_link_invalid_target(self, client, mock_service, mock_semantic_memory):
+        """Should reject invalid target memory ID format."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
+
+        response = client.post(
+            "/api/v1/memories/sem_test123/links",
+            json={
+                "target_id": "invalid_id",
+                "link_type": "related",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 400
+
+    def test_create_link_source_not_found(self, client, mock_service):
+        """Should return 404 when source memory not found."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=None)
+
+        response = client.post(
+            "/api/v1/memories/sem_nonexistent/links",
+            json={
+                "target_id": "sem_target456",
+                "link_type": "related",
+                "user_id": "user_123",
+            },
+        )
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    def test_list_links_success(self, client, mock_service):
+        """Should list all links from a memory."""
+        from engram.models import SemanticMemory
+
+        memory_with_links = SemanticMemory(
+            id="sem_test123",
+            content="Test memory",
+            user_id="user_123",
+            embedding=[0.1] * 1536,
+            related_ids=["sem_linked1", "sem_linked2"],
+            link_types={"sem_linked1": "related", "sem_linked2": "contradicts"},
+        )
+        mock_service.storage.get_semantic = AsyncMock(return_value=memory_with_links)
+
+        response = client.get("/api/v1/memories/sem_test123/links?user_id=user_123")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["memory_id"] == "sem_test123"
+        assert data["count"] == 2
+        assert len(data["links"]) == 2
+        link_targets = {link["target_id"] for link in data["links"]}
+        assert "sem_linked1" in link_targets
+        assert "sem_linked2" in link_targets
+
+    def test_list_links_empty(self, client, mock_service, mock_semantic_memory):
+        """Should return empty list when no links."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
+
+        response = client.get("/api/v1/memories/sem_test123/links?user_id=user_123")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 0
+        assert data["links"] == []
+
+    def test_list_links_not_found(self, client, mock_service):
+        """Should return 404 when memory not found."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=None)
+
+        response = client.get("/api/v1/memories/sem_nonexistent/links?user_id=user_123")
+
+        assert response.status_code == 404
+
+    def test_delete_link_success(
+        self, client, mock_service, mock_semantic_memory, mock_semantic_memory_2
+    ):
+        """Should delete link between memories."""
+        # Add a link to the source memory
+        mock_semantic_memory.related_ids = ["sem_target456"]
+        mock_semantic_memory.link_types = {"sem_target456": "related"}
+        # Add reverse link to target
+        mock_semantic_memory_2.related_ids = ["sem_test123"]
+        mock_semantic_memory_2.link_types = {"sem_test123": "related"}
+
+        mock_service.storage.get_semantic = AsyncMock(
+            side_effect=lambda id, _: mock_semantic_memory
+            if id == "sem_test123"
+            else mock_semantic_memory_2
+        )
+        mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        response = client.delete(
+            "/api/v1/memories/sem_test123/links/sem_target456?user_id=user_123"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["source_id"] == "sem_test123"
+        assert data["target_id"] == "sem_target456"
+        assert data["removed"] is True
+        assert data["reverse_removed"] is True
+
+    def test_delete_link_not_found(self, client, mock_service, mock_semantic_memory):
+        """Should return removed=False when link doesn't exist."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=mock_semantic_memory)
+        mock_service.storage.update_semantic_memory = AsyncMock(return_value=True)
+
+        response = client.delete(
+            "/api/v1/memories/sem_test123/links/sem_nonexistent?user_id=user_123"
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["removed"] is False
+
+    def test_delete_link_memory_not_found(self, client, mock_service):
+        """Should return 404 when source memory not found."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=None)
+
+        response = client.delete(
+            "/api/v1/memories/sem_nonexistent/links/sem_target?user_id=user_123"
+        )
+
+        assert response.status_code == 404

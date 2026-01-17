@@ -327,6 +327,112 @@ Delete all memories for a user (GDPR right to erasure).
 
 ---
 
+## Memory Link Endpoints
+
+Manage explicit links between memories for multi-hop reasoning.
+
+### POST /memories/{memory_id}/links
+
+Create a link between memories.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `memory_id` | string | Source memory ID (must be `sem_*` or `proc_*`) |
+
+**Request Body:**
+```json
+{
+  "target_id": "sem_target456",
+  "link_type": "related",
+  "user_id": "user_123"
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `target_id` | string | Yes | - | ID of memory to link to |
+| `link_type` | string | No | `"related"` | Link type: `related`, `supersedes`, `contradicts` |
+| `user_id` | string | Yes | - | User ID for isolation |
+
+**Link Types:**
+- `related` - General association (bidirectional)
+- `supersedes` - This memory replaces another (directional)
+- `contradicts` - These memories conflict (bidirectional)
+
+**Response (201 Created):**
+```json
+{
+  "source_id": "sem_abc123",
+  "target_id": "sem_target456",
+  "link_type": "related",
+  "bidirectional": true
+}
+```
+
+---
+
+### GET /memories/{memory_id}/links
+
+List all links from a memory.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `memory_id` | string | Memory ID (must be `sem_*` or `proc_*`) |
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `user_id` | string | Yes | User ID for isolation |
+
+**Response (200 OK):**
+```json
+{
+  "memory_id": "sem_abc123",
+  "links": [
+    {
+      "target_id": "sem_xyz789",
+      "link_type": "related"
+    },
+    {
+      "target_id": "sem_conflict1",
+      "link_type": "contradicts"
+    }
+  ],
+  "count": 2
+}
+```
+
+---
+
+### DELETE /memories/{memory_id}/links/{target_id}
+
+Remove a link between memories.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `memory_id` | string | Source memory ID (must be `sem_*` or `proc_*`) |
+| `target_id` | string | Target memory ID to unlink |
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `user_id` | string | Yes | User ID for isolation |
+
+**Response (200 OK):**
+```json
+{
+  "source_id": "sem_abc123",
+  "target_id": "sem_target456",
+  "removed": true,
+  "reverse_removed": true
+}
+```
+
+---
+
 ## Workflow Endpoints
 
 Manually trigger background workflows for consolidation, decay, and memory processing.
