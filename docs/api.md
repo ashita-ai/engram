@@ -768,6 +768,155 @@ Check service health status.
 
 ---
 
+## Conflict Detection Endpoints
+
+Proactively detect contradictions between memories.
+
+### POST /conflicts/detect
+
+Detect contradictions between memories using semantic similarity and LLM analysis.
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "org_id": "org_456",
+  "memory_type": "semantic",
+  "similarity_threshold": 0.5
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `user_id` | string | Yes | - | User ID for isolation |
+| `org_id` | string | No | `null` | Optional org filter |
+| `memory_type` | string | No | `"semantic"` | Memory type: `semantic` or `structured` |
+| `similarity_threshold` | float | No | `0.5` | Minimum similarity to check (0.0-1.0) |
+
+**Response (200 OK):**
+```json
+{
+  "conflicts_found": 1,
+  "conflicts": [
+    {
+      "id": "conflict_20250116103000123456",
+      "memory_a_id": "sem_abc123",
+      "memory_a_content": "User prefers PostgreSQL",
+      "memory_b_id": "sem_xyz789",
+      "memory_b_content": "User doesn't like SQL databases",
+      "conflict_type": "implicit",
+      "confidence": 0.75,
+      "explanation": "Implicit contradiction about database preference",
+      "resolution": null,
+      "detected_at": "2025-01-16T10:30:00Z",
+      "resolved_at": null
+    }
+  ]
+}
+```
+
+**Conflict Types:**
+- `direct`: Explicit contradiction (e.g., "likes coffee" vs "hates coffee")
+- `implicit`: Logical inconsistency (e.g., "vegetarian" vs "favorite steak restaurant")
+- `temporal`: Time-based conflict (e.g., "works at Company A" vs "quit Company A last month")
+
+---
+
+### GET /conflicts
+
+List detected conflicts for a user.
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `user_id` | string | Yes | User ID |
+| `org_id` | string | No | Optional org filter |
+| `include_resolved` | bool | No | Include resolved conflicts (default: false) |
+
+**Response (200 OK):**
+```json
+{
+  "conflicts": [...],
+  "count": 3
+}
+```
+
+---
+
+### GET /conflicts/{conflict_id}
+
+Get a specific conflict by ID.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `conflict_id` | string | Conflict ID |
+
+**Response (200 OK):**
+```json
+{
+  "id": "conflict_20250116103000123456",
+  "memory_a_id": "sem_abc123",
+  "memory_a_content": "User prefers PostgreSQL",
+  "memory_b_id": "sem_xyz789",
+  "memory_b_content": "User doesn't like SQL databases",
+  "conflict_type": "implicit",
+  "confidence": 0.75,
+  "explanation": "Implicit contradiction",
+  "resolution": null,
+  "detected_at": "2025-01-16T10:30:00Z",
+  "resolved_at": null
+}
+```
+
+---
+
+### POST /conflicts/{conflict_id}/resolve
+
+Resolve a conflict with a given resolution.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `conflict_id` | string | Conflict ID |
+
+**Request Body:**
+```json
+{
+  "resolution": "newer_wins"
+}
+```
+
+| Resolution | Description |
+|------------|-------------|
+| `newer_wins` | More recent memory supersedes the older one |
+| `flag_for_review` | Keep both, mark for manual review |
+| `lower_confidence` | Reduce confidence of both memories |
+| `create_negation` | Create a negation fact from the conflict |
+
+**Response (200 OK):** Updated conflict with resolution and resolved_at timestamp.
+
+---
+
+### DELETE /conflicts
+
+Clear all conflicts for a user.
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `user_id` | string | Yes | User ID |
+| `org_id` | string | No | Optional org filter |
+
+**Response (200 OK):**
+```json
+{
+  "cleared": 5
+}
+```
+
+---
+
 ## Error Responses
 
 All endpoints return standard error responses:

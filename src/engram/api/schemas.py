@@ -826,3 +826,107 @@ class UpdateMemoryResponse(BaseModel):
     updated: bool = Field(description="Whether any changes were made")
     re_embedded: bool = Field(default=False, description="Whether content was re-embedded")
     changes: list[UpdateChange] = Field(default_factory=list, description="List of field changes")
+
+
+# ============================================================================
+# Conflict Detection Schemas
+# ============================================================================
+
+
+class DetectConflictsRequest(BaseModel):
+    """Request body for detecting conflicts.
+
+    Attributes:
+        user_id: User ID for multi-tenancy.
+        org_id: Optional organization ID.
+        memory_type: Memory type to check (semantic or structured).
+        similarity_threshold: Minimum similarity to consider as potential conflict.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(min_length=1, description="User ID for isolation")
+    org_id: str | None = Field(default=None, description="Optional org ID")
+    memory_type: Literal["semantic", "structured"] = Field(
+        default="semantic", description="Memory type to check"
+    )
+    similarity_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum similarity to consider as potential conflict",
+    )
+
+
+class ConflictResponse(BaseModel):
+    """Response for a detected conflict.
+
+    Attributes:
+        id: Conflict ID.
+        memory_a_id: ID of the first memory.
+        memory_a_content: Content of the first memory.
+        memory_b_id: ID of the second memory.
+        memory_b_content: Content of the second memory.
+        conflict_type: Type of conflict (direct, implicit, temporal).
+        confidence: Confidence that this is a true conflict.
+        explanation: Explanation of the conflict.
+        resolution: How the conflict was resolved.
+        detected_at: When the conflict was detected.
+        resolved_at: When the conflict was resolved.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Conflict ID")
+    memory_a_id: str = Field(description="ID of the first memory")
+    memory_a_content: str = Field(description="Content of the first memory")
+    memory_b_id: str = Field(description="ID of the second memory")
+    memory_b_content: str = Field(description="Content of the second memory")
+    conflict_type: str = Field(description="Type: direct, implicit, temporal")
+    confidence: float = Field(description="Confidence in conflict detection")
+    explanation: str = Field(description="Explanation of the conflict")
+    resolution: str | None = Field(default=None, description="Resolution if resolved")
+    detected_at: datetime = Field(description="When detected")
+    resolved_at: datetime | None = Field(default=None, description="When resolved")
+
+
+class ConflictListResponse(BaseModel):
+    """Response for listing conflicts.
+
+    Attributes:
+        conflicts: List of detected conflicts.
+        count: Total number of conflicts.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    conflicts: list[ConflictResponse] = Field(default_factory=list)
+    count: int = Field(ge=0, description="Total conflicts")
+
+
+class DetectConflictsResponse(BaseModel):
+    """Response for conflict detection workflow.
+
+    Attributes:
+        conflicts_found: Number of new conflicts detected.
+        conflicts: List of detected conflicts.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    conflicts_found: int = Field(ge=0, description="Number of new conflicts")
+    conflicts: list[ConflictResponse] = Field(default_factory=list)
+
+
+class ResolveConflictRequest(BaseModel):
+    """Request to resolve a conflict.
+
+    Attributes:
+        resolution: Resolution type.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resolution: Literal["newer_wins", "flag_for_review", "lower_confidence", "create_negation"] = (
+        Field(description="Resolution type")
+    )

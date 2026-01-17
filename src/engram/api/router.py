@@ -14,6 +14,8 @@ from engram.service import EngramService
 from .schemas import (
     BulkDeleteResponse,
     ConfidenceStats,
+    ConflictListResponse,
+    ConflictResponse,
     ConsolidateRequest,
     ConsolidateResponse,
     CreateLinkRequest,
@@ -21,6 +23,8 @@ from .schemas import (
     DecayRequest,
     DecayResponse,
     DeleteLinkResponse,
+    DetectConflictsRequest,
+    DetectConflictsResponse,
     EncodeRequest,
     EncodeResponse,
     EpisodeResponse,
@@ -34,6 +38,7 @@ from .schemas import (
     RecallRequest,
     RecallResponse,
     RecallResultResponse,
+    ResolveConflictRequest,
     SourceEpisodeDetail,
     SourceEpisodeSummary,
     SourcesResponse,
@@ -1615,4 +1620,252 @@ async def delete_link(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while deleting the link",
+        ) from e
+
+
+# ============================================================================
+# Conflict Detection Endpoints
+# ============================================================================
+
+
+@router.post("/conflicts/detect", response_model=DetectConflictsResponse)
+async def detect_conflicts(
+    request: DetectConflictsRequest,
+) -> DetectConflictsResponse:
+    """Detect contradictions between memories.
+
+    Analyzes memories to find potential contradictions using semantic
+    similarity and LLM-based conflict analysis.
+
+    Args:
+        request: Detection parameters including user_id and memory_type.
+
+    Returns:
+        DetectConflictsResponse with detected conflicts.
+    """
+    service = await get_service()
+
+    try:
+        if request.memory_type == "semantic":
+            conflicts = await service.detect_conflicts_in_semantic(
+                user_id=request.user_id,
+                org_id=request.org_id,
+                similarity_threshold=request.similarity_threshold,
+            )
+        else:
+            conflicts = await service.detect_conflicts_in_structured(
+                user_id=request.user_id,
+                org_id=request.org_id,
+                similarity_threshold=request.similarity_threshold,
+            )
+
+        return DetectConflictsResponse(
+            conflicts_found=len(conflicts),
+            conflicts=[
+                ConflictResponse(
+                    id=c.id,
+                    memory_a_id=c.memory_a_id,
+                    memory_a_content=c.memory_a_content,
+                    memory_b_id=c.memory_b_id,
+                    memory_b_content=c.memory_b_content,
+                    conflict_type=c.conflict_type,
+                    confidence=c.confidence,
+                    explanation=c.explanation,
+                    resolution=c.resolution,
+                    detected_at=c.detected_at,
+                    resolved_at=c.resolved_at,
+                )
+                for c in conflicts
+            ],
+        )
+
+    except Exception as e:
+        logger.exception("Failed to detect conflicts")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred during conflict detection",
+        ) from e
+
+
+@router.get("/conflicts", response_model=ConflictListResponse)
+async def list_conflicts(
+    user_id: str,
+    org_id: str | None = None,
+    include_resolved: bool = False,
+) -> ConflictListResponse:
+    """List detected conflicts for a user.
+
+    Args:
+        user_id: User ID for multi-tenancy.
+        org_id: Optional organization ID filter.
+        include_resolved: Whether to include resolved conflicts.
+
+    Returns:
+        ConflictListResponse with list of conflicts.
+    """
+    service = await get_service()
+
+    try:
+        conflicts = service.get_conflicts(
+            user_id=user_id,
+            org_id=org_id,
+            include_resolved=include_resolved,
+        )
+
+        return ConflictListResponse(
+            conflicts=[
+                ConflictResponse(
+                    id=c.id,
+                    memory_a_id=c.memory_a_id,
+                    memory_a_content=c.memory_a_content,
+                    memory_b_id=c.memory_b_id,
+                    memory_b_content=c.memory_b_content,
+                    conflict_type=c.conflict_type,
+                    confidence=c.confidence,
+                    explanation=c.explanation,
+                    resolution=c.resolution,
+                    detected_at=c.detected_at,
+                    resolved_at=c.resolved_at,
+                )
+                for c in conflicts
+            ],
+            count=len(conflicts),
+        )
+
+    except Exception as e:
+        logger.exception("Failed to list conflicts")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while listing conflicts",
+        ) from e
+
+
+@router.get("/conflicts/{conflict_id}", response_model=ConflictResponse)
+async def get_conflict(conflict_id: str) -> ConflictResponse:
+    """Get a specific conflict by ID.
+
+    Args:
+        conflict_id: The conflict ID.
+
+    Returns:
+        ConflictResponse with conflict details.
+
+    Raises:
+        HTTPException: 404 if conflict not found.
+    """
+    service = await get_service()
+
+    try:
+        conflict = service.get_conflict(conflict_id)
+
+        if conflict is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Conflict not found: {conflict_id}",
+            )
+
+        return ConflictResponse(
+            id=conflict.id,
+            memory_a_id=conflict.memory_a_id,
+            memory_a_content=conflict.memory_a_content,
+            memory_b_id=conflict.memory_b_id,
+            memory_b_content=conflict.memory_b_content,
+            conflict_type=conflict.conflict_type,
+            confidence=conflict.confidence,
+            explanation=conflict.explanation,
+            resolution=conflict.resolution,
+            detected_at=conflict.detected_at,
+            resolved_at=conflict.resolved_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get conflict %s", conflict_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while getting conflict",
+        ) from e
+
+
+@router.post("/conflicts/{conflict_id}/resolve", response_model=ConflictResponse)
+async def resolve_conflict(
+    conflict_id: str,
+    request: ResolveConflictRequest,
+) -> ConflictResponse:
+    """Resolve a conflict with a given resolution.
+
+    Args:
+        conflict_id: The conflict ID.
+        request: Resolution details.
+
+    Returns:
+        Updated ConflictResponse.
+
+    Raises:
+        HTTPException: 404 if conflict not found.
+    """
+    service = await get_service()
+
+    try:
+        conflict = service.resolve_conflict(
+            conflict_id=conflict_id,
+            resolution=request.resolution,
+        )
+
+        if conflict is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Conflict not found: {conflict_id}",
+            )
+
+        return ConflictResponse(
+            id=conflict.id,
+            memory_a_id=conflict.memory_a_id,
+            memory_a_content=conflict.memory_a_content,
+            memory_b_id=conflict.memory_b_id,
+            memory_b_content=conflict.memory_b_content,
+            conflict_type=conflict.conflict_type,
+            confidence=conflict.confidence,
+            explanation=conflict.explanation,
+            resolution=conflict.resolution,
+            detected_at=conflict.detected_at,
+            resolved_at=conflict.resolved_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to resolve conflict %s", conflict_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while resolving conflict",
+        ) from e
+
+
+@router.delete("/conflicts", status_code=status.HTTP_200_OK)
+async def clear_conflicts(
+    user_id: str,
+    org_id: str | None = None,
+) -> dict[str, int]:
+    """Clear all conflicts for a user.
+
+    Args:
+        user_id: User ID for multi-tenancy.
+        org_id: Optional organization ID filter.
+
+    Returns:
+        Number of conflicts cleared.
+    """
+    service = await get_service()
+
+    try:
+        count = service.clear_conflicts(user_id=user_id, org_id=org_id)
+        return {"cleared": count}
+
+    except Exception as e:
+        logger.exception("Failed to clear conflicts")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while clearing conflicts",
         ) from e

@@ -17,6 +17,7 @@ Example:
 """
 
 from .base import EngramService
+from .contradiction import ConflictDetection
 from .helpers import IMPORTANCE_KEYWORDS, calculate_importance, cosine_similarity
 from .models import (
     EncodeResult,
@@ -29,6 +30,7 @@ from .models import (
 _calculate_importance = calculate_importance
 
 __all__ = [
+    "ConflictDetection",
     "IMPORTANCE_KEYWORDS",
     "EncodeResult",
     "EngramService",
