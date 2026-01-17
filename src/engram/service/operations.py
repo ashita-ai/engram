@@ -6,9 +6,10 @@ Provides consolidation, verification, and source tracing methods.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from engram.models import Episode, ProvenanceChain, ProvenanceEvent, Staleness
+from engram.models import Episode, HistoryEntry, ProvenanceChain, ProvenanceEvent, Staleness
 
 from .helpers import cosine_similarity
 from .models import RecallResult, SourceEpisodeSummary, VerificationResult
@@ -945,6 +946,91 @@ class OperationsMixin:
             return None
 
         return None
+
+    async def get_memory_history(
+        self,
+        memory_id: str,
+        user_id: str,
+        since: datetime | None = None,
+        limit: int = 100,
+    ) -> list[HistoryEntry]:
+        """Get change history for a specific memory.
+
+        Returns all changes made to a memory over time, enabling full
+        audit trail and debugging. Each entry shows before/after state,
+        what triggered the change, and when.
+
+        Args:
+            memory_id: ID of the memory to get history for.
+            user_id: User ID for multi-tenancy isolation.
+            since: Optional timestamp to filter entries after.
+            limit: Maximum entries to return (default 100).
+
+        Returns:
+            List of HistoryEntry sorted by timestamp (newest first).
+
+        Example:
+            ```python
+            history = await engram.get_memory_history("sem_abc123", user_id="u1")
+            for entry in history:
+                print(f"{entry.timestamp}: {entry.change_type} ({entry.trigger})")
+                if entry.diff:
+                    print(f"  Changed: {list(entry.diff.keys())}")
+            ```
+        """
+        return await self.storage.get_memory_history(
+            memory_id=memory_id,
+            user_id=user_id,
+            since=since,
+            limit=limit,
+        )
+
+    async def get_user_history(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        memory_type: str | None = None,
+        change_type: str | None = None,
+        since: datetime | None = None,
+        limit: int = 100,
+    ) -> list[HistoryEntry]:
+        """Get change history for all memories of a user.
+
+        Returns a timeline of all changes across all memory types,
+        useful for understanding how the user's memory store evolved.
+
+        Args:
+            user_id: User to get history for.
+            org_id: Optional organization filter.
+            memory_type: Optional filter by type (structured, semantic, procedural).
+            change_type: Optional filter by change type (created, updated, etc.).
+            since: Optional timestamp to filter entries after.
+            limit: Maximum entries to return (default 100).
+
+        Returns:
+            List of HistoryEntry sorted by timestamp (newest first).
+
+        Example:
+            ```python
+            # Get all recent changes
+            history = await engram.get_user_history(user_id="u1", limit=50)
+
+            # Get only consolidation-triggered changes
+            consolidations = await engram.get_user_history(
+                user_id="u1",
+                memory_type="semantic",
+                change_type="strengthened",
+            )
+            ```
+        """
+        return await self.storage.get_user_history(
+            user_id=user_id,
+            org_id=org_id,
+            memory_type=memory_type,
+            change_type=change_type,
+            since=since,
+            limit=limit,
+        )
 
 
 __all__ = ["OperationsMixin"]

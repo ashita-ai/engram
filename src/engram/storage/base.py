@@ -15,6 +15,7 @@ from engram.config import settings
 from engram.models import (
     AuditEntry,
     Episode,
+    HistoryEntry,
     ProceduralMemory,
     SemanticMemory,
     StructuredMemory,
@@ -31,6 +32,7 @@ MemoryT = TypeVar(
     SemanticMemory,
     ProceduralMemory,
     AuditEntry,
+    HistoryEntry,
 )
 
 # Collection names by memory type (keys match API memory_types values)
@@ -40,6 +42,7 @@ COLLECTION_NAMES = {
     "semantic": "semantic",
     "procedural": "procedural",
     "audit": "audit",
+    "history": "history",
 }
 
 # Default embedding dimension (text-embedding-3-small)
@@ -171,11 +174,28 @@ class StorageBase:
             field_name="org_id",
             field_schema=models.PayloadSchemaType.KEYWORD,
         )
-        if "audit" not in collection_name:
+        if "audit" not in collection_name and "history" not in collection_name:
             await self.client.create_payload_index(
                 collection_name=collection_name,
                 field_name="confidence_value",
                 field_schema=models.PayloadSchemaType.FLOAT,
+            )
+        # History-specific indexes
+        if "history" in collection_name:
+            await self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name="memory_id",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+            await self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name="memory_type",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+            await self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name="change_type",
+                field_schema=models.PayloadSchemaType.KEYWORD,
             )
 
     def _memory_to_payload(self, memory: BaseModel) -> dict[str, Any]:

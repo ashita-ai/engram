@@ -859,6 +859,7 @@ class UpdateMemoryRequest(BaseModel):
         keywords: New keywords list (semantic only).
         context: New context description (semantic only).
         user_id: User ID for multi-tenancy isolation.
+        org_id: Optional organization ID for further isolation.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -871,6 +872,7 @@ class UpdateMemoryRequest(BaseModel):
     keywords: list[str] | None = Field(default=None, description="New keywords list")
     context: str | None = Field(default=None, description="New context description")
     user_id: str = Field(min_length=1, description="User ID for isolation")
+    org_id: str | None = Field(default=None, description="Optional organization ID")
 
 
 class UpdateChange(BaseModel):
@@ -1011,3 +1013,54 @@ class ResolveConflictRequest(BaseModel):
     resolution: Literal["newer_wins", "flag_for_review", "lower_confidence", "create_negation"] = (
         Field(description="Resolution type")
     )
+
+
+# History schemas
+ChangeType = Literal["created", "updated", "strengthened", "weakened", "archived", "deleted"]
+TriggerType = Literal[
+    "encode", "consolidation", "decay", "promotion", "manual", "retrieval", "system"
+]
+
+
+class HistoryEntryResponse(BaseModel):
+    """Response model for a single history entry.
+
+    Attributes:
+        id: Unique identifier for this history entry.
+        memory_id: ID of the memory that changed.
+        memory_type: Type of memory (structured, semantic, procedural).
+        timestamp: When the change occurred.
+        change_type: Type of change.
+        trigger: What caused the change.
+        before: Previous state (null for create).
+        after: New state (null for delete).
+        diff: What specifically changed.
+        reason: Human-readable explanation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="History entry ID")
+    memory_id: str = Field(description="ID of the memory that changed")
+    memory_type: str = Field(description="Type: structured, semantic, procedural")
+    timestamp: datetime = Field(description="When the change occurred")
+    change_type: ChangeType = Field(description="Type of change")
+    trigger: TriggerType = Field(description="What caused the change")
+    before: dict[str, Any] | None = Field(default=None, description="Previous state")
+    after: dict[str, Any] | None = Field(default=None, description="New state")
+    diff: dict[str, Any] = Field(default_factory=dict, description="What changed")
+    reason: str | None = Field(default=None, description="Explanation")
+
+
+class HistoryListResponse(BaseModel):
+    """Response for history queries.
+
+    Attributes:
+        entries: List of history entries.
+        count: Total number of entries returned.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    entries: list[HistoryEntryResponse] = Field(default_factory=list)
+    count: int = Field(ge=0, description="Number of entries")

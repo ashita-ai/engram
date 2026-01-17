@@ -8,7 +8,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from engram.models import AuditEntry
+from engram.models import AuditEntry, HistoryEntry
 from engram.service import EngramService
 
 from .schemas import (
@@ -29,6 +29,8 @@ from .schemas import (
     EncodeResponse,
     EpisodeResponse,
     HealthResponse,
+    HistoryEntryResponse,
+    HistoryListResponse,
     IntermediateMemoryResponse,
     LinkDetail,
     LinksListResponse,
@@ -744,6 +746,24 @@ async def delete_memory(
         )
 
     try:
+        # Capture state before deletion for history logging (mutable types only)
+        before_state: dict[str, object] | None = None
+        if memory_type == "structured":
+            struct_mem = await service.storage.get_structured(memory_id, user_id)
+            if struct_mem:
+                before_state = struct_mem.model_dump(mode="json")
+                before_state.pop("embedding", None)
+        elif memory_type == "semantic":
+            sem_mem = await service.storage.get_semantic(memory_id, user_id)
+            if sem_mem:
+                before_state = sem_mem.model_dump(mode="json")
+                before_state.pop("embedding", None)
+        elif memory_type == "procedural":
+            proc_mem = await service.storage.get_procedural(memory_id, user_id)
+            if proc_mem:
+                before_state = proc_mem.model_dump(mode="json")
+                before_state.pop("embedding", None)
+
         # Call appropriate delete method based on memory type
         if memory_type == "episodic":
             deleted = await service.storage.delete_episode(memory_id, user_id)
@@ -770,6 +790,19 @@ async def delete_memory(
             duration_ms=duration_ms,
         )
         await service.storage.log_audit(audit_entry)
+
+        # Log history entry for deletion (mutable types only)
+        if before_state is not None:
+            history_entry = HistoryEntry.for_delete(
+                memory_id=memory_id,
+                memory_type=memory_type,
+                user_id=user_id,
+                trigger="manual",
+                before_state=before_state,
+                org_id=org_id,
+                reason="Manual deletion via API",
+            )
+            await service.storage.log_history(history_entry)
 
         logger.info("Deleted %s memory %s for user %s", memory_type, memory_id, user_id)
 
@@ -846,6 +879,11 @@ async def update_memory(
         changes: list[UpdateChange] = []
         re_embedded = False
 
+        # Track before/after state for history logging
+        before_state: dict[str, object] | None = None
+        after_state: dict[str, object] | None = None
+        memory_ref: object = None  # Reference to the memory object for after_state
+
         # Get and update memory based on type
         if memory_type == "structured":
             memory = await service.storage.get_structured(memory_id, request.user_id)
@@ -854,6 +892,10 @@ async def update_memory(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Memory not found: {memory_id}",
                 )
+            # Capture before state for history
+            before_state = memory.model_dump(mode="json")
+            before_state.pop("embedding", None)  # Don't include embedding in history
+            memory_ref = memory
 
             # Update content (summary for structured memories)
             if request.content is not None and request.content != memory.summary:
@@ -890,6 +932,10 @@ async def update_memory(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Memory not found: {memory_id}",
                 )
+            # Capture before state for history
+            before_state = memory_sem.model_dump(mode="json")
+            before_state.pop("embedding", None)
+            memory_ref = memory_sem
 
             # Update content
             if request.content is not None and request.content != memory_sem.content:
@@ -959,6 +1005,10 @@ async def update_memory(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Memory not found: {memory_id}",
                 )
+            # Capture before state for history
+            before_state = memory_proc.model_dump(mode="json")
+            before_state.pop("embedding", None)
+            memory_ref = memory_proc
 
             # Update content
             if request.content is not None and request.content != memory_proc.content:
@@ -1004,6 +1054,22 @@ async def update_memory(
                 duration_ms=duration_ms,
             )
             await service.storage.log_audit(audit_entry)
+
+            # Log history entry for change tracking
+            if before_state is not None and memory_ref is not None:
+                after_state = memory_ref.model_dump(mode="json")
+                after_state.pop("embedding", None)
+                history_entry = HistoryEntry.for_update(
+                    memory_id=memory_id,
+                    memory_type=memory_type,
+                    user_id=request.user_id,
+                    trigger="manual",
+                    before_state=before_state,
+                    after_state=after_state,
+                    org_id=request.org_id,
+                    reason=f"Manual update via API: {len(changes)} field(s) changed",
+                )
+                await service.storage.log_history(history_entry)
 
             logger.info(
                 "Updated %s memory %s for user %s: %d changes",
@@ -2002,4 +2068,205 @@ async def clear_conflicts(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while clearing conflicts",
+        ) from e
+
+
+# ============================================================================
+# History Endpoints
+# ============================================================================
+
+
+@router.get(
+    "/memories/{memory_id}/history",
+    response_model=HistoryListResponse,
+    tags=["history"],
+)
+async def get_memory_history(
+    memory_id: str,
+    user_id: str,
+    service: ServiceDep,
+    since: str | None = None,
+    limit: int = 100,
+) -> HistoryListResponse:
+    """Get change history for a specific memory.
+
+    Returns all changes made to a memory over time, enabling full audit
+    trail and debugging. Each entry shows before/after state, what
+    triggered the change, and when it occurred.
+
+    Supported memory types (by ID prefix):
+    - struct_*: Structured memories
+    - sem_*: Semantic memories
+    - proc_*: Procedural memories
+
+    Args:
+        memory_id: ID of the memory to get history for.
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+        since: Optional ISO timestamp to filter entries after.
+        limit: Maximum entries to return (default 100).
+
+    Returns:
+        List of history entries sorted by timestamp (newest first).
+
+    Raises:
+        HTTPException: 400 if memory ID format is invalid.
+        HTTPException: 400 if since timestamp is invalid.
+    """
+    from datetime import datetime
+
+    # Validate memory ID format
+    if not any(memory_id.startswith(prefix) for prefix in ["struct_", "sem_", "proc_"]):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Expected prefix: struct_, sem_, or proc_",
+        )
+
+    # Parse since timestamp if provided
+    since_dt: datetime | None = None
+    if since is not None:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid timestamp format: {since}. Use ISO format.",
+            ) from e
+
+    try:
+        entries = await service.get_memory_history(
+            memory_id=memory_id,
+            user_id=user_id,
+            since=since_dt,
+            limit=limit,
+        )
+
+        return HistoryListResponse(
+            entries=[
+                HistoryEntryResponse(
+                    id=entry.id,
+                    memory_id=entry.memory_id,
+                    memory_type=entry.memory_type,
+                    timestamp=entry.timestamp,
+                    change_type=entry.change_type,
+                    trigger=entry.trigger,
+                    before=entry.before,
+                    after=entry.after,
+                    diff=entry.diff,
+                    reason=entry.reason,
+                )
+                for entry in entries
+            ],
+            count=len(entries),
+        )
+
+    except Exception as e:
+        logger.exception("Failed to get memory history for %s", memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while retrieving history",
+        ) from e
+
+
+@router.get(
+    "/users/{user_id}/history",
+    response_model=HistoryListResponse,
+    tags=["history"],
+)
+async def get_user_history(
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+    memory_type: str | None = None,
+    change_type: str | None = None,
+    since: str | None = None,
+    limit: int = 100,
+) -> HistoryListResponse:
+    """Get change history for all memories of a user.
+
+    Returns a timeline of all changes across all memory types, useful
+    for understanding how the user's memory store evolved over time.
+
+    Args:
+        user_id: User to get history for.
+        service: Injected EngramService.
+        org_id: Optional organization filter.
+        memory_type: Optional filter by type (structured, semantic, procedural).
+        change_type: Optional filter by change type (created, updated,
+            strengthened, weakened, archived, deleted).
+        since: Optional ISO timestamp to filter entries after.
+        limit: Maximum entries to return (default 100).
+
+    Returns:
+        List of history entries sorted by timestamp (newest first).
+
+    Raises:
+        HTTPException: 400 if parameters are invalid.
+    """
+    from datetime import datetime
+
+    # Validate memory_type if provided
+    valid_memory_types = {"structured", "semantic", "procedural"}
+    if memory_type is not None and memory_type not in valid_memory_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory_type: {memory_type}. "
+            f"Valid types: {', '.join(valid_memory_types)}",
+        )
+
+    # Validate change_type if provided
+    valid_change_types = {"created", "updated", "strengthened", "weakened", "archived", "deleted"}
+    if change_type is not None and change_type not in valid_change_types:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid change_type: {change_type}. "
+            f"Valid types: {', '.join(valid_change_types)}",
+        )
+
+    # Parse since timestamp if provided
+    since_dt: datetime | None = None
+    if since is not None:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid timestamp format: {since}. Use ISO format.",
+            ) from e
+
+    try:
+        entries = await service.get_user_history(
+            user_id=user_id,
+            org_id=org_id,
+            memory_type=memory_type,
+            change_type=change_type,
+            since=since_dt,
+            limit=limit,
+        )
+
+        return HistoryListResponse(
+            entries=[
+                HistoryEntryResponse(
+                    id=entry.id,
+                    memory_id=entry.memory_id,
+                    memory_type=entry.memory_type,
+                    timestamp=entry.timestamp,
+                    change_type=entry.change_type,
+                    trigger=entry.trigger,
+                    before=entry.before,
+                    after=entry.after,
+                    diff=entry.diff,
+                    reason=entry.reason,
+                )
+                for entry in entries
+            ],
+            count=len(entries),
+        )
+
+    except Exception as e:
+        logger.exception("Failed to get user history for %s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while retrieving history",
         ) from e

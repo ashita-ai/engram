@@ -64,8 +64,8 @@ class TestEngramStorageInit:
         # The fixture itself uses async context manager pattern
         collections = await storage.client.get_collections()
         assert (
-            len(collections.collections) == 5
-        )  # episodic, structured, semantic, procedural, audit
+            len(collections.collections) == 6
+        )  # episodic, structured, semantic, procedural, audit, history
 
     def test_collection_name(self, storage: EngramStorage):
         """_collection_name should apply prefix correctly."""
