@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 import re
 import time
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from engram.models import AuditEntry, Episode, Staleness
@@ -46,6 +47,7 @@ class RecallMixin:
         query: str,
         user_id: str,
         org_id: str | None = None,
+        session_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
         min_selectivity: float = 0.0,
@@ -59,11 +61,12 @@ class RecallMixin:
         include_system_prompts: bool = False,
         diversity: float = 0.0,
         expand_query: bool = False,
+        rerank: bool | None = None,
     ) -> list[RecallResult]:
         """Recall memories by semantic similarity.
 
         Searches across memory types and returns unified results
-        sorted by similarity score, with optional diversity reranking.
+        sorted by similarity score, with optional context-aware reranking.
 
         Memory types:
         - episodic: Raw interactions (ground truth)
@@ -76,6 +79,7 @@ class RecallMixin:
             query: Natural language query.
             user_id: User ID for multi-tenancy isolation.
             org_id: Optional organization ID filter.
+            session_id: Current session ID for session-aware reranking bonus.
             limit: Maximum results per memory type.
             min_confidence: Minimum confidence for structured/semantic.
             min_selectivity: Minimum selectivity for semantic memories (0.0-1.0).
@@ -93,9 +97,12 @@ class RecallMixin:
                 return more diverse results at the cost of some relevance. 0.0 = no
                 diversity reranking (default), 0.3 = recommended balance.
             expand_query: Expand query with LLM-generated related terms for better recall.
+            rerank: Enable context-aware reranking using weighted signals (similarity,
+                recency, confidence, session match, access frequency). None uses
+                settings.rerank_enabled (default True).
 
         Returns:
-            List of RecallResult sorted by similarity score (or MMR score if diversity > 0).
+            List of RecallResult sorted by final score (reranked if enabled).
         """
         start_time = time.monotonic()
 
@@ -156,6 +163,13 @@ class RecallMixin:
         # Apply freshness filtering
         if freshness == "fresh_only":
             results = [r for r in results if r.staleness == Staleness.FRESH]
+
+        # Apply context-aware reranking
+        should_rerank = rerank if rerank is not None else self.settings.rerank_enabled
+        if should_rerank and results:
+            results = self._apply_context_reranking(results, session_id)
+            # Re-sort after reranking
+            results.sort(key=lambda r: r.score, reverse=True)
 
         # Apply MMR diversity reranking if diversity > 0
         if diversity > 0 and len(results) > limit:
@@ -353,6 +367,7 @@ class RecallMixin:
                         "role": ep.role,
                         "importance": ep.importance,
                         "timestamp": ep.timestamp.isoformat(),
+                        "session_id": ep.session_id,
                         "summarized": ep.summarized,
                         "structured": ep.structured,
                     },
@@ -407,7 +422,9 @@ class RecallMixin:
                         "negations": [n.model_dump() for n in struct.negations]
                         if struct.negations
                         else [],
+                        "timestamp": struct.derived_at.isoformat(),
                         "derived_at": struct.derived_at.isoformat(),
+                        "retrieval_count": struct.retrieval_count,
                     },
                 )
             )
@@ -904,6 +921,180 @@ class RecallMixin:
 
             except Exception as e:
                 logger.warning(f"Failed to strengthen {result.memory_type} {result.memory_id}: {e}")
+
+    def _apply_context_reranking(
+        self,
+        results: list[RecallResult],
+        session_id: str | None = None,
+    ) -> list[RecallResult]:
+        """Apply context-aware reranking using weighted signals.
+
+        Combines multiple signals to compute a final score:
+        - Similarity: Original vector similarity score
+        - Recency: Time decay (more recent = higher score)
+        - Confidence: Memory confidence score
+        - Session match: Bonus for memories from same session
+        - Access boost: Bonus for frequently accessed memories
+
+        Args:
+            results: List of recall results to rerank.
+            session_id: Current session ID for session match bonus.
+
+        Returns:
+            Results with updated scores based on weighted signals.
+        """
+        weights = self.settings.rerank_weights
+        now = datetime.now(UTC)
+
+        reranked: list[RecallResult] = []
+        for result in results:
+            # Signal 1: Similarity (already normalized 0-1)
+            similarity_score = result.score
+
+            # Signal 2: Recency (exponential decay)
+            recency_score = self._calculate_recency_score(
+                result, now, weights.recency_half_life_hours
+            )
+
+            # Signal 3: Confidence (normalized 0-1, default 0.5 for episodic)
+            confidence_score = result.confidence if result.confidence is not None else 0.5
+
+            # Signal 4: Session match (binary 0 or 1)
+            session_score = self._calculate_session_score(result, session_id)
+
+            # Signal 5: Access boost (logarithmic scaling)
+            access_score = self._calculate_access_score(result, weights.max_access_boost)
+
+            # Compute weighted final score
+            final_score = (
+                similarity_score * weights.similarity
+                + recency_score * weights.recency
+                + confidence_score * weights.confidence
+                + session_score * weights.session
+                + access_score * weights.access
+            )
+
+            # Clamp to [0, 1]
+            final_score = max(0.0, min(1.0, final_score))
+
+            # Create updated result with new score
+            reranked.append(
+                RecallResult(
+                    memory_type=result.memory_type,
+                    content=result.content,
+                    score=final_score,
+                    confidence=result.confidence,
+                    memory_id=result.memory_id,
+                    source_episode_id=result.source_episode_id,
+                    source_episode_ids=result.source_episode_ids,
+                    source_episodes=result.source_episodes,
+                    related_ids=result.related_ids,
+                    hop_distance=result.hop_distance,
+                    staleness=result.staleness,
+                    consolidated_at=result.consolidated_at,
+                    metadata={
+                        **result.metadata,
+                        "original_similarity": similarity_score,
+                        "rerank_signals": {
+                            "similarity": similarity_score,
+                            "recency": recency_score,
+                            "confidence": confidence_score,
+                            "session": session_score,
+                            "access": access_score,
+                        },
+                    },
+                )
+            )
+
+        return reranked
+
+    def _calculate_recency_score(
+        self,
+        result: RecallResult,
+        now: datetime,
+        half_life_hours: float,
+    ) -> float:
+        """Calculate recency score using exponential decay.
+
+        Args:
+            result: The recall result.
+            now: Current timestamp.
+            half_life_hours: Hours for score to halve.
+
+        Returns:
+            Recency score between 0.0 and 1.0.
+        """
+        # Get timestamp from metadata
+        timestamp_str = result.metadata.get("timestamp")
+        if not timestamp_str:
+            # For memories without timestamp, use moderate recency
+            return 0.5
+
+        try:
+            # Parse ISO format timestamp
+            timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=UTC)
+
+            # Calculate age in hours
+            age_hours = (now - timestamp).total_seconds() / 3600.0
+
+            # Exponential decay: score = 0.5^(age / half_life)
+            # This gives 1.0 for age=0, 0.5 for age=half_life, 0.25 for age=2*half_life, etc.
+            decay_factor = math.pow(0.5, age_hours / half_life_hours)
+            return max(0.0, min(1.0, decay_factor))
+
+        except (ValueError, TypeError):
+            return 0.5
+
+    def _calculate_session_score(
+        self,
+        result: RecallResult,
+        current_session_id: str | None,
+    ) -> float:
+        """Calculate session match score.
+
+        Args:
+            result: The recall result.
+            current_session_id: Current session ID.
+
+        Returns:
+            1.0 if sessions match, 0.0 otherwise.
+        """
+        if current_session_id is None:
+            return 0.0
+
+        # Check metadata for session_id
+        memory_session_id = result.metadata.get("session_id")
+        if memory_session_id and memory_session_id == current_session_id:
+            return 1.0
+
+        return 0.0
+
+    def _calculate_access_score(
+        self,
+        result: RecallResult,
+        max_boost: float,
+    ) -> float:
+        """Calculate access frequency score using logarithmic scaling.
+
+        Args:
+            result: The recall result.
+            max_boost: Maximum access boost.
+
+        Returns:
+            Access score between 0.0 and max_boost.
+        """
+        # Get retrieval count from metadata
+        retrieval_count = result.metadata.get("retrieval_count", 0)
+        if not isinstance(retrieval_count, int) or retrieval_count <= 0:
+            return 0.0
+
+        # Logarithmic scaling: log(1 + count) / log(1 + 100)
+        # This gives a smooth curve that caps around 100 accesses
+        # log(1) = 0, log(11) ≈ 2.4, log(101) ≈ 4.6
+        normalized = math.log(1 + retrieval_count) / math.log(101)
+        return min(max_boost, normalized * max_boost)
 
     async def _apply_diversity_reranking(
         self,
