@@ -1064,3 +1064,152 @@ class HistoryListResponse(BaseModel):
 
     entries: list[HistoryEntryResponse] = Field(default_factory=list)
     count: int = Field(ge=0, description="Number of entries")
+
+
+# ============================================================================
+# Webhook Schemas
+# ============================================================================
+
+EventType = Literal[
+    "encode_complete",
+    "consolidation_started",
+    "consolidation_complete",
+    "decay_complete",
+    "memory_created",
+    "memory_updated",
+    "memory_archived",
+    "memory_deleted",
+]
+
+DeliveryStatus = Literal["pending", "success", "failed", "retrying"]
+
+
+class CreateWebhookRequest(BaseModel):
+    """Request to register a new webhook.
+
+    Attributes:
+        url: HTTPS endpoint to receive webhook events.
+        secret: Shared secret for HMAC-SHA256 signature verification.
+        events: List of event types to subscribe to. Defaults to all events.
+        description: Optional human-readable description.
+        user_id: User ID for multi-tenancy isolation.
+        org_id: Optional organization ID.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=1, description="HTTPS endpoint URL")
+    secret: str = Field(min_length=16, description="Shared secret (min 16 chars)")
+    events: list[EventType] | None = Field(
+        default=None,
+        description="Event types to subscribe to (default: all)",
+    )
+    description: str | None = Field(default=None, description="Human-readable description")
+    user_id: str = Field(min_length=1, description="User ID for isolation")
+    org_id: str | None = Field(default=None, description="Optional org ID")
+
+
+class UpdateWebhookRequest(BaseModel):
+    """Request to update a webhook.
+
+    All fields are optional - only provided fields are updated.
+
+    Attributes:
+        url: New HTTPS endpoint URL.
+        secret: New shared secret.
+        events: New list of event types to subscribe to.
+        enabled: Whether webhook is active.
+        description: New description.
+        user_id: User ID for multi-tenancy isolation.
+        org_id: Optional organization ID.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str | None = Field(default=None, description="New HTTPS endpoint URL")
+    secret: str | None = Field(default=None, min_length=16, description="New shared secret")
+    events: list[EventType] | None = Field(default=None, description="New event types")
+    enabled: bool | None = Field(default=None, description="Enable/disable webhook")
+    description: str | None = Field(default=None, description="New description")
+    user_id: str = Field(min_length=1, description="User ID for isolation")
+    org_id: str | None = Field(default=None, description="Optional org ID")
+
+
+class WebhookResponse(BaseModel):
+    """Response model for a webhook configuration.
+
+    Attributes:
+        id: Unique webhook ID.
+        url: HTTPS endpoint URL.
+        events: List of subscribed event types.
+        enabled: Whether webhook is active.
+        description: Human-readable description.
+        created_at: When the webhook was registered.
+        updated_at: When the webhook was last modified.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Webhook ID")
+    url: str = Field(description="HTTPS endpoint URL")
+    events: list[str] = Field(description="Subscribed event types")
+    enabled: bool = Field(description="Whether webhook is active")
+    description: str | None = Field(default=None, description="Description")
+    created_at: datetime = Field(description="When registered")
+    updated_at: datetime = Field(description="When last modified")
+
+
+class WebhookListResponse(BaseModel):
+    """Response for listing webhooks.
+
+    Attributes:
+        webhooks: List of webhook configurations.
+        count: Total number of webhooks.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    webhooks: list[WebhookResponse] = Field(default_factory=list)
+    count: int = Field(ge=0, description="Number of webhooks")
+
+
+class WebhookDeliveryResponse(BaseModel):
+    """Response model for a webhook delivery attempt.
+
+    Attributes:
+        id: Unique delivery ID.
+        webhook_id: ID of the webhook configuration.
+        event_id: ID of the event delivered.
+        status: Delivery status.
+        attempt: Attempt number.
+        created_at: When delivery started.
+        completed_at: When delivery finished.
+        response_code: HTTP response status code.
+        error: Error message if failed.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Delivery ID")
+    webhook_id: str = Field(description="Webhook configuration ID")
+    event_id: str = Field(description="Event ID")
+    status: DeliveryStatus = Field(description="Delivery status")
+    attempt: int = Field(ge=1, description="Attempt number")
+    created_at: datetime = Field(description="When delivery started")
+    completed_at: datetime | None = Field(default=None, description="When delivery finished")
+    response_code: int | None = Field(default=None, description="HTTP response code")
+    error: str | None = Field(default=None, description="Error message")
+
+
+class WebhookDeliveryListResponse(BaseModel):
+    """Response for listing webhook delivery logs.
+
+    Attributes:
+        deliveries: List of delivery records.
+        count: Total number of deliveries.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    deliveries: list[WebhookDeliveryResponse] = Field(default_factory=list)
+    count: int = Field(ge=0, description="Number of deliveries")

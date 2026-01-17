@@ -15,6 +15,7 @@ Supporting Types:
     - ResolvedDate, Person, Preference, Negation: Structured extraction sub-types
     - ProvenanceChain, ProvenanceEvent: Derivation tracking
     - AuditEntry: Operation logging
+    - WebhookConfig, WebhookEvent, WebhookDelivery: Webhook notifications
 """
 
 from .audit import AuditEntry
@@ -25,6 +26,14 @@ from .procedural import ProceduralMemory
 from .provenance import ProvenanceChain, ProvenanceEvent
 from .semantic import EvolutionEntry, SemanticMemory
 from .structured import Negation, Person, Preference, ResolvedDate, StructuredMemory
+from .webhook import (
+    ALL_EVENT_TYPES,
+    DeliveryStatus,
+    EventType,
+    WebhookConfig,
+    WebhookDelivery,
+    WebhookEvent,
+)
 
 __all__ = [
     # Base types
@@ -55,4 +64,11 @@ __all__ = [
     "HistoryEntry",
     "ChangeType",
     "TriggerType",
+    # Webhooks
+    "WebhookConfig",
+    "WebhookEvent",
+    "WebhookDelivery",
+    "EventType",
+    "DeliveryStatus",
+    "ALL_EVENT_TYPES",
 ]
