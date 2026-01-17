@@ -185,6 +185,24 @@ class Settings(BaseSettings):
         description="Strength increase per retrieval (smaller than consolidation's 0.1)",
     )
 
+    # Surprise-based Importance Scoring (Adaptive Compression)
+    surprise_scoring_enabled: bool = Field(
+        default=True,
+        description="Enable surprise/novelty factor in importance calculation",
+    )
+    surprise_weight: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=0.5,
+        description="Weight for surprise factor in importance (0.15 = 15%)",
+    )
+    surprise_search_limit: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of similar memories to check for surprise calculation",
+    )
+
     # Logging
     log_level: str = Field(
         default="INFO",

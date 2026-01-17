@@ -153,13 +153,16 @@ class EncodeMixin:
         episode.structured_into = structured.id
         await self.storage.update_episode(episode)
 
-        # Calculate importance based on extracts
+        # Calculate importance based on extracts + surprise
         if importance is None:
-            # Use structured extracts for importance calculation
-            calculated_importance = self._calculate_importance_from_structured(
+            # Use structured extracts and surprise for importance calculation
+            calculated_importance = await self._calculate_importance_with_surprise(
                 content=content,
                 role=role,
                 structured=structured,
+                embedding=embedding,
+                user_id=user_id,
+                org_id=org_id,
             )
             episode.importance = calculated_importance
             await self.storage.update_episode(episode)
@@ -199,18 +202,29 @@ class EncodeMixin:
 
         return EncodeResult(episode=episode, structured=structured)
 
-    def _calculate_importance_from_structured(
+    async def _calculate_importance_with_surprise(
         self,
         content: str,
         role: str,
         structured: StructuredMemory,
+        embedding: list[float],
+        user_id: str,
+        org_id: str | None = None,
     ) -> float:
-        """Calculate episode importance from structured extracts.
+        """Calculate episode importance including surprise/novelty factor.
+
+        Uses the Adaptive Compression framework (Nagy et al. 2025):
+        - Novel/surprising content gets higher importance
+        - Redundant/predictable content stays lower priority
+        - Surprise is computed as 1 - max_similarity to existing memories
 
         Args:
             content: The episode content.
             role: Role of the speaker.
             structured: The structured memory with extracts.
+            embedding: The episode's embedding vector.
+            user_id: User ID for memory search.
+            org_id: Optional organization ID.
 
         Returns:
             Importance score clamped to [0.0, 1.0].
@@ -244,7 +258,64 @@ class EncodeMixin:
         elif role == "system":
             score -= 0.1
 
+        # Surprise factor (Adaptive Compression)
+        if self.settings.surprise_scoring_enabled:
+            surprise_score = await self._calculate_surprise(
+                embedding=embedding,
+                user_id=user_id,
+                org_id=org_id,
+            )
+            score += surprise_score * self.settings.surprise_weight
+            logger.debug(
+                f"Surprise score: {surprise_score:.2f} (weighted: {surprise_score * self.settings.surprise_weight:.3f})"
+            )
+
         return max(0.0, min(1.0, score))
+
+    async def _calculate_surprise(
+        self,
+        embedding: list[float],
+        user_id: str,
+        org_id: str | None = None,
+    ) -> float:
+        """Calculate surprise/novelty score for new content.
+
+        Based on Adaptive Compression (Nagy et al. 2025):
+        - High similarity to existing memories = low surprise (predictable)
+        - Low similarity to existing memories = high surprise (novel)
+        - No existing memories = moderate surprise (cold start)
+
+        Args:
+            embedding: The new content's embedding vector.
+            user_id: User ID for memory search.
+            org_id: Optional organization ID.
+
+        Returns:
+            Surprise score between 0.0 (predictable) and 1.0 (highly novel).
+        """
+        try:
+            # Search for similar existing memories (episodic)
+            similar = await self.storage.search_episodes(
+                query_vector=embedding,
+                user_id=user_id,
+                org_id=org_id,
+                limit=self.settings.surprise_search_limit,
+            )
+
+            if similar:
+                # High similarity = low surprise
+                max_similarity = max(r.score for r in similar)
+                surprise = 1.0 - max_similarity
+                return max(0.0, min(1.0, surprise))
+            else:
+                # Cold start: no existing memories = moderate surprise
+                # Not maximum (1.0) since we don't know if this is truly novel
+                return 0.5
+
+        except Exception as e:
+            logger.warning(f"Surprise calculation failed: {e}")
+            # On error, return neutral surprise (don't affect importance)
+            return 0.0
 
     async def _enrich_structured_sync(
         self,
