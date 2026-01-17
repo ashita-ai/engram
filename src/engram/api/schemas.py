@@ -417,6 +417,83 @@ class VerificationResponse(BaseModel):
     explanation: str = Field(description="Human-readable derivation trace")
 
 
+class ProvenanceEventResponse(BaseModel):
+    """Response model for a single provenance event.
+
+    Attributes:
+        timestamp: When the event occurred.
+        event_type: Type of derivation event.
+        description: Human-readable description.
+        memory_id: ID of the memory involved.
+        metadata: Additional event data.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    timestamp: str = Field(description="When the event occurred (ISO format)")
+    event_type: str = Field(description="Type of event")
+    description: str = Field(description="Human-readable description")
+    memory_id: str | None = Field(default=None, description="ID of memory involved")
+    metadata: dict[str, object] = Field(default_factory=dict, description="Additional data")
+
+
+class IntermediateMemoryResponse(BaseModel):
+    """Response model for an intermediate memory in provenance chain.
+
+    Attributes:
+        id: Memory ID.
+        type: Memory type (structured, semantic).
+        summary_or_content: Summary or content preview.
+        derivation_method: How this memory was derived.
+        derived_at: When derived.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(description="Memory ID")
+    type: str = Field(description="Memory type")
+    summary_or_content: str = Field(description="Summary or content preview")
+    derivation_method: str = Field(description="How this was derived")
+    derived_at: str = Field(description="When derived (ISO format)")
+
+
+class ProvenanceResponse(BaseModel):
+    """Response for provenance endpoint.
+
+    Provides complete derivation chain from source episodes through
+    intermediate memories to the final derived memory.
+
+    Attributes:
+        memory_id: ID of the traced memory.
+        memory_type: Type of memory (structured, semantic, procedural).
+        derivation_method: How this memory was derived.
+        derivation_reasoning: LLM's explanation (if applicable).
+        derived_at: When derivation occurred.
+        source_episodes: Source episode details.
+        intermediate_memories: Intermediate derivations.
+        timeline: Chronological derivation events.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memory_id: str = Field(description="ID of the traced memory")
+    memory_type: str = Field(description="Type: structured, semantic, procedural")
+    derivation_method: str = Field(description="How this memory was derived")
+    derivation_reasoning: str | None = Field(
+        default=None, description="LLM's explanation (if applicable)"
+    )
+    derived_at: str | None = Field(default=None, description="When derived (ISO format)")
+    source_episodes: list[SourceEpisodeDetail] = Field(
+        default_factory=list, description="Source episode details"
+    )
+    intermediate_memories: list[IntermediateMemoryResponse] = Field(
+        default_factory=list, description="Intermediate derivations"
+    )
+    timeline: list[ProvenanceEventResponse] = Field(
+        default_factory=list, description="Chronological derivation events"
+    )
+
+
 class BulkDeleteResponse(BaseModel):
     """Response for bulk delete (GDPR erasure) endpoint.
 

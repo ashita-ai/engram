@@ -405,6 +405,9 @@ async def run_consolidation(
 
         embedding = await embedder.embed(final_summary)
 
+        # Get derivation method from settings
+        from engram.config import settings
+
         memory = SemanticMemory(
             content=final_summary,
             source_episode_ids=all_episode_ids,
@@ -413,6 +416,7 @@ async def run_consolidation(
             embedding=embedding,
             keywords=final_keywords,
             context=final_context,
+            derivation_method=f"consolidation:{settings.consolidation_model}",
         )
 
         # Set confidence based on number of supporting episodes
@@ -605,6 +609,9 @@ async def run_consolidation_from_structured(
 
     embedding = await embedder.embed(synthesis.summary)
 
+    # Get derivation method from settings
+    from engram.config import settings
+
     memory = SemanticMemory(
         content=synthesis.summary,
         source_episode_ids=source_episode_ids,
@@ -613,6 +620,7 @@ async def run_consolidation_from_structured(
         embedding=embedding,
         keywords=synthesis.keywords,
         context=synthesis.context,
+        derivation_method=f"consolidation:{settings.consolidation_model}",
     )
 
     # Set confidence based on structured input count

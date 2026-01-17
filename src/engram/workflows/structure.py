@@ -295,6 +295,9 @@ async def run_structure(
     )
 
     # 4. Create StructuredMemory
+    from engram.config import settings
+
+    model_spec = model or settings.consolidation_model
     structured = StructuredMemory.from_episode(
         source_episode_id=episode.id,
         user_id=episode.user_id,
@@ -313,6 +316,8 @@ async def run_structure(
         # Summary
         summary=llm_output.summary,
         keywords=llm_output.keywords,
+        # Provenance
+        derivation_method=f"rich:llm:{model_spec}",
     )
 
     # 5. Generate embedding from structured content

@@ -29,12 +29,15 @@ from .schemas import (
     EncodeResponse,
     EpisodeResponse,
     HealthResponse,
+    IntermediateMemoryResponse,
     LinkDetail,
     LinksListResponse,
     MemoryCounts,
     MemoryStatsResponse,
     PromoteRequest,
     PromoteResponse,
+    ProvenanceEventResponse,
+    ProvenanceResponse,
     RecallRequest,
     RecallResponse,
     RecallResultResponse,
@@ -559,6 +562,136 @@ async def verify_memory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while verifying the memory",
+        ) from e
+
+
+@router.get(
+    "/memories/{memory_id}/provenance",
+    response_model=ProvenanceResponse,
+    tags=["memory"],
+)
+async def get_provenance(
+    memory_id: str,
+    user_id: str,
+    service: ServiceDep,
+) -> ProvenanceResponse:
+    """Get complete provenance chain for a derived memory.
+
+    Traces a derived memory back through its entire derivation chain,
+    from source episodes through intermediate memories (StructuredMemory,
+    SemanticMemory), recording how and when each derivation occurred.
+
+    This is the full auditability endpoint, enabling any derived memory
+    to be traced back to its original source episodes with a complete
+    timeline of derivation events.
+
+    Args:
+        memory_id: ID of the derived memory (must start with struct_, sem_, or proc_).
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+
+    Returns:
+        ProvenanceResponse with complete derivation chain and timeline.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if memory not found.
+
+    Example:
+        GET /memories/sem_abc123/provenance?user_id=u1
+
+        Response:
+        {
+            "memory_id": "sem_abc123",
+            "memory_type": "semantic",
+            "derivation_method": "consolidation:openai:gpt-4o-mini",
+            "derived_at": "2026-01-15T12:00:00Z",
+            "source_episodes": [
+                {"id": "ep_xyz", "content": "Original content...", ...}
+            ],
+            "intermediate_memories": [
+                {"id": "struct_def", "type": "structured", ...}
+            ],
+            "timeline": [
+                {"timestamp": "...", "event_type": "stored", "description": "..."},
+                {"timestamp": "...", "event_type": "extracted", "description": "..."},
+                {"timestamp": "...", "event_type": "inferred", "description": "..."}
+            ]
+        }
+    """
+    # Validate memory ID format
+    valid_prefixes = ("struct_", "sem_", "proc_")
+    if not memory_id.startswith(valid_prefixes):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Expected prefix: struct_, sem_, or proc_",
+        )
+
+    try:
+        chain = await service.get_provenance(memory_id, user_id)
+
+        # Convert source episodes to response format
+        source_episode_responses = [
+            SourceEpisodeDetail(
+                id=ep["id"],
+                content=ep["content"],
+                role=ep["role"],
+                timestamp=ep["timestamp"],
+            )
+            for ep in chain.source_episodes
+        ]
+
+        # Convert intermediate memories to response format
+        intermediate_responses = [
+            IntermediateMemoryResponse(
+                id=mem["id"],
+                type=mem["type"],
+                summary_or_content=mem.get("summary") or mem.get("content", ""),
+                derivation_method=mem["derivation_method"],
+                derived_at=mem["derived_at"],
+            )
+            for mem in chain.intermediate_memories
+        ]
+
+        # Convert timeline to response format
+        timeline_responses = [
+            ProvenanceEventResponse(
+                timestamp=event.timestamp.isoformat(),
+                event_type=event.event_type,
+                description=event.description,
+                memory_id=event.memory_id,
+                metadata=event.metadata,
+            )
+            for event in chain.timeline
+        ]
+
+        return ProvenanceResponse(
+            memory_id=chain.memory_id,
+            memory_type=chain.memory_type,
+            derivation_method=chain.derivation_method or "unknown",
+            derivation_reasoning=chain.derivation_reasoning,
+            derived_at=chain.derived_at.isoformat() if chain.derived_at else None,
+            source_episodes=source_episode_responses,
+            intermediate_memories=intermediate_responses,
+            timeline=timeline_responses,
+        )
+
+    except KeyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception("Failed to get provenance for memory %s", memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while retrieving provenance",
         ) from e
 
 
