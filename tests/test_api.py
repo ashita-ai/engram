@@ -1374,3 +1374,190 @@ class TestLinkEndpoints:
         )
 
         assert response.status_code == 404
+
+
+class TestListMemoriesEndpoint:
+    """Tests for GET /memories endpoint."""
+
+    def test_list_memories_basic(self, client, mock_service):
+        """Should list memories with basic filter."""
+        mock_service.storage.search_memories = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": "ep_test1",
+                        "memory_type": "episodic",
+                        "content": "Test content 1",
+                        "user_id": "user_123",
+                        "org_id": None,
+                        "session_id": "session_1",
+                        "confidence": None,
+                        "created_at": "2025-01-15T10:00:00",
+                    },
+                    {
+                        "id": "sem_test2",
+                        "memory_type": "semantic",
+                        "content": "Test content 2",
+                        "user_id": "user_123",
+                        "org_id": None,
+                        "session_id": None,
+                        "confidence": 0.85,
+                        "created_at": "2025-01-14T10:00:00",
+                    },
+                ],
+                2,
+            )
+        )
+
+        response = client.get("/api/v1/memories?user_id=user_123")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["memories"]) == 2
+        assert data["total"] == 2
+        assert data["limit"] == 50
+        assert data["offset"] == 0
+        assert data["has_more"] is False
+        assert data["memories"][0]["id"] == "ep_test1"
+        assert data["memories"][1]["confidence"] == 0.85
+
+    def test_list_memories_with_memory_types_filter(self, client, mock_service):
+        """Should filter by memory types."""
+        mock_service.storage.search_memories = AsyncMock(return_value=([], 0))
+
+        response = client.get("/api/v1/memories?user_id=user_123&memory_types=episodic,semantic")
+
+        assert response.status_code == 200
+        mock_service.storage.search_memories.assert_called_once()
+        call_kwargs = mock_service.storage.search_memories.call_args[1]
+        assert call_kwargs["memory_types"] == ["episodic", "semantic"]
+
+    def test_list_memories_with_session_id_filter(self, client, mock_service):
+        """Should filter by session ID."""
+        mock_service.storage.search_memories = AsyncMock(return_value=([], 0))
+
+        response = client.get("/api/v1/memories?user_id=user_123&session_id=session_abc")
+
+        assert response.status_code == 200
+        call_kwargs = mock_service.storage.search_memories.call_args[1]
+        assert call_kwargs["session_id"] == "session_abc"
+
+    def test_list_memories_with_date_filters(self, client, mock_service):
+        """Should filter by date range."""
+        mock_service.storage.search_memories = AsyncMock(return_value=([], 0))
+
+        response = client.get(
+            "/api/v1/memories?user_id=user_123"
+            "&created_after=2025-01-01T00:00:00"
+            "&created_before=2025-01-31T23:59:59"
+        )
+
+        assert response.status_code == 200
+        call_kwargs = mock_service.storage.search_memories.call_args[1]
+        assert call_kwargs["created_after"] is not None
+        assert call_kwargs["created_before"] is not None
+
+    def test_list_memories_with_min_confidence(self, client, mock_service):
+        """Should filter by minimum confidence."""
+        mock_service.storage.search_memories = AsyncMock(return_value=([], 0))
+
+        response = client.get("/api/v1/memories?user_id=user_123&min_confidence=0.7")
+
+        assert response.status_code == 200
+        call_kwargs = mock_service.storage.search_memories.call_args[1]
+        assert call_kwargs["min_confidence"] == 0.7
+
+    def test_list_memories_with_sorting(self, client, mock_service):
+        """Should support sorting parameters."""
+        mock_service.storage.search_memories = AsyncMock(return_value=([], 0))
+
+        response = client.get("/api/v1/memories?user_id=user_123&sort_by=confidence&sort_order=asc")
+
+        assert response.status_code == 200
+        call_kwargs = mock_service.storage.search_memories.call_args[1]
+        assert call_kwargs["sort_by"] == "confidence"
+        assert call_kwargs["sort_order"] == "asc"
+
+    def test_list_memories_with_pagination(self, client, mock_service):
+        """Should support pagination parameters."""
+        mock_service.storage.search_memories = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": "ep_test1",
+                        "memory_type": "episodic",
+                        "content": "Test",
+                        "user_id": "user_123",
+                        "org_id": None,
+                        "session_id": None,
+                        "confidence": None,
+                        "created_at": "2025-01-15T10:00:00",
+                    }
+                ],
+                100,
+            )
+        )
+
+        response = client.get("/api/v1/memories?user_id=user_123&limit=20&offset=40")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["limit"] == 20
+        assert data["offset"] == 40
+        assert data["total"] == 100
+        assert data["has_more"] is True
+
+    def test_list_memories_invalid_memory_types(self, client, mock_service):
+        """Should return 400 for invalid memory types."""
+        response = client.get("/api/v1/memories?user_id=user_123&memory_types=invalid_type")
+
+        assert response.status_code == 400
+        assert "Invalid memory types" in response.json()["detail"]
+
+    def test_list_memories_invalid_sort_by(self, client, mock_service):
+        """Should return 400 for invalid sort field."""
+        response = client.get("/api/v1/memories?user_id=user_123&sort_by=invalid_field")
+
+        assert response.status_code == 400
+        assert "Invalid sort_by" in response.json()["detail"]
+
+    def test_list_memories_invalid_sort_order(self, client, mock_service):
+        """Should return 400 for invalid sort order."""
+        response = client.get("/api/v1/memories?user_id=user_123&sort_order=invalid")
+
+        assert response.status_code == 400
+        assert "Invalid sort_order" in response.json()["detail"]
+
+    def test_list_memories_invalid_limit(self, client, mock_service):
+        """Should return 400 for invalid limit."""
+        response = client.get("/api/v1/memories?user_id=user_123&limit=500")
+
+        assert response.status_code == 400
+        assert "Invalid limit" in response.json()["detail"]
+
+    def test_list_memories_invalid_offset(self, client, mock_service):
+        """Should return 400 for invalid offset."""
+        response = client.get("/api/v1/memories?user_id=user_123&offset=-10")
+
+        assert response.status_code == 400
+        assert "Invalid offset" in response.json()["detail"]
+
+    def test_list_memories_invalid_timestamp(self, client, mock_service):
+        """Should return 400 for invalid timestamp format."""
+        response = client.get("/api/v1/memories?user_id=user_123&created_after=invalid-date")
+
+        assert response.status_code == 400
+        assert "Invalid created_after timestamp" in response.json()["detail"]
+
+    def test_list_memories_invalid_min_confidence(self, client, mock_service):
+        """Should return 400 for invalid min_confidence."""
+        response = client.get("/api/v1/memories?user_id=user_123&min_confidence=1.5")
+
+        assert response.status_code == 400
+        assert "Invalid min_confidence" in response.json()["detail"]
+
+    def test_list_memories_missing_user_id(self, client, mock_service):
+        """Should return 422 when user_id is missing."""
+        response = client.get("/api/v1/memories")
+
+        assert response.status_code == 422

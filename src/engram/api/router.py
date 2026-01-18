@@ -12,6 +12,7 @@ from engram.models import AuditEntry, HistoryEntry
 from engram.service import EngramService
 
 from .schemas import (
+    ALL_MEMORY_TYPES,
     BulkDeleteResponse,
     ConfidenceStats,
     ConflictListResponse,
@@ -37,6 +38,8 @@ from .schemas import (
     LinkDetail,
     LinksListResponse,
     MemoryCounts,
+    MemoryListItem,
+    MemoryListResponse,
     MemoryStatsResponse,
     PromoteRequest,
     PromoteResponse,
@@ -351,6 +354,188 @@ async def get_memory_stats(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while retrieving memory statistics",
+        ) from e
+
+
+@router.get("/memories", response_model=MemoryListResponse, tags=["memory"])
+async def list_memories(
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+    session_id: str | None = None,
+    memory_types: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+    min_confidence: float | None = None,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
+) -> MemoryListResponse:
+    """List memories with metadata filters.
+
+    Search and filter memories without requiring a semantic query.
+    Useful for building memory browsers, session history retrieval,
+    and debugging memory contents.
+
+    Args:
+        user_id: User ID for multi-tenancy isolation (required).
+        service: Injected EngramService.
+        org_id: Optional organization ID filter.
+        session_id: Filter by session ID (episodic memories only).
+        memory_types: Comma-separated list of memory types to include.
+            Options: episodic, structured, semantic, procedural.
+            Defaults to all types if not specified.
+        created_after: Filter to memories created after this ISO timestamp.
+        created_before: Filter to memories created before this ISO timestamp.
+        min_confidence: Minimum confidence score (0.0-1.0). Applies to
+            derived memories only (structured, semantic, procedural).
+        sort_by: Field to sort by ("created_at" or "confidence").
+        sort_order: Sort direction ("asc" or "desc").
+        limit: Maximum results to return (1-100, default 50).
+        offset: Number of results to skip for pagination.
+
+    Returns:
+        List of memories with pagination metadata.
+
+    Raises:
+        HTTPException: 400 if parameters are invalid.
+
+    Example:
+        GET /memories?user_id=u1&memory_types=episodic,structured&limit=20
+
+        Response:
+        {
+            "memories": [
+                {"id": "ep_xxx", "memory_type": "episodic", "content": "...", ...},
+                {"id": "struct_yyy", "memory_type": "structured", ...}
+            ],
+            "total": 150,
+            "limit": 20,
+            "offset": 0,
+            "has_more": true
+        }
+    """
+    from datetime import datetime
+
+    # Validate memory_types if provided
+    types_list: list[str] | None = None
+    if memory_types is not None:
+        types_list = [t.strip() for t in memory_types.split(",")]
+        invalid_types = set(types_list) - ALL_MEMORY_TYPES
+        if invalid_types:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid memory types: {', '.join(invalid_types)}. "
+                f"Valid types: {', '.join(ALL_MEMORY_TYPES)}",
+            )
+
+    # Parse timestamps
+    created_after_dt: datetime | None = None
+    created_before_dt: datetime | None = None
+
+    if created_after is not None:
+        try:
+            created_after_dt = datetime.fromisoformat(created_after.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid created_after timestamp: {created_after}. Use ISO format.",
+            ) from e
+
+    if created_before is not None:
+        try:
+            created_before_dt = datetime.fromisoformat(created_before.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid created_before timestamp: {created_before}. Use ISO format.",
+            ) from e
+
+    # Validate sort_by
+    valid_sort_fields = {"created_at", "confidence"}
+    if sort_by not in valid_sort_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid sort_by: {sort_by}. Valid fields: {', '.join(valid_sort_fields)}",
+        )
+
+    # Validate sort_order
+    if sort_order not in {"asc", "desc"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid sort_order: {sort_order}. Use 'asc' or 'desc'.",
+        )
+
+    # Validate pagination
+    if limit < 1 or limit > 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid limit: {limit}. Must be between 1 and 100.",
+        )
+
+    if offset < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid offset: {offset}. Must be non-negative.",
+        )
+
+    # Validate min_confidence
+    if min_confidence is not None and (min_confidence < 0.0 or min_confidence > 1.0):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid min_confidence: {min_confidence}. Must be between 0.0 and 1.0.",
+        )
+
+    try:
+        memories, total = await service.storage.search_memories(
+            user_id=user_id,
+            org_id=org_id,
+            session_id=session_id,
+            memory_types=types_list,
+            created_after=created_after_dt,
+            created_before=created_before_dt,
+            min_confidence=min_confidence,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            limit=limit,
+            offset=offset,
+        )
+
+        memory_items = []
+        for m in memories:
+            conf_val = m.get("confidence")
+            conf: float | None = None
+            if conf_val is not None:
+                conf = float(conf_val)  # type: ignore[arg-type]
+            memory_items.append(
+                MemoryListItem(
+                    id=str(m["id"]),
+                    memory_type=str(m["memory_type"]),
+                    content=str(m["content"]),
+                    user_id=str(m["user_id"]),
+                    org_id=str(m["org_id"]) if m.get("org_id") else None,
+                    session_id=str(m["session_id"]) if m.get("session_id") else None,
+                    confidence=conf,
+                    created_at=str(m["created_at"]),
+                )
+            )
+
+        has_more = (offset + len(memory_items)) < total
+
+        return MemoryListResponse(
+            memories=memory_items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            has_more=has_more,
+        )
+
+    except Exception as e:
+        logger.exception("Failed to list memories for user %s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while listing memories",
         ) from e
 
 
