@@ -1561,3 +1561,69 @@ class TestListMemoriesEndpoint:
         response = client.get("/api/v1/memories")
 
         assert response.status_code == 422
+
+
+class TestDeleteMemoryEndpoint:
+    """Tests for DELETE /memories/{memory_id} endpoint."""
+
+    def test_delete_episodic_memory(self, client, mock_service):
+        """Should delete an episodic memory and return 204."""
+        mock_service.storage.delete_episode = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete("/api/v1/memories/ep_test123?user_id=user_123")
+
+        assert response.status_code == 204
+        mock_service.storage.delete_episode.assert_called_once_with("ep_test123", "user_123")
+
+    def test_delete_structured_memory(self, client, mock_service):
+        """Should delete a structured memory and return 204."""
+        mock_service.storage.get_structured = AsyncMock(return_value=None)
+        mock_service.storage.delete_structured = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete("/api/v1/memories/struct_test123?user_id=user_123")
+
+        assert response.status_code == 204
+
+    def test_delete_semantic_memory(self, client, mock_service):
+        """Should delete a semantic memory and return 204."""
+        mock_service.storage.get_semantic = AsyncMock(return_value=None)
+        mock_service.storage.delete_semantic = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete("/api/v1/memories/sem_test123?user_id=user_123")
+
+        assert response.status_code == 204
+
+    def test_delete_procedural_memory(self, client, mock_service):
+        """Should delete a procedural memory and return 204."""
+        mock_service.storage.get_procedural = AsyncMock(return_value=None)
+        mock_service.storage.delete_procedural = AsyncMock(return_value=True)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete("/api/v1/memories/proc_test123?user_id=user_123")
+
+        assert response.status_code == 204
+
+    def test_delete_memory_not_found(self, client, mock_service):
+        """Should return 404 when memory doesn't exist."""
+        mock_service.storage.delete_episode = AsyncMock(return_value=False)
+
+        response = client.delete("/api/v1/memories/ep_nonexistent?user_id=user_123")
+
+        assert response.status_code == 404
+        assert "Memory not found" in response.json()["detail"]
+
+    def test_delete_memory_invalid_format(self, client, mock_service):
+        """Should return 400 for invalid memory ID format."""
+        response = client.delete("/api/v1/memories/invalid_id?user_id=user_123")
+
+        assert response.status_code == 400
+        assert "Invalid memory ID format" in response.json()["detail"]
+
+    def test_delete_memory_missing_user_id(self, client, mock_service):
+        """Should return 422 when user_id is missing."""
+        response = client.delete("/api/v1/memories/ep_test123")
+
+        assert response.status_code == 422
