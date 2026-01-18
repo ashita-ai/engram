@@ -137,6 +137,57 @@ class GetMemoryResponse(BaseModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+# Valid sort fields for memory listing
+SortField = Literal["created_at", "confidence"]
+SortOrder = Literal["asc", "desc"]
+
+
+class MemoryListItem(BaseModel):
+    """A single memory item in a list response.
+
+    Attributes:
+        id: Memory ID.
+        memory_type: Type of memory (episodic, structured, semantic, procedural).
+        content: The memory content (preview, may be truncated).
+        user_id: User ID.
+        org_id: Optional org ID.
+        session_id: Session ID (for episodic memories).
+        confidence: Confidence score (None for episodic).
+        created_at: ISO timestamp of creation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    memory_type: str
+    content: str
+    user_id: str
+    org_id: str | None = None
+    session_id: str | None = None
+    confidence: float | None = None
+    created_at: str
+
+
+class MemoryListResponse(BaseModel):
+    """Response for listing memories with metadata filters.
+
+    Attributes:
+        memories: List of memory items.
+        total: Total number of matching memories (before pagination).
+        limit: Maximum items returned per page.
+        offset: Number of items skipped.
+        has_more: Whether there are more items available.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    memories: list[MemoryListItem] = Field(default_factory=list)
+    total: int = Field(ge=0, description="Total matching memories")
+    limit: int = Field(ge=1, description="Page size")
+    offset: int = Field(ge=0, description="Items skipped")
+    has_more: bool = Field(description="Whether more items are available")
+
+
 class EncodeResponse(BaseModel):
     """Response body for encode operation.
 

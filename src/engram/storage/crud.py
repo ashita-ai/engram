@@ -5,6 +5,7 @@ Provides methods to retrieve and delete individual memories.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from qdrant_client import models
@@ -1115,3 +1116,391 @@ class CRUDMixin:
         )
 
         return True
+
+    async def search_memories(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        session_id: str | None = None,
+        memory_types: list[str] | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        min_confidence: float | None = None,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, object]], int]:
+        """Search memories by metadata filters.
+
+        Supports filtering across all memory types without semantic search.
+        Results are sorted and paginated in Python after retrieval.
+
+        Args:
+            user_id: User ID for multi-tenancy isolation (required).
+            org_id: Optional organization ID filter.
+            session_id: Filter by session ID (episodes only).
+            memory_types: Filter by memory types. Options: episodic, structured,
+                semantic, procedural. None means all types.
+            created_after: Filter to memories created after this timestamp.
+            created_before: Filter to memories created before this timestamp.
+            min_confidence: Minimum confidence score (derived memories only).
+            sort_by: Sort field ("created_at" or "confidence").
+            sort_order: Sort direction ("asc" or "desc").
+            limit: Maximum results to return (after offset).
+            offset: Number of results to skip.
+
+        Returns:
+            Tuple of (list of memory dicts, total count before pagination).
+        """
+        # Determine which memory types to search
+        types_to_search = memory_types or ["episodic", "structured", "semantic", "procedural"]
+
+        all_memories: list[dict[str, object]] = []
+
+        # Search each collection
+        for mem_type in types_to_search:
+            if mem_type == "episodic":
+                memories = await self._search_episodic(
+                    user_id=user_id,
+                    org_id=org_id,
+                    session_id=session_id,
+                    created_after=created_after,
+                    created_before=created_before,
+                )
+                all_memories.extend(memories)
+
+            elif mem_type == "structured":
+                memories = await self._search_structured(
+                    user_id=user_id,
+                    org_id=org_id,
+                    created_after=created_after,
+                    created_before=created_before,
+                    min_confidence=min_confidence,
+                )
+                all_memories.extend(memories)
+
+            elif mem_type == "semantic":
+                memories = await self._search_semantic(
+                    user_id=user_id,
+                    org_id=org_id,
+                    created_after=created_after,
+                    created_before=created_before,
+                    min_confidence=min_confidence,
+                )
+                all_memories.extend(memories)
+
+            elif mem_type == "procedural":
+                memories = await self._search_procedural(
+                    user_id=user_id,
+                    org_id=org_id,
+                    created_after=created_after,
+                    created_before=created_before,
+                    min_confidence=min_confidence,
+                )
+                all_memories.extend(memories)
+
+        # Sort results
+        reverse = sort_order == "desc"
+        if sort_by == "confidence":
+            # Sort by confidence (None values go to end)
+            def confidence_key(m: dict[str, object]) -> tuple[bool, float]:
+                conf = m.get("confidence")
+                return (conf is None, float(conf) if conf is not None else 0.0)  # type: ignore[arg-type]
+
+            all_memories.sort(key=confidence_key, reverse=reverse)
+        else:
+            # Sort by created_at (default)
+            def created_at_key(m: dict[str, object]) -> str:
+                val = m.get("created_at")
+                return str(val) if val is not None else ""
+
+            all_memories.sort(key=created_at_key, reverse=reverse)
+
+        # Calculate total before pagination
+        total = len(all_memories)
+
+        # Apply pagination
+        paginated = all_memories[offset : offset + limit]
+
+        return paginated, total
+
+    async def _search_episodic(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        session_id: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+    ) -> list[dict[str, object]]:
+        """Search episodic memories with filters."""
+        from engram.models import Episode
+
+        collection = self._collection_name("episodic")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        if session_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="session_id",
+                    match=models.MatchValue(value=session_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=10000,  # Fetch all, filter/paginate in Python
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        memories: list[dict[str, object]] = []
+        for point in results:
+            if point.payload is not None:
+                episode = self._payload_to_memory(point.payload, Episode)
+                timestamp_str = episode.timestamp.isoformat()
+
+                # Apply date filters
+                if created_after and episode.timestamp < created_after:
+                    continue
+                if created_before and episode.timestamp > created_before:
+                    continue
+
+                memories.append(
+                    {
+                        "id": episode.id,
+                        "memory_type": "episodic",
+                        "content": episode.content,
+                        "user_id": episode.user_id,
+                        "org_id": episode.org_id,
+                        "session_id": episode.session_id,
+                        "confidence": None,
+                        "created_at": timestamp_str,
+                    }
+                )
+
+        return memories
+
+    async def _search_structured(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        min_confidence: float | None = None,
+    ) -> list[dict[str, object]]:
+        """Search structured memories with filters."""
+        from engram.models import StructuredMemory
+
+        collection = self._collection_name("structured")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=10000,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        memories: list[dict[str, object]] = []
+        for point in results:
+            if point.payload is not None:
+                memory = self._payload_to_memory(point.payload, StructuredMemory)
+                timestamp_str = memory.derived_at.isoformat()
+
+                # Apply date filters
+                if created_after and memory.derived_at < created_after:
+                    continue
+                if created_before and memory.derived_at > created_before:
+                    continue
+
+                # Apply confidence filter
+                if min_confidence and memory.confidence.value < min_confidence:
+                    continue
+
+                memories.append(
+                    {
+                        "id": memory.id,
+                        "memory_type": "structured",
+                        "content": memory.summary or "",
+                        "user_id": memory.user_id,
+                        "org_id": memory.org_id,
+                        "session_id": None,
+                        "confidence": memory.confidence.value,
+                        "created_at": timestamp_str,
+                    }
+                )
+
+        return memories
+
+    async def _search_semantic(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        min_confidence: float | None = None,
+    ) -> list[dict[str, object]]:
+        """Search semantic memories with filters."""
+        from engram.models import SemanticMemory
+
+        collection = self._collection_name("semantic")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        # Exclude archived by default
+        filters.append(
+            models.FieldCondition(
+                key="archived",
+                match=models.MatchValue(value=False),
+            )
+        )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=10000,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        memories: list[dict[str, object]] = []
+        for point in results:
+            if point.payload is not None:
+                memory = self._payload_to_memory(point.payload, SemanticMemory)
+                timestamp_str = memory.derived_at.isoformat()
+
+                # Apply date filters
+                if created_after and memory.derived_at < created_after:
+                    continue
+                if created_before and memory.derived_at > created_before:
+                    continue
+
+                # Apply confidence filter
+                if min_confidence and memory.confidence.value < min_confidence:
+                    continue
+
+                memories.append(
+                    {
+                        "id": memory.id,
+                        "memory_type": "semantic",
+                        "content": memory.content,
+                        "user_id": memory.user_id,
+                        "org_id": memory.org_id,
+                        "session_id": None,
+                        "confidence": memory.confidence.value,
+                        "created_at": timestamp_str,
+                    }
+                )
+
+        return memories
+
+    async def _search_procedural(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        min_confidence: float | None = None,
+    ) -> list[dict[str, object]]:
+        """Search procedural memories with filters."""
+        from engram.models import ProceduralMemory
+
+        collection = self._collection_name("procedural")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=10000,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        memories: list[dict[str, object]] = []
+        for point in results:
+            if point.payload is not None:
+                memory = self._payload_to_memory(point.payload, ProceduralMemory)
+                timestamp_str = memory.derived_at.isoformat()
+
+                # Apply date filters
+                if created_after and memory.derived_at < created_after:
+                    continue
+                if created_before and memory.derived_at > created_before:
+                    continue
+
+                # Apply confidence filter
+                if min_confidence and memory.confidence.value < min_confidence:
+                    continue
+
+                memories.append(
+                    {
+                        "id": memory.id,
+                        "memory_type": "procedural",
+                        "content": memory.content,
+                        "user_id": memory.user_id,
+                        "org_id": memory.org_id,
+                        "session_id": None,
+                        "confidence": memory.confidence.value,
+                        "created_at": timestamp_str,
+                    }
+                )
+
+        return memories
