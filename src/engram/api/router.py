@@ -20,6 +20,7 @@ from .schemas import (
     ConsolidateResponse,
     CreateLinkRequest,
     CreateLinkResponse,
+    CreateWebhookRequest,
     DecayRequest,
     DecayResponse,
     DeleteLinkResponse,
@@ -55,7 +56,12 @@ from .schemas import (
     UpdateChange,
     UpdateMemoryRequest,
     UpdateMemoryResponse,
+    UpdateWebhookRequest,
     VerificationResponse,
+    WebhookDeliveryListResponse,
+    WebhookDeliveryResponse,
+    WebhookListResponse,
+    WebhookResponse,
     WorkflowStatusResponse,
     WorkingMemoryResponse,
 )
@@ -2269,4 +2275,392 @@ async def get_user_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while retrieving history",
+        ) from e
+
+
+# ============================================================================
+# Webhook Endpoints
+# ============================================================================
+
+
+@router.post(
+    "/webhooks",
+    response_model=WebhookResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["webhooks"],
+)
+async def create_webhook(
+    request: CreateWebhookRequest,
+    service: ServiceDep,
+) -> WebhookResponse:
+    """Register a new webhook.
+
+    Webhooks enable server-to-server notifications for Engram events.
+    When events occur (encode, consolidation, decay, etc.), Engram will
+    POST event payloads to the registered URL.
+
+    Security:
+    - Payloads are signed with HMAC-SHA256 using the provided secret
+    - Verify signatures using the X-Engram-Signature header
+    - Use HTTPS endpoints only for production
+
+    Args:
+        request: Webhook configuration.
+        service: Injected EngramService.
+
+    Returns:
+        Created webhook configuration.
+
+    Raises:
+        HTTPException: 400 if URL is invalid.
+    """
+    from engram.models import ALL_EVENT_TYPES, WebhookConfig
+
+    try:
+        webhook = WebhookConfig(
+            user_id=request.user_id,
+            org_id=request.org_id,
+            url=request.url,
+            secret=request.secret,
+            events=request.events or list(ALL_EVENT_TYPES),
+            description=request.description,
+        )
+
+        await service.storage.store_webhook(webhook)
+
+        return WebhookResponse(
+            id=webhook.id,
+            url=str(webhook.url),
+            events=list(webhook.events),
+            enabled=webhook.enabled,
+            description=webhook.description,
+            created_at=webhook.created_at,
+            updated_at=webhook.updated_at,
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+    except Exception as e:
+        logger.exception("Failed to create webhook")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while creating webhook",
+        ) from e
+
+
+@router.get(
+    "/webhooks",
+    response_model=WebhookListResponse,
+    tags=["webhooks"],
+)
+async def list_webhooks(
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+    enabled_only: bool = False,
+) -> WebhookListResponse:
+    """List registered webhooks.
+
+    Returns all webhook configurations for the user. Use enabled_only=True
+    to filter to only active webhooks.
+
+    Args:
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+        org_id: Optional organization filter.
+        enabled_only: If True, only return enabled webhooks.
+
+    Returns:
+        List of webhook configurations.
+    """
+    try:
+        webhooks = await service.storage.list_webhooks(
+            user_id=user_id,
+            org_id=org_id,
+            enabled_only=enabled_only,
+        )
+
+        return WebhookListResponse(
+            webhooks=[
+                WebhookResponse(
+                    id=wh.id,
+                    url=str(wh.url),
+                    events=list(wh.events),
+                    enabled=wh.enabled,
+                    description=wh.description,
+                    created_at=wh.created_at,
+                    updated_at=wh.updated_at,
+                )
+                for wh in webhooks
+            ],
+            count=len(webhooks),
+        )
+
+    except Exception as e:
+        logger.exception("Failed to list webhooks for user %s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while listing webhooks",
+        ) from e
+
+
+@router.get(
+    "/webhooks/{webhook_id}",
+    response_model=WebhookResponse,
+    tags=["webhooks"],
+)
+async def get_webhook(
+    webhook_id: str,
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+) -> WebhookResponse:
+    """Get a webhook configuration.
+
+    Args:
+        webhook_id: ID of the webhook.
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+        org_id: Optional organization filter.
+
+    Returns:
+        Webhook configuration.
+
+    Raises:
+        HTTPException: 404 if webhook not found.
+    """
+    try:
+        webhook = await service.storage.get_webhook(
+            webhook_id=webhook_id,
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+        if webhook is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Webhook {webhook_id} not found",
+            )
+
+        return WebhookResponse(
+            id=webhook.id,
+            url=str(webhook.url),
+            events=list(webhook.events),
+            enabled=webhook.enabled,
+            description=webhook.description,
+            created_at=webhook.created_at,
+            updated_at=webhook.updated_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get webhook %s", webhook_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while retrieving webhook",
+        ) from e
+
+
+@router.patch(
+    "/webhooks/{webhook_id}",
+    response_model=WebhookResponse,
+    tags=["webhooks"],
+)
+async def update_webhook(
+    webhook_id: str,
+    request: UpdateWebhookRequest,
+    service: ServiceDep,
+) -> WebhookResponse:
+    """Update a webhook configuration.
+
+    Only provided fields are updated. Use this to enable/disable a webhook,
+    change the URL or secret, or modify subscribed event types.
+
+    Args:
+        webhook_id: ID of the webhook to update.
+        request: Fields to update.
+        service: Injected EngramService.
+
+    Returns:
+        Updated webhook configuration.
+
+    Raises:
+        HTTPException: 404 if webhook not found.
+    """
+    try:
+        # Build updates dict from request
+        updates: dict[str, object] = {}
+        if request.url is not None:
+            updates["url"] = request.url
+        if request.secret is not None:
+            updates["secret"] = request.secret
+        if request.events is not None:
+            updates["events"] = request.events
+        if request.enabled is not None:
+            updates["enabled"] = request.enabled
+        if request.description is not None:
+            updates["description"] = request.description
+
+        webhook = await service.storage.update_webhook(
+            webhook_id=webhook_id,
+            user_id=request.user_id,
+            org_id=request.org_id,
+            **updates,
+        )
+
+        if webhook is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Webhook {webhook_id} not found",
+            )
+
+        return WebhookResponse(
+            id=webhook.id,
+            url=str(webhook.url),
+            events=list(webhook.events),
+            enabled=webhook.enabled,
+            description=webhook.description,
+            created_at=webhook.created_at,
+            updated_at=webhook.updated_at,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to update webhook %s", webhook_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while updating webhook",
+        ) from e
+
+
+@router.delete(
+    "/webhooks/{webhook_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["webhooks"],
+)
+async def delete_webhook(
+    webhook_id: str,
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+) -> None:
+    """Delete a webhook.
+
+    Removes the webhook configuration. Pending deliveries will not be retried
+    after deletion.
+
+    Args:
+        webhook_id: ID of the webhook to delete.
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+        org_id: Optional organization filter.
+
+    Raises:
+        HTTPException: 404 if webhook not found.
+    """
+    try:
+        deleted = await service.storage.delete_webhook(
+            webhook_id=webhook_id,
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Webhook {webhook_id} not found",
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete webhook %s", webhook_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while deleting webhook",
+        ) from e
+
+
+@router.get(
+    "/webhooks/{webhook_id}/logs",
+    response_model=WebhookDeliveryListResponse,
+    tags=["webhooks"],
+)
+async def get_webhook_logs(
+    webhook_id: str,
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+    since: str | None = None,
+    limit: int = 100,
+) -> WebhookDeliveryListResponse:
+    """Get delivery logs for a webhook.
+
+    Returns the history of delivery attempts for this webhook, including
+    successes, failures, and retries. Useful for debugging integration issues.
+
+    Args:
+        webhook_id: ID of the webhook.
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+        org_id: Optional organization filter.
+        since: Optional ISO timestamp to filter entries after.
+        limit: Maximum entries to return (default 100).
+
+    Returns:
+        List of delivery records sorted by timestamp (newest first).
+
+    Raises:
+        HTTPException: 400 if since timestamp is invalid.
+    """
+    from datetime import datetime
+
+    # Parse since timestamp if provided
+    since_dt: datetime | None = None
+    if since is not None:
+        try:
+            since_dt = datetime.fromisoformat(since.replace("Z", "+00:00"))
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid timestamp format: {since}. Use ISO format.",
+            ) from e
+
+    try:
+        deliveries = await service.storage.get_delivery_logs(
+            webhook_id=webhook_id,
+            user_id=user_id,
+            org_id=org_id,
+            since=since_dt,
+            limit=limit,
+        )
+
+        return WebhookDeliveryListResponse(
+            deliveries=[
+                WebhookDeliveryResponse(
+                    id=d.id,
+                    webhook_id=d.webhook_id,
+                    event_id=d.event_id,
+                    status=d.status,
+                    attempt=d.attempt,
+                    created_at=d.created_at,
+                    completed_at=d.completed_at,
+                    response_code=d.response_code,
+                    error=d.error,
+                )
+                for d in deliveries
+            ],
+            count=len(deliveries),
+        )
+
+    except Exception as e:
+        logger.exception("Failed to get delivery logs for webhook %s", webhook_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while retrieving delivery logs",
         ) from e

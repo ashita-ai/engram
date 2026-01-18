@@ -19,6 +19,8 @@ from engram.models import (
     ProceduralMemory,
     SemanticMemory,
     StructuredMemory,
+    WebhookConfig,
+    WebhookDelivery,
 )
 
 if TYPE_CHECKING:
@@ -33,6 +35,8 @@ MemoryT = TypeVar(
     ProceduralMemory,
     AuditEntry,
     HistoryEntry,
+    WebhookConfig,
+    WebhookDelivery,
 )
 
 # Collection names by memory type (keys match API memory_types values)
@@ -43,6 +47,8 @@ COLLECTION_NAMES = {
     "procedural": "procedural",
     "audit": "audit",
     "history": "history",
+    "webhooks": "webhooks",
+    "webhook_deliveries": "webhook_deliveries",
 }
 
 # Default embedding dimension (text-embedding-3-small)
@@ -195,6 +201,30 @@ class StorageBase:
             await self.client.create_payload_index(
                 collection_name=collection_name,
                 field_name="change_type",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+        # Webhook-specific indexes
+        if "webhooks" in collection_name and "deliveries" not in collection_name:
+            await self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name="enabled",
+                field_schema=models.PayloadSchemaType.BOOL,
+            )
+        # Webhook delivery indexes
+        if "webhook_deliveries" in collection_name:
+            await self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name="webhook_id",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+            await self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name="status",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+            await self.client.create_payload_index(
+                collection_name=collection_name,
+                field_name="event_id",
                 field_schema=models.PayloadSchemaType.KEYWORD,
             )
 
