@@ -297,6 +297,7 @@ async def run_consolidation(
     org_id: str | None = None,
     consolidation_passes: int = 1,
     similarity_threshold: float = 0.7,
+    use_llm_linking: bool = False,
 ) -> ConsolidationResult:
     """Run the consolidation workflow.
 
@@ -319,6 +320,8 @@ async def run_consolidation(
         org_id: Optional organization ID.
         consolidation_passes: Number of times to run (typically 1).
         similarity_threshold: Min similarity score for automatic linking.
+        use_llm_linking: Use LLM to discover richer relationship types
+            (causal, temporal, contradicts, etc.) beyond embedding similarity.
 
     Returns:
         ConsolidationResult with processing statistics.
@@ -456,6 +459,63 @@ async def run_consolidation(
             if links_created > 0:
                 await storage.update_semantic_memory(memory)
 
+        # 7b. Optional: LLM-driven link discovery for richer relationship types
+        if use_llm_linking and similar:
+            from engram.linking import discover_links
+
+            candidates_data = [
+                {
+                    "id": m.id,
+                    "content": m.content,
+                    "keywords": m.keywords,
+                    "tags": m.tags,
+                }
+                for m in similar
+                if m.id != memory.id
+            ]
+
+            if candidates_data:
+                try:
+                    result = await discover_links(
+                        new_memory_content=memory.content,
+                        new_memory_id=memory.id,
+                        candidate_memories=candidates_data,
+                        min_confidence=0.6,
+                    )
+
+                    # Apply discovered relationship types to existing links
+                    for link in result.links:
+                        if link.target_id in memory.link_types:
+                            # Upgrade from "related" to more specific type
+                            memory.link_types[link.target_id] = link.link_type
+                            logger.debug(
+                                "Upgraded link %s -> %s to type '%s'",
+                                memory.id,
+                                link.target_id,
+                                link.link_type,
+                            )
+                        elif link.target_id not in memory.related_ids:
+                            # New link discovered by LLM
+                            memory.add_link(link.target_id, link.link_type)
+                            links_created += 1
+                            logger.debug(
+                                "LLM discovered %s link: %s -> %s",
+                                link.link_type,
+                                memory.id,
+                                link.target_id,
+                            )
+
+                    if result.links:
+                        await storage.update_semantic_memory(memory)
+
+                    logger.info(
+                        "LLM link discovery: %d links analyzed, %d type upgrades",
+                        len(result.links),
+                        sum(1 for link in result.links if link.target_id in memory.link_types),
+                    )
+                except Exception as e:
+                    logger.warning("LLM link discovery failed, using embedding links: %s", e)
+
         # 8. Mark ALL episodes as summarized (including system prompts)
         await storage.mark_episodes_summarized(all_episode_ids, user_id, memory.id)
 
@@ -533,6 +593,7 @@ async def run_consolidation_from_structured(
     user_id: str,
     org_id: str | None = None,
     similarity_threshold: float = 0.7,
+    use_llm_linking: bool = False,
 ) -> ConsolidationResult:
     """Run consolidation using StructuredMemories as input.
 
@@ -634,6 +695,7 @@ async def run_consolidation_from_structured(
 
     # 6. Build links to similar existing memories
     links_created = 0
+    similar: list[SemanticMemory] = []
     if existing_memories:
         similar = await _find_semantically_similar_memories(
             query_embedding=embedding,
@@ -657,6 +719,68 @@ async def run_consolidation_from_structured(
 
         if links_created > 0:
             await storage.update_semantic_memory(memory)
+
+    # 6b. Optional: LLM-driven link discovery for richer relationship types
+    if use_llm_linking and existing_memories:
+        from engram.linking import discover_links
+
+        # Use the similar memories found above, or get some if not available
+        candidates = similar
+        if not candidates:
+            candidates = existing_memories[:5]
+
+        candidates_data = [
+            {
+                "id": m.id,
+                "content": m.content,
+                "keywords": m.keywords,
+                "tags": m.tags,
+            }
+            for m in candidates
+            if m.id != memory.id
+        ]
+
+        if candidates_data:
+            try:
+                result = await discover_links(
+                    new_memory_content=memory.content,
+                    new_memory_id=memory.id,
+                    candidate_memories=candidates_data,
+                    min_confidence=0.6,
+                )
+
+                # Apply discovered relationship types to existing links
+                for link in result.links:
+                    if link.target_id in memory.link_types:
+                        # Upgrade from "related" to more specific type
+                        memory.link_types[link.target_id] = link.link_type
+                        logger.debug(
+                            "Upgraded link %s -> %s to type '%s'",
+                            memory.id,
+                            link.target_id,
+                            link.link_type,
+                        )
+                    elif link.target_id not in memory.related_ids:
+                        # New link discovered by LLM
+                        memory.add_link(link.target_id, link.link_type)
+                        links_created += 1
+                        logger.debug(
+                            "LLM discovered %s link: %s -> %s",
+                            link.link_type,
+                            memory.id,
+                            link.target_id,
+                        )
+
+                if result.links:
+                    await storage.update_semantic_memory(memory)
+
+                logger.info(
+                    "LLM link discovery: %d links analyzed, %d type upgrades",
+                    len(result.links),
+                    sum(1 for link in result.links if link.target_id in memory.link_types),
+                )
+            except Exception as e:
+                logger.warning("LLM link discovery failed, using embedding links: %s", e)
 
     # 7. Mark StructuredMemories as consolidated
     await storage.mark_structured_consolidated(structured_ids, user_id, memory.id)
