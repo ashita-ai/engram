@@ -29,6 +29,7 @@ from .schemas import (
     EncodeRequest,
     EncodeResponse,
     EpisodeResponse,
+    GetMemoryResponse,
     HealthResponse,
     HistoryEntryResponse,
     HistoryListResponse,
@@ -401,6 +402,158 @@ async def clear_working_memory(
     This is typically called at the end of a session.
     """
     service.clear_working_memory()
+
+
+@router.get("/memories/{memory_id}", response_model=GetMemoryResponse, tags=["memory"])
+async def get_memory(
+    memory_id: str,
+    user_id: str,
+    service: ServiceDep,
+    org_id: str | None = None,
+) -> GetMemoryResponse:
+    """Get a specific memory by ID.
+
+    Retrieves any memory type (episodic, structured, semantic, procedural)
+    by its ID. The ID prefix determines the memory type:
+    - ep_*: Episodic memories (ground truth)
+    - struct_*: Structured memories (extracted facts)
+    - sem_*: Semantic memories (consolidated knowledge)
+    - proc_*: Procedural memories (behavioral patterns)
+
+    Args:
+        memory_id: ID of the memory to retrieve.
+        user_id: User ID for multi-tenancy isolation.
+        service: Injected EngramService.
+        org_id: Optional organization ID.
+
+    Returns:
+        The memory content and metadata.
+
+    Raises:
+        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 404 if memory not found.
+    """
+    # Determine memory type from ID prefix
+    if memory_id.startswith("ep_"):
+        memory_type = "episodic"
+    elif memory_id.startswith("struct_"):
+        memory_type = "structured"
+    elif memory_id.startswith("sem_"):
+        memory_type = "semantic"
+    elif memory_id.startswith("proc_"):
+        memory_type = "procedural"
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid memory ID format: {memory_id}. "
+            "Expected prefix: ep_, struct_, sem_, or proc_",
+        )
+
+    try:
+        if memory_type == "episodic":
+            episode = await service.storage.get_episode(memory_id, user_id)
+            if episode is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+            return GetMemoryResponse(
+                id=episode.id,
+                memory_type=memory_type,
+                content=episode.content,
+                user_id=episode.user_id,
+                org_id=episode.org_id,
+                confidence=None,
+                source_episode_ids=[],
+                created_at=episode.timestamp.isoformat(),
+                metadata={
+                    "role": episode.role,
+                    "session_id": episode.session_id,
+                    "importance": episode.importance,
+                },
+            )
+
+        elif memory_type == "structured":
+            structured = await service.storage.get_structured(memory_id, user_id)
+            if structured is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+            return GetMemoryResponse(
+                id=structured.id,
+                memory_type=memory_type,
+                content=structured.summary or "",
+                user_id=structured.user_id,
+                org_id=structured.org_id,
+                confidence=structured.confidence.value,
+                source_episode_ids=[structured.source_episode_id],
+                created_at=structured.derived_at.isoformat(),
+                metadata={
+                    "mode": structured.mode,
+                    "enriched": structured.enriched,
+                    "emails": structured.emails,
+                    "phones": structured.phones,
+                    "urls": structured.urls,
+                },
+            )
+
+        elif memory_type == "semantic":
+            semantic = await service.storage.get_semantic(memory_id, user_id)
+            if semantic is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+            return GetMemoryResponse(
+                id=semantic.id,
+                memory_type=memory_type,
+                content=semantic.content,
+                user_id=semantic.user_id,
+                org_id=semantic.org_id,
+                confidence=semantic.confidence.value,
+                source_episode_ids=semantic.source_episode_ids,
+                created_at=semantic.derived_at.isoformat(),
+                metadata={
+                    "tags": semantic.tags,
+                    "keywords": semantic.keywords,
+                    "context": semantic.context,
+                    "related_ids": semantic.related_ids,
+                },
+            )
+
+        else:  # procedural
+            procedural = await service.storage.get_procedural(memory_id, user_id)
+            if procedural is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Memory not found: {memory_id}",
+                )
+            return GetMemoryResponse(
+                id=procedural.id,
+                memory_type=memory_type,
+                content=procedural.content,
+                user_id=procedural.user_id,
+                org_id=procedural.org_id,
+                confidence=procedural.confidence.value,
+                source_episode_ids=procedural.source_episode_ids,
+                created_at=procedural.derived_at.isoformat(),
+                metadata={
+                    "trigger_context": procedural.trigger_context,
+                    "consolidation_strength": procedural.consolidation_strength,
+                    "retrieval_count": procedural.retrieval_count,
+                    "related_ids": procedural.related_ids,
+                },
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get memory %s", memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while retrieving the memory",
+        ) from e
 
 
 @router.get("/memories/{memory_id}/sources", response_model=SourcesResponse, tags=["memory"])
