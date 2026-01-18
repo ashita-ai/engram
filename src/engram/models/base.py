@@ -41,6 +41,8 @@ class ConfidenceScore(BaseModel):
     - supporting_episodes: How many sources corroborate this?
     - last_confirmed: How recently was this verified?
     - contradictions: Is there conflicting evidence?
+    - hedging_penalty: Penalty for uncertainty language (Phase 1 of #136)
+    - specificity_boost: Boost for specific/detailed content (Phase 1 of #136)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -54,6 +56,24 @@ class ConfidenceScore(BaseModel):
     )
     contradictions: int = Field(default=0, ge=0, description="Number of conflicting evidence items")
     verified: bool = Field(default=False, description="Whether format validation passed")
+
+    # Intelligent confidence signals (Phase 1 of #136)
+    hedging_penalty: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Multiplier from hedging detection (1.0 = no penalty, <1.0 = uncertain)",
+    )
+    specificity_boost: float = Field(
+        default=0.0,
+        ge=-0.1,
+        le=0.15,
+        description="Additive boost from specificity scoring",
+    )
+    source_text_analyzed: bool = Field(
+        default=False,
+        description="Whether source text was analyzed for hedging/specificity",
+    )
 
     def recompute(
         self,
@@ -71,6 +91,10 @@ class ConfidenceScore(BaseModel):
         - corroboration: Logarithmic bonus for multiple sources
         - recency: Exponential decay based on time since confirmation
         - verification: Binary bonus if format validation passed
+
+        Applies intelligent adjustments (Phase 1 of #136):
+        - hedging_penalty: Multiplier for uncertainty language
+        - specificity_boost: Additive bonus for specific content
 
         Contradictions apply a penalty that scales with count.
 
@@ -114,8 +138,41 @@ class ConfidenceScore(BaseModel):
             penalty_multiplier = (1.0 - contradiction_penalty) ** self.contradictions
             raw_score = max(0.1, raw_score * penalty_multiplier)
 
+        # Apply intelligent confidence adjustments (Phase 1 of #136)
+        # Hedging: multiplicative penalty for uncertainty language
+        raw_score = raw_score * self.hedging_penalty
+
+        # Specificity: additive boost for detailed/specific content
+        raw_score = raw_score + self.specificity_boost
+
         self.value = min(1.0, max(0.0, raw_score))
         return self
+
+    def analyze_source_text(self, source_text: str) -> ConfidenceScore:
+        """Analyze source text for hedging and specificity signals.
+
+        Updates hedging_penalty and specificity_boost based on text analysis,
+        then recomputes the confidence score.
+
+        Args:
+            source_text: The original text this memory was derived from.
+
+        Returns:
+            Self with updated signals and recomputed value.
+
+        Example:
+            >>> score = ConfidenceScore.for_inferred()
+            >>> score.analyze_source_text("I think I might prefer Python")
+            >>> score.hedging_penalty < 1.0
+            True
+        """
+        from engram.confidence import compute_confidence_signals
+
+        signals = compute_confidence_signals(source_text)
+        self.hedging_penalty = signals.hedging_penalty
+        self.specificity_boost = signals.specificity_boost
+        self.source_text_analyzed = True
+        return self.recompute()
 
     def recompute_with_weights(self, weights: ConfidenceWeights) -> ConfidenceScore:
         """Recompute confidence using a ConfidenceWeights configuration.
@@ -154,6 +211,14 @@ class ConfidenceScore(BaseModel):
             parts.append(
                 f"{self.contradictions} contradiction{'s' if self.contradictions != 1 else ''}"
             )
+        # Include intelligent signals if source text was analyzed
+        if self.source_text_analyzed:
+            if self.hedging_penalty < 1.0:
+                parts.append(f"hedging ({self.hedging_penalty:.0%})")
+            if self.specificity_boost > 0.01:
+                parts.append(f"specific (+{self.specificity_boost:.0%})")
+            elif self.specificity_boost < -0.01:
+                parts.append(f"vague ({self.specificity_boost:.0%})")
         return f"{self.value:.2f}: " + ", ".join(parts)
 
     @staticmethod
