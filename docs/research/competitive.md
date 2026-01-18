@@ -6,13 +6,14 @@ Technical comparison of AI memory systems. Based on published papers and documen
 
 | System | Ground Truth | Confidence | Forgetting | Bi-Temporal | Dynamic Linking | Strength Tracking |
 |--------|--------------|------------|------------|-------------|-----------------|-------------------|
-| **Engram** | Yes | Yes | Yes | Yes | Yes | Yes |
+| **Engram** | Yes | Yes | Yes | Partial | Yes | Yes |
 | **Mem0** | No | No | Partial | No | Yes (Mem0ᵍ) | No |
 | **Zep/Graphiti** | Yes | No | No | Yes | Partial | No |
 | **Letta/MemGPT** | Partial | No | No | No | No | No |
 
 **Notes**:
 - **Strength Tracking**: Whether memories get *stronger* through repeated consolidation (Testing Effect). No system except Engram tracks consolidation_strength or passes.
+- **Engram Bi-Temporal**: Only SemanticMemory has full bi-temporal support (`event_at` + `derived_at`). StructuredMemory and ProceduralMemory track only `derived_at`.
 - **Mem0 Forgetting**: Mem0 has lifecycle policies for time-based expiration, but not principled decay based on access/importance.
 - **Mem0 Dynamic Linking**: Mem0ᵍ (graph variant) stores entities as nodes and relations as edges.
 
@@ -192,7 +193,7 @@ Novel approaches from recent literature:
 
 **Value**: Enables "what was known on date X?" queries. Useful for debugging and audit.
 
-**Engram**: Implements bi-temporal tracking with explicit `event_at` and `derived_at` timestamps on all derived memories.
+**Engram**: Partial bi-temporal support. SemanticMemory has both `event_at` (when facts were true) and `derived_at` (when inferred). StructuredMemory and ProceduralMemory track only `derived_at`. Full bi-temporal queries are supported via `recall_at` endpoint for "what was known at time X" scenarios.
 
 ### Dynamic Memory Linking (A-MEM)
 
@@ -239,6 +240,18 @@ Note: Negations (stored in `StructuredMemory.negations`, e.g., "User does NOT us
 | Token compression focus | Engram optimizes for accuracy, not size |
 | Complex graph schemas | Over-engineering for most use cases |
 | Self-editing memory | Risks ground truth corruption |
+
+---
+
+## Known Gaps
+
+Features documented elsewhere but not yet implemented:
+
+| Gap | Impact | Status |
+|-----|--------|--------|
+| **Cascade deletion** | Deleting episodes orphans derived memories with stale `source_episode_ids` | [#137](https://github.com/ashita-ai/engram/issues/137) |
+| **Full bi-temporal on all types** | Only SemanticMemory has `event_at`; others have only `derived_at` | Future work |
+| **Bayesian confidence** | Current confidence is static weighted sum, not learned | [#136](https://github.com/ashita-ai/engram/issues/136) |
 
 ---
 
