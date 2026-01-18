@@ -19,34 +19,38 @@ logger = logging.getLogger(__name__)
 
 # Regex patterns for temporal language
 # Format: (pattern, change_type, captures: [entity_group, ...])
+# Entity pattern: word optionally followed by .word or -word (e.g., Vue.js, VS-Code)
+# Keeps it simple to avoid capturing trailing prepositions like "for", "but", "after"
+_ENTITY = r"(\w+(?:[\.\-]\w+)?)"
+
 TEMPORAL_PATTERNS: list[tuple[str, ChangeType, list[int]]] = [
     # Stopped patterns
-    (r"I no longer (?:use|work with|have) (\w+(?:\s+\w+)?)", "stopped", [1]),
-    (r"I stopped using (\w+(?:\s+\w+)?)", "stopped", [1]),
-    (r"I quit using (\w+(?:\s+\w+)?)", "stopped", [1]),
-    (r"I gave up on (\w+(?:\s+\w+)?)", "stopped", [1]),
-    (r"I don't use (\w+(?:\s+\w+)?) anymore", "stopped", [1]),
-    (r"I'm no longer (?:using|working with) (\w+(?:\s+\w+)?)", "stopped", [1]),
+    (rf"I no longer (?:use|work with|have) {_ENTITY}", "stopped", [1]),
+    (rf"I stopped using {_ENTITY}", "stopped", [1]),
+    (rf"I quit using {_ENTITY}", "stopped", [1]),
+    (rf"I gave up on {_ENTITY}", "stopped", [1]),
+    (rf"I don't use {_ENTITY} anymore", "stopped", [1]),
+    (rf"I'm no longer (?:using|working with) {_ENTITY}", "stopped", [1]),
     # Started patterns
-    (r"I (?:now|recently) (?:use|started using) (\w+(?:\s+\w+)?)", "started", [1]),
-    (r"I've started (?:using|working with) (\w+(?:\s+\w+)?)", "started", [1]),
-    (r"I just (?:started|began) (?:using|with) (\w+(?:\s+\w+)?)", "started", [1]),
-    (r"I picked up (\w+(?:\s+\w+)?)", "started", [1]),
+    (rf"I (?:now|recently) (?:use|started using) {_ENTITY}", "started", [1]),
+    (rf"I've started (?:using|working with) {_ENTITY}", "started", [1]),
+    (rf"I just (?:started|began) (?:using|with) {_ENTITY}", "started", [1]),
+    (rf"I picked up {_ENTITY}", "started", [1]),
     # Changed/switched patterns
-    (r"I switched from (\w+(?:\s+\w+)?) to (\w+(?:\s+\w+)?)", "changed", [1, 2]),
-    (r"I moved from (\w+(?:\s+\w+)?) to (\w+(?:\s+\w+)?)", "changed", [1, 2]),
-    (r"I migrated from (\w+(?:\s+\w+)?) to (\w+(?:\s+\w+)?)", "changed", [1, 2]),
-    (r"I replaced (\w+(?:\s+\w+)?) with (\w+(?:\s+\w+)?)", "changed", [1, 2]),
+    (rf"I switched from {_ENTITY} to {_ENTITY}", "changed", [1, 2]),
+    (rf"I moved from {_ENTITY} to {_ENTITY}", "changed", [1, 2]),
+    (rf"I migrated from {_ENTITY} to {_ENTITY}", "changed", [1, 2]),
+    (rf"I replaced {_ENTITY} with {_ENTITY}", "changed", [1, 2]),
     # Used to patterns (implies stopped)
-    (r"I used to (?:use|work with|have) (\w+(?:\s+\w+)?)", "stopped", [1]),
-    (r"I previously used (\w+(?:\s+\w+)?)", "stopped", [1]),
-    (r"I was using (\w+(?:\s+\w+)?) before", "stopped", [1]),
+    (rf"I used to (?:use|work with|have) {_ENTITY}", "stopped", [1]),
+    (rf"I previously used {_ENTITY}", "stopped", [1]),
+    (rf"I was using {_ENTITY} before", "stopped", [1]),
     # Upgraded/downgraded patterns
-    (r"I upgraded (?:to|from \w+ to) (\w+(?:\s+\w+)?)", "upgraded", [1]),
-    (r"I downgraded (?:to|from \w+ to) (\w+(?:\s+\w+)?)", "downgraded", [1]),
+    (rf"I upgraded (?:to|from \w+ to) {_ENTITY}", "upgraded", [1]),
+    (rf"I downgraded (?:to|from \w+ to) {_ENTITY}", "downgraded", [1]),
     # Resumed patterns
-    (r"I'm back to (?:using|working with) (\w+(?:\s+\w+)?)", "resumed", [1]),
-    (r"I started using (\w+(?:\s+\w+)?) again", "resumed", [1]),
+    (rf"I'm back to (?:using|working with) {_ENTITY}", "resumed", [1]),
+    (rf"I started using {_ENTITY} again", "resumed", [1]),
 ]
 
 
