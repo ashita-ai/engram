@@ -106,6 +106,37 @@ class EpisodeResponse(BaseModel):
     created_at: str
 
 
+class GetMemoryResponse(BaseModel):
+    """Response for retrieving a specific memory by ID.
+
+    Returns the memory content and metadata regardless of memory type.
+    The response format adapts based on the memory type.
+
+    Attributes:
+        id: Memory ID.
+        memory_type: Type of memory (episodic, structured, semantic, procedural).
+        content: The memory content (varies by type).
+        user_id: User ID.
+        org_id: Optional org ID.
+        confidence: Confidence score (None for episodic).
+        source_episode_ids: Source episode IDs (for derived memories).
+        created_at: ISO timestamp of creation.
+        metadata: Additional type-specific metadata.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    memory_type: str
+    content: str
+    user_id: str
+    org_id: str | None = None
+    confidence: float | None = None
+    source_episode_ids: list[str] = Field(default_factory=list)
+    created_at: str
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+
 class EncodeResponse(BaseModel):
     """Response body for encode operation.
 
