@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -95,10 +95,14 @@ class TestExtractEntities:
             reasoning="Found person and organization",
         )
 
-        with patch(
-            "engram.workflows.llm_utils.run_agent_with_retry",
-            new_callable=AsyncMock,
-        ) as mock_run:
+        with (
+            patch("pydantic_ai.Agent") as mock_agent_class,
+            patch(
+                "engram.workflows.llm_utils.run_agent_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_run,
+        ):
+            mock_agent_class.return_value = MagicMock()
             mock_run.return_value = mock_extracted
 
             mentions = await extract_entities(
@@ -115,10 +119,14 @@ class TestExtractEntities:
     @pytest.mark.asyncio
     async def test_returns_empty_on_error(self) -> None:
         """Should return empty list on LLM error."""
-        with patch(
-            "engram.workflows.llm_utils.run_agent_with_retry",
-            new_callable=AsyncMock,
-        ) as mock_run:
+        with (
+            patch("pydantic_ai.Agent") as mock_agent_class,
+            patch(
+                "engram.workflows.llm_utils.run_agent_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_run,
+        ):
+            mock_agent_class.return_value = MagicMock()
             mock_run.side_effect = Exception("LLM error")
 
             mentions = await extract_entities(
@@ -133,10 +141,14 @@ class TestExtractEntities:
         """Should still call LLM even with empty content."""
         mock_extracted = ExtractedEntities(mentions=[], reasoning="No content")
 
-        with patch(
-            "engram.workflows.llm_utils.run_agent_with_retry",
-            new_callable=AsyncMock,
-        ) as mock_run:
+        with (
+            patch("pydantic_ai.Agent") as mock_agent_class,
+            patch(
+                "engram.workflows.llm_utils.run_agent_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_run,
+        ):
+            mock_agent_class.return_value = MagicMock()
             mock_run.return_value = mock_extracted
 
             mentions = await extract_entities(content="", memory_id="mem_123")
@@ -187,10 +199,14 @@ class TestClusterMentions:
             reasoning="Clustered by name",
         )
 
-        with patch(
-            "engram.workflows.llm_utils.run_agent_with_retry",
-            new_callable=AsyncMock,
-        ) as mock_run:
+        with (
+            patch("pydantic_ai.Agent") as mock_agent_class,
+            patch(
+                "engram.workflows.llm_utils.run_agent_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_run,
+        ):
+            mock_agent_class.return_value = MagicMock()
             mock_run.return_value = mock_clustering
 
             result = await cluster_mentions(mentions)
@@ -224,10 +240,14 @@ class TestClusterMentions:
             reasoning="Considered existing entities",
         )
 
-        with patch(
-            "engram.workflows.llm_utils.run_agent_with_retry",
-            new_callable=AsyncMock,
-        ) as mock_run:
+        with (
+            patch("pydantic_ai.Agent") as mock_agent_class,
+            patch(
+                "engram.workflows.llm_utils.run_agent_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_run,
+        ):
+            mock_agent_class.return_value = MagicMock()
             mock_run.return_value = mock_clustering
 
             await cluster_mentions(mentions, existing_entities=existing)
@@ -250,10 +270,14 @@ class TestClusterMentions:
             )
         ]
 
-        with patch(
-            "engram.workflows.llm_utils.run_agent_with_retry",
-            new_callable=AsyncMock,
-        ) as mock_run:
+        with (
+            patch("pydantic_ai.Agent") as mock_agent_class,
+            patch(
+                "engram.workflows.llm_utils.run_agent_with_retry",
+                new_callable=AsyncMock,
+            ) as mock_run,
+        ):
+            mock_agent_class.return_value = MagicMock()
             mock_run.side_effect = Exception("Clustering failed")
 
             result = await cluster_mentions(mentions)
