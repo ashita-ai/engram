@@ -869,26 +869,30 @@ class TestVerifyWorkflow:
 
     @pytest.mark.asyncio
     async def test_verify_structured_not_found(self, mock_storage, mock_embedder):
-        """Test verify raises KeyError for non-existent structured memory."""
+        """Test verify raises NotFoundError for non-existent structured memory."""
+        from engram.exceptions import NotFoundError
+
         service = EngramService(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
         )
 
-        with pytest.raises(KeyError, match="StructuredMemory not found"):
+        with pytest.raises(NotFoundError, match="StructuredMemory not found"):
             await service.verify("struct_nonexistent", "user_123")
 
     @pytest.mark.asyncio
     async def test_verify_invalid_memory_id(self, mock_storage, mock_embedder):
-        """Test verify raises ValueError for invalid memory ID format."""
+        """Test verify raises ValidationError for invalid memory ID format."""
+        from engram.exceptions import ValidationError
+
         service = EngramService(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
         )
 
-        with pytest.raises(ValueError, match="Cannot determine memory type"):
+        with pytest.raises(ValidationError, match="Cannot determine memory type"):
             await service.verify("invalid_id_format", "user_123")
 
 

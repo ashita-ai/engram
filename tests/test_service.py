@@ -866,30 +866,38 @@ class TestGetSources:
 
     @pytest.mark.asyncio
     async def test_get_sources_structured_not_found(self, mock_service):
-        """Should raise KeyError if structured memory not found."""
+        """Should raise NotFoundError if structured memory not found."""
+        from engram.exceptions import NotFoundError
+
         mock_service.storage.get_structured.return_value = None
 
-        with pytest.raises(KeyError, match="StructuredMemory not found"):
+        with pytest.raises(NotFoundError, match="StructuredMemory not found"):
             await mock_service.get_sources("struct_nonexistent", "user_123")
 
     @pytest.mark.asyncio
     async def test_get_sources_semantic_not_found(self, mock_service):
-        """Should raise KeyError if semantic memory not found."""
+        """Should raise NotFoundError if semantic memory not found."""
+        from engram.exceptions import NotFoundError
+
         mock_service.storage.get_semantic.return_value = None
 
-        with pytest.raises(KeyError, match="SemanticMemory not found"):
+        with pytest.raises(NotFoundError, match="SemanticMemory not found"):
             await mock_service.get_sources("sem_nonexistent", "user_123")
 
     @pytest.mark.asyncio
     async def test_get_sources_invalid_prefix(self, mock_service):
-        """Should raise ValueError for invalid memory ID prefix."""
-        with pytest.raises(ValueError, match="Cannot determine memory type"):
+        """Should raise ValidationError for invalid memory ID prefix."""
+        from engram.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="Cannot determine memory type"):
             await mock_service.get_sources("invalid_id", "user_123")
 
     @pytest.mark.asyncio
     async def test_get_sources_episode_prefix(self, mock_service):
-        """Should raise ValueError for episode prefix (not a derived memory)."""
-        with pytest.raises(ValueError, match="Cannot determine memory type"):
+        """Should raise ValidationError for episode prefix (not a derived memory)."""
+        from engram.exceptions import ValidationError
+
+        with pytest.raises(ValidationError, match="Cannot determine memory type"):
             await mock_service.get_sources("ep_123", "user_123")
 
     @pytest.mark.asyncio

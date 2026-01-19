@@ -9,6 +9,8 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from engram.exceptions import NotFoundError, ValidationError
+from engram.logging import get_logger
 from engram.models import Episode, HistoryEntry, ProvenanceChain, ProvenanceEvent, Staleness
 
 from .helpers import cosine_similarity
@@ -20,6 +22,8 @@ if TYPE_CHECKING:
     from engram.workflows.backend import WorkflowBackend
     from engram.workflows.consolidation import ConsolidationResult
     from engram.workflows.promotion import SynthesisResult
+
+logger = get_logger(__name__)
 
 
 class OperationsMixin:
@@ -74,25 +78,26 @@ class OperationsMixin:
         if memory_id.startswith("struct_"):
             structured = await self.storage.get_structured(memory_id, user_id)
             if structured is None:
-                raise KeyError(f"StructuredMemory not found: {memory_id}")
+                raise NotFoundError("StructuredMemory", memory_id)
             source_episode_ids = [structured.source_episode_id]
 
         elif memory_id.startswith("sem_"):
             semantic = await self.storage.get_semantic(memory_id, user_id)
             if semantic is None:
-                raise KeyError(f"SemanticMemory not found: {memory_id}")
+                raise NotFoundError("SemanticMemory", memory_id)
             source_episode_ids = semantic.source_episode_ids
 
         elif memory_id.startswith("proc_"):
             procedural = await self.storage.get_procedural(memory_id, user_id)
             if procedural is None:
-                raise KeyError(f"ProceduralMemory not found: {memory_id}")
+                raise NotFoundError("ProceduralMemory", memory_id)
             source_episode_ids = procedural.source_episode_ids
 
         else:
-            raise ValueError(
+            raise ValidationError(
+                "memory_id",
                 f"Cannot determine memory type from ID: {memory_id}. "
-                "Expected prefix: struct_, sem_, or proc_"
+                "Expected prefix: struct_, sem_, or proc_",
             )
 
         # Fetch source episodes
@@ -146,7 +151,7 @@ class OperationsMixin:
         if memory_id.startswith("struct_"):
             structured = await self.storage.get_structured(memory_id, user_id)
             if structured is None:
-                raise KeyError(f"StructuredMemory not found: {memory_id}")
+                raise NotFoundError("StructuredMemory", memory_id)
 
             # Get source episode
             episode = await self.storage.get_episode(structured.source_episode_id, user_id)
@@ -204,7 +209,7 @@ class OperationsMixin:
         elif memory_id.startswith("sem_"):
             semantic = await self.storage.get_semantic(memory_id, user_id)
             if semantic is None:
-                raise KeyError(f"SemanticMemory not found: {memory_id}")
+                raise NotFoundError("SemanticMemory", memory_id)
 
             # Get source episodes
             for ep_id in semantic.source_episode_ids:
@@ -277,7 +282,7 @@ class OperationsMixin:
         elif memory_id.startswith("proc_"):
             procedural = await self.storage.get_procedural(memory_id, user_id)
             if procedural is None:
-                raise KeyError(f"ProceduralMemory not found: {memory_id}")
+                raise NotFoundError("ProceduralMemory", memory_id)
 
             # Get source episodes
             for ep_id in procedural.source_episode_ids:
@@ -348,9 +353,10 @@ class OperationsMixin:
             )
 
         else:
-            raise ValueError(
+            raise ValidationError(
+                "memory_id",
                 f"Cannot determine memory type from ID: {memory_id}. "
-                "Expected prefix: struct_, sem_, or proc_"
+                "Expected prefix: struct_, sem_, or proc_",
             )
 
     async def verify(
@@ -398,7 +404,7 @@ class OperationsMixin:
             memory_type = "structured"
             structured = await self.storage.get_structured(memory_id, user_id)
             if structured is None:
-                raise KeyError(f"StructuredMemory not found: {memory_id}")
+                raise NotFoundError("StructuredMemory", memory_id)
             content = structured.to_embedding_text() or structured.summary
             confidence = structured.confidence
             category = "structured" if structured.enriched else "regex-extracted"
@@ -407,7 +413,7 @@ class OperationsMixin:
             memory_type = "semantic"
             semantic = await self.storage.get_semantic(memory_id, user_id)
             if semantic is None:
-                raise KeyError(f"SemanticMemory not found: {memory_id}")
+                raise NotFoundError("SemanticMemory", memory_id)
             content = semantic.content
             confidence = semantic.confidence
 
@@ -415,14 +421,15 @@ class OperationsMixin:
             memory_type = "procedural"
             procedural = await self.storage.get_procedural(memory_id, user_id)
             if procedural is None:
-                raise KeyError(f"ProceduralMemory not found: {memory_id}")
+                raise NotFoundError("ProceduralMemory", memory_id)
             content = procedural.content
             confidence = procedural.confidence
 
         else:
-            raise ValueError(
+            raise ValidationError(
+                "memory_id",
                 f"Cannot determine memory type from ID: {memory_id}. "
-                "Expected prefix: struct_, sem_, or proc_"
+                "Expected prefix: struct_, sem_, or proc_",
             )
 
         # Get source episodes
@@ -820,10 +827,6 @@ class OperationsMixin:
         Returns:
             Filtered list of results with negated items removed.
         """
-        import logging
-
-        logger = logging.getLogger(__name__)
-
         # Collect negation patterns from StructuredMemory.negations
         negated_patterns: set[str] = set()
 
