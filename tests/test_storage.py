@@ -165,9 +165,9 @@ class TestEpisodeStorage:
         )
         await storage.store_episode(episode)
 
-        # Delete
-        deleted = await storage.delete_episode(episode.id, "user_123")
-        assert deleted is True
+        # Delete (returns dict with cascade stats)
+        result = await storage.delete_episode(episode.id, "user_123")
+        assert result["deleted"] is True
 
         # Verify gone
         result = await storage.get_episode(episode.id, "user_123")

@@ -435,7 +435,15 @@ class TestDeleteEndpoint:
 
     def test_delete_episode_success(self, client, mock_service):
         """Should delete an episodic memory."""
-        mock_service.storage.delete_episode = AsyncMock(return_value=True)
+        cascade_result = {
+            "deleted": True,
+            "structured_deleted": 0,
+            "semantic_deleted": 0,
+            "semantic_updated": 0,
+            "procedural_deleted": 0,
+            "procedural_updated": 0,
+        }
+        mock_service.storage.delete_episode = AsyncMock(return_value=cascade_result)
         mock_service.storage.log_audit = AsyncMock()
 
         response = client.delete(
@@ -443,8 +451,13 @@ class TestDeleteEndpoint:
             params={"user_id": "user_123"},
         )
 
-        assert response.status_code == 204
-        mock_service.storage.delete_episode.assert_called_once_with("ep_123", "user_123")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
+        assert data["memory_type"] == "episodic"
+        mock_service.storage.delete_episode.assert_called_once_with(
+            "ep_123", "user_123", cascade="soft"
+        )
         mock_service.storage.log_audit.assert_called_once()
 
     def test_delete_structured_success(self, client, mock_service):
@@ -462,7 +475,9 @@ class TestDeleteEndpoint:
             params={"user_id": "user_123"},
         )
 
-        assert response.status_code == 204
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
         mock_service.storage.delete_structured.assert_called_once_with("struct_456", "user_123")
 
     def test_delete_semantic_success(self, client, mock_service):
@@ -480,7 +495,9 @@ class TestDeleteEndpoint:
             params={"user_id": "user_123"},
         )
 
-        assert response.status_code == 204
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
         mock_service.storage.delete_semantic.assert_called_once_with("sem_789", "user_123")
 
     def test_delete_procedural_success(self, client, mock_service):
@@ -498,12 +515,15 @@ class TestDeleteEndpoint:
             params={"user_id": "user_123"},
         )
 
-        assert response.status_code == 204
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
         mock_service.storage.delete_procedural.assert_called_once_with("proc_abc", "user_123")
 
     def test_delete_not_found(self, client, mock_service):
         """Should return 404 when memory not found."""
-        mock_service.storage.delete_episode = AsyncMock(return_value=False)
+        cascade_result = {"deleted": False}
+        mock_service.storage.delete_episode = AsyncMock(return_value=cascade_result)
 
         response = client.delete(
             "/api/v1/memories/ep_nonexistent",
@@ -1567,48 +1587,69 @@ class TestDeleteMemoryEndpoint:
     """Tests for DELETE /memories/{memory_id} endpoint."""
 
     def test_delete_episodic_memory(self, client, mock_service):
-        """Should delete an episodic memory and return 204."""
-        mock_service.storage.delete_episode = AsyncMock(return_value=True)
+        """Should delete an episodic memory and return 200 with cascade info."""
+        cascade_result = {
+            "deleted": True,
+            "structured_deleted": 0,
+            "semantic_deleted": 0,
+            "semantic_updated": 0,
+            "procedural_deleted": 0,
+            "procedural_updated": 0,
+        }
+        mock_service.storage.delete_episode = AsyncMock(return_value=cascade_result)
         mock_service.storage.log_audit = AsyncMock()
 
         response = client.delete("/api/v1/memories/ep_test123?user_id=user_123")
 
-        assert response.status_code == 204
-        mock_service.storage.delete_episode.assert_called_once_with("ep_test123", "user_123")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
+        assert data["memory_type"] == "episodic"
+        assert "cascade" in data
+        mock_service.storage.delete_episode.assert_called_once_with(
+            "ep_test123", "user_123", cascade="soft"
+        )
 
     def test_delete_structured_memory(self, client, mock_service):
-        """Should delete a structured memory and return 204."""
+        """Should delete a structured memory and return 200."""
         mock_service.storage.get_structured = AsyncMock(return_value=None)
         mock_service.storage.delete_structured = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
 
         response = client.delete("/api/v1/memories/struct_test123?user_id=user_123")
 
-        assert response.status_code == 204
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
 
     def test_delete_semantic_memory(self, client, mock_service):
-        """Should delete a semantic memory and return 204."""
+        """Should delete a semantic memory and return 200."""
         mock_service.storage.get_semantic = AsyncMock(return_value=None)
         mock_service.storage.delete_semantic = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
 
         response = client.delete("/api/v1/memories/sem_test123?user_id=user_123")
 
-        assert response.status_code == 204
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
 
     def test_delete_procedural_memory(self, client, mock_service):
-        """Should delete a procedural memory and return 204."""
+        """Should delete a procedural memory and return 200."""
         mock_service.storage.get_procedural = AsyncMock(return_value=None)
         mock_service.storage.delete_procedural = AsyncMock(return_value=True)
         mock_service.storage.log_audit = AsyncMock()
 
         response = client.delete("/api/v1/memories/proc_test123?user_id=user_123")
 
-        assert response.status_code == 204
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
 
     def test_delete_memory_not_found(self, client, mock_service):
         """Should return 404 when memory doesn't exist."""
-        mock_service.storage.delete_episode = AsyncMock(return_value=False)
+        cascade_result = {"deleted": False}
+        mock_service.storage.delete_episode = AsyncMock(return_value=cascade_result)
 
         response = client.delete("/api/v1/memories/ep_nonexistent?user_id=user_123")
 
@@ -1621,6 +1662,59 @@ class TestDeleteMemoryEndpoint:
 
         assert response.status_code == 400
         assert "Invalid memory ID format" in response.json()["detail"]
+
+    def test_delete_episode_with_cascade_hard(self, client, mock_service):
+        """Should delete episode with hard cascade."""
+        cascade_result = {
+            "deleted": True,
+            "structured_deleted": 1,
+            "semantic_deleted": 2,
+            "semantic_updated": 0,
+            "procedural_deleted": 1,
+            "procedural_updated": 0,
+        }
+        mock_service.storage.delete_episode = AsyncMock(return_value=cascade_result)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete("/api/v1/memories/ep_test123?user_id=user_123&cascade=hard")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cascade"]["mode"] == "hard"
+        assert data["cascade"]["structured_deleted"] == 1
+        assert data["cascade"]["semantic_deleted"] == 2
+        mock_service.storage.delete_episode.assert_called_once_with(
+            "ep_test123", "user_123", cascade="hard"
+        )
+
+    def test_delete_episode_with_cascade_none(self, client, mock_service):
+        """Should delete episode without cascade."""
+        cascade_result = {
+            "deleted": True,
+            "structured_deleted": 0,
+            "semantic_deleted": 0,
+            "semantic_updated": 0,
+            "procedural_deleted": 0,
+            "procedural_updated": 0,
+        }
+        mock_service.storage.delete_episode = AsyncMock(return_value=cascade_result)
+        mock_service.storage.log_audit = AsyncMock()
+
+        response = client.delete("/api/v1/memories/ep_test123?user_id=user_123&cascade=none")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["cascade"]["mode"] == "none"
+        mock_service.storage.delete_episode.assert_called_once_with(
+            "ep_test123", "user_123", cascade="none"
+        )
+
+    def test_delete_episode_invalid_cascade_mode(self, client, mock_service):
+        """Should return 400 for invalid cascade mode."""
+        response = client.delete("/api/v1/memories/ep_test123?user_id=user_123&cascade=invalid")
+
+        assert response.status_code == 400
+        assert "Invalid cascade mode" in response.json()["detail"]
 
     def test_delete_memory_missing_user_id(self, client, mock_service):
         """Should return 422 when user_id is missing."""

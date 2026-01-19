@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from engram.models import AuditEntry, HistoryEntry
 from engram.service import EngramService
@@ -1043,35 +1043,66 @@ async def get_provenance(
 
 @router.delete(
     "/memories/{memory_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    status_code=status.HTTP_200_OK,
     tags=["memory"],
+    responses={
+        200: {"description": "Memory deleted successfully with cascade info"},
+        204: {"description": "Memory deleted (no cascade)"},
+        400: {"description": "Invalid memory ID format"},
+        404: {"description": "Memory not found"},
+    },
 )
 async def delete_memory(
     memory_id: str,
     user_id: str,
     service: ServiceDep,
     org_id: str | None = None,
-) -> None:
-    """Delete a specific memory by ID.
+    cascade: str = Query(
+        default="soft",
+        description="Cascade mode for episode deletion: "
+        "'none' (delete only episode), "
+        "'soft' (remove references, reduce confidence, delete orphans), "
+        "'hard' (delete all derived memories)",
+    ),
+) -> dict[str, object]:
+    """Delete a specific memory by ID with optional cascade for episodes.
 
     Deletes a memory from the appropriate collection based on its ID prefix.
     Supported memory types:
-    - ep_*: Episodic memories (ground truth)
+    - ep_*: Episodic memories (ground truth) - supports cascade deletion
     - struct_*: Structured memories (extracted facts)
     - sem_*: Semantic memories (consolidated knowledge)
     - proc_*: Procedural memories (behavioral patterns)
+
+    For episodic memories, the cascade parameter controls how derived memories
+    are handled:
+    - 'none': Delete only the episode, leaving derived memories orphaned
+    - 'soft': Remove episode reference from derived memories, reduce their
+              confidence proportionally, delete memories with no remaining sources
+    - 'hard': Delete all derived memories that reference this episode
 
     Args:
         memory_id: ID of the memory to delete.
         user_id: User ID for multi-tenancy isolation.
         service: Injected EngramService.
         org_id: Optional organization ID.
+        cascade: Cascade mode for episode deletion (none/soft/hard).
+
+    Returns:
+        Dict with deletion statistics including cascade effects.
 
     Raises:
-        HTTPException: 400 if memory_id format is invalid.
+        HTTPException: 400 if memory_id format is invalid or cascade mode invalid.
         HTTPException: 404 if memory not found.
     """
     start_time = time.time()
+
+    # Validate cascade parameter
+    if cascade not in ("none", "soft", "hard"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid cascade mode: {cascade}. Expected: none, soft, or hard",
+        )
 
     # Determine memory type from ID prefix and call appropriate delete method
     if memory_id.startswith("ep_"):
@@ -1109,8 +1140,12 @@ async def delete_memory(
                 before_state.pop("embedding", None)
 
         # Call appropriate delete method based on memory type
+        cascade_result: dict[str, object] | None = None
         if memory_type == "episodic":
-            deleted = await service.storage.delete_episode(memory_id, user_id)
+            cascade_result = await service.storage.delete_episode(
+                memory_id, user_id, cascade=cascade
+            )
+            deleted = bool(cascade_result.get("deleted", False))
         elif memory_type == "structured":
             deleted = await service.storage.delete_structured(memory_id, user_id)
         elif memory_type == "semantic":
@@ -1133,10 +1168,17 @@ async def delete_memory(
             org_id=org_id,
             duration_ms=duration_ms,
         )
+        # Add cascade info to audit details if available
+        if cascade_result is not None:
+            audit_entry.details["cascade_mode"] = cascade
+            audit_entry.details["cascade_result"] = cascade_result
         await service.storage.log_audit(audit_entry)
 
         # Log history entry for deletion (mutable types only)
         if before_state is not None:
+            reason = "Manual deletion via API"
+            if cascade_result is not None:
+                reason = f"Manual deletion via API (cascade={cascade})"
             history_entry = HistoryEntry.for_delete(
                 memory_id=memory_id,
                 memory_type=memory_type,
@@ -1144,11 +1186,29 @@ async def delete_memory(
                 trigger="manual",
                 before_state=before_state,
                 org_id=org_id,
-                reason="Manual deletion via API",
+                reason=reason,
             )
             await service.storage.log_history(history_entry)
 
         logger.info("Deleted %s memory %s for user %s", memory_type, memory_id, user_id)
+
+        # Build response
+        response: dict[str, object] = {
+            "memory_id": memory_id,
+            "memory_type": memory_type,
+            "deleted": True,
+        }
+        if cascade_result is not None:
+            response["cascade"] = {
+                "mode": cascade,
+                "structured_deleted": cascade_result.get("structured_deleted", 0),
+                "semantic_deleted": cascade_result.get("semantic_deleted", 0),
+                "semantic_updated": cascade_result.get("semantic_updated", 0),
+                "procedural_deleted": cascade_result.get("procedural_deleted", 0),
+                "procedural_updated": cascade_result.get("procedural_updated", 0),
+            }
+
+        return response
 
     except HTTPException:
         raise
