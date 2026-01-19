@@ -121,17 +121,220 @@ class CRUDMixin:
         result: MemoryT = self._payload_to_memory(points[0].payload, memory_class)
         return result
 
-    async def delete_episode(self, episode_id: str, user_id: str) -> bool:
-        """Delete an episode.
+    async def delete_episode(
+        self,
+        episode_id: str,
+        user_id: str,
+        cascade: str = "soft",
+    ) -> dict[str, object]:
+        """Delete an episode with optional cascade to derived memories.
 
         Args:
             episode_id: Episode to delete.
             user_id: User ID for ownership verification.
+            cascade: Cascade mode:
+                - "none": Delete only the episode, leave derived memories orphaned
+                - "soft": Remove episode reference from derived memories, reduce confidence,
+                          delete derived memories that have no remaining sources
+                - "hard": Delete all derived memories that reference this episode
 
         Returns:
-            True if deleted, False if not found.
+            Dict with deletion statistics:
+                - deleted: Whether the episode was deleted
+                - structured_deleted: Number of structured memories deleted
+                - semantic_deleted: Number of semantic memories deleted
+                - semantic_updated: Number of semantic memories updated (reference removed)
+                - procedural_deleted: Number of procedural memories deleted
+                - procedural_updated: Number of procedural memories updated (reference removed)
         """
-        return await self._delete_by_id(episode_id, user_id, "episodic")
+        # Use typed counters for cascade statistics
+        structured_deleted = 0
+        semantic_deleted = 0
+        semantic_updated = 0
+        procedural_deleted = 0
+        procedural_updated = 0
+
+        # First verify the episode exists
+        episode = await self.get_episode(episode_id, user_id)
+        if not episode:
+            return {
+                "deleted": False,
+                "structured_deleted": 0,
+                "semantic_deleted": 0,
+                "semantic_updated": 0,
+                "procedural_deleted": 0,
+                "procedural_updated": 0,
+            }
+
+        if cascade != "none":
+            # Handle StructuredMemory (1:1 with episode, always delete)
+            structured = await self.get_structured_for_episode(episode_id, user_id)
+            if structured:
+                await self._delete_by_id(structured.id, user_id, "structured")
+                structured_deleted = 1
+
+            # Handle SemanticMemory
+            semantics = await self._find_semantics_by_source_episode(episode_id, user_id)
+            for sem in semantics:
+                if cascade == "hard":
+                    # Hard cascade: delete any semantic that references this episode
+                    await self._delete_by_id(sem.id, user_id, "semantic")
+                    semantic_deleted += 1
+                else:
+                    # Soft cascade: remove reference, reduce confidence
+                    original_count = len(sem.source_episode_ids)
+                    sem.source_episode_ids = [
+                        eid for eid in sem.source_episode_ids if eid != episode_id
+                    ]
+
+                    if not sem.source_episode_ids:
+                        # No sources left, delete
+                        await self._delete_by_id(sem.id, user_id, "semantic")
+                        semantic_deleted += 1
+                    else:
+                        # Reduce confidence proportionally
+                        remaining_count = len(sem.source_episode_ids)
+                        confidence_factor = remaining_count / original_count
+                        sem.confidence.value *= confidence_factor
+                        sem.confidence.value = max(0.1, sem.confidence.value)  # Floor at 0.1
+                        await self.update_semantic_memory(sem)
+                        semantic_updated += 1
+
+            # Handle ProceduralMemory
+            procedurals = await self._find_procedurals_by_source_episode(episode_id, user_id)
+            for proc in procedurals:
+                if cascade == "hard":
+                    await self._delete_by_id(proc.id, user_id, "procedural")
+                    procedural_deleted += 1
+                else:
+                    # Soft cascade: remove reference
+                    original_count = len(proc.source_episode_ids)
+                    proc.source_episode_ids = [
+                        eid for eid in proc.source_episode_ids if eid != episode_id
+                    ]
+
+                    if not proc.source_episode_ids and not proc.source_semantic_ids:
+                        # No sources left at all, delete
+                        await self._delete_by_id(proc.id, user_id, "procedural")
+                        procedural_deleted += 1
+                    else:
+                        # Reduce confidence proportionally (only if episode sources changed)
+                        if original_count > 0:
+                            remaining_count = len(proc.source_episode_ids)
+                            confidence_factor = (
+                                remaining_count / original_count if original_count > 0 else 1.0
+                            )
+                            proc.confidence.value *= confidence_factor
+                            proc.confidence.value = max(0.1, proc.confidence.value)
+                        await self.update_procedural_memory(proc)
+                        procedural_updated += 1
+
+        # Delete the episode itself
+        deleted = await self._delete_by_id(episode_id, user_id, "episodic")
+
+        return {
+            "deleted": deleted,
+            "structured_deleted": structured_deleted,
+            "semantic_deleted": semantic_deleted,
+            "semantic_updated": semantic_updated,
+            "procedural_deleted": procedural_deleted,
+            "procedural_updated": procedural_updated,
+        }
+
+    async def _find_semantics_by_source_episode(
+        self,
+        episode_id: str,
+        user_id: str,
+    ) -> list[SemanticMemory]:
+        """Find all SemanticMemory records that reference a given episode.
+
+        Args:
+            episode_id: The episode ID to search for.
+            user_id: User ID for isolation.
+
+        Returns:
+            List of SemanticMemory objects containing the episode in source_episode_ids.
+        """
+        from engram.models import SemanticMemory
+
+        collection = self._collection_name("semantic")
+
+        # Qdrant supports array contains via MatchAny
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source_episode_ids",
+                        match=models.MatchAny(any=[episode_id]),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    ),
+                ]
+            ),
+            limit=10000,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        memories: list[SemanticMemory] = []
+        for point in results:
+            if point.payload is not None:
+                memory = self._payload_to_memory(point.payload, SemanticMemory)
+                if isinstance(point.vector, list):
+                    memory.embedding = point.vector
+                memories.append(memory)
+
+        return memories
+
+    async def _find_procedurals_by_source_episode(
+        self,
+        episode_id: str,
+        user_id: str,
+    ) -> list[ProceduralMemory]:
+        """Find all ProceduralMemory records that reference a given episode.
+
+        Args:
+            episode_id: The episode ID to search for.
+            user_id: User ID for isolation.
+
+        Returns:
+            List of ProceduralMemory objects containing the episode in source_episode_ids.
+        """
+        from engram.models import ProceduralMemory
+
+        collection = self._collection_name("procedural")
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="source_episode_ids",
+                        match=models.MatchAny(any=[episode_id]),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    ),
+                ]
+            ),
+            limit=10000,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        memories: list[ProceduralMemory] = []
+        for point in results:
+            if point.payload is not None:
+                memory = self._payload_to_memory(point.payload, ProceduralMemory)
+                if isinstance(point.vector, list):
+                    memory.embedding = point.vector
+                memories.append(memory)
+
+        return memories
 
     async def delete_structured(self, memory_id: str, user_id: str) -> bool:
         """Delete a structured memory."""
