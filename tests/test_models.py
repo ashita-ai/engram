@@ -612,8 +612,8 @@ class TestAuditEntry:
 
     def test_create_audit_entry(self):
         """Basic audit entry creation."""
-        entry = AuditEntry(event="test", user_id="user_123")
-        assert entry.event == "test"
+        entry = AuditEntry(event="encode", user_id="user_123")
+        assert entry.event == "encode"
         assert entry.user_id == "user_123"
         assert entry.id.startswith("audit_")
 
@@ -676,7 +676,7 @@ class TestAuditEntry:
 
     def test_optional_fields(self):
         """Optional fields should be None by default."""
-        entry = AuditEntry(event="test", user_id="user_123")
+        entry = AuditEntry(event="encode", user_id="user_123")
         assert entry.org_id is None
         assert entry.session_id is None
         assert entry.duration_ms is None

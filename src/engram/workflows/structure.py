@@ -227,14 +227,15 @@ Provide a brief reasoning for your confidence score. Be conservative - lower con
 
 Today's date is {datetime.now(UTC).strftime("%Y-%m-%d")} for resolving relative dates."""
 
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     agent: Agent[None, LLMExtractionOutput] = Agent(
         model_spec,
         output_type=LLMExtractionOutput,
         instructions=extraction_prompt,
     )
 
-    result = await agent.run(content)
-    return result.output
+    return await run_agent_with_retry(agent, content)
 
 
 async def run_structure(

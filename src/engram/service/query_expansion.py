@@ -91,10 +91,11 @@ async def expand_query(
     Returns:
         ExpandedQuery with original and expanded terms.
     """
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     agent = get_expansion_agent(model)
     try:
-        result = await agent.run(f"Expand this query: {query}")
-        expanded = result.output
+        expanded = await run_agent_with_retry(agent, f"Expand this query: {query}")
         expanded.original = query  # Ensure original is set
         logger.debug(f"Expanded '{query}' → {expanded.expanded_terms} ({expanded.reasoning})")
         return expanded

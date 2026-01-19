@@ -388,6 +388,15 @@ class StructuredMemory(MemoryBase):
                 total = deterministic_count + llm_count
                 confidence_value = (0.9 * deterministic_count + 0.8 * llm_count) / total
 
+        # Determine extraction method based on what was actually extracted
+        # If only deterministic extracts (no LLM), use EXTRACTED; otherwise INFERRED
+        if llm_count == 0 and deterministic_count > 0:
+            extraction_method = ExtractionMethod.EXTRACTED
+            extraction_base = 0.9
+        else:
+            extraction_method = ExtractionMethod.INFERRED
+            extraction_base = llm_confidence if llm_confidence is not None else 0.8
+
         return cls(
             source_episode_id=source_episode_id,
             user_id=user_id,
@@ -409,8 +418,8 @@ class StructuredMemory(MemoryBase):
             derivation_method=derivation_method or "rich:llm:unknown",
             confidence=ConfidenceScore(
                 value=confidence_value,
-                extraction_method=ExtractionMethod.INFERRED,
-                extraction_base=llm_confidence if llm_confidence is not None else 0.8,
+                extraction_method=extraction_method,
+                extraction_base=extraction_base,
                 llm_reasoning=llm_confidence_reasoning,
             ),
         )

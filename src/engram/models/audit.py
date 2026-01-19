@@ -1,11 +1,24 @@
 """AuditEntry model - operation logging for auditability."""
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from .base import generate_id
+
+# Audit event types for type safety
+AuditEventType = Literal[
+    "encode",
+    "recall",
+    "consolidate",
+    "decay",
+    "delete",
+    "update",
+    "bulk_delete",
+    "structure",
+    "promote",
+]
 
 
 class AuditEntry(BaseModel):
@@ -17,7 +30,7 @@ class AuditEntry(BaseModel):
     Attributes:
         id: Unique identifier for this audit entry.
         timestamp: When the operation occurred.
-        event: Type of operation (encode, recall, consolidate, decay).
+        event: Type of operation (encode, recall, consolidate, decay, etc.).
         user_id: User who triggered the operation.
         org_id: Organization (optional).
         session_id: Session context (optional).
@@ -32,7 +45,9 @@ class AuditEntry(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         description="When the operation occurred",
     )
-    event: str = Field(description="Operation type: encode, recall, consolidate, decay")
+    event: AuditEventType = Field(
+        description="Operation type: encode, recall, consolidate, decay, delete, update, bulk_delete, structure, promote"
+    )
     user_id: str = Field(description="User who triggered the operation")
     org_id: str | None = Field(default=None, description="Organization (optional)")
     session_id: str | None = Field(default=None, description="Session context (optional)")

@@ -115,6 +115,8 @@ async def extract_entities(
         instructions=EXTRACTION_PROMPT,
     )
 
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     user_prompt = f"""Extract all named entities from this text:
 
 {content}
@@ -124,8 +126,7 @@ Memory ID: {memory_id}
 List every entity mention you find."""
 
     try:
-        result = await agent.run(user_prompt)
-        extracted = result.output
+        extracted = await run_agent_with_retry(agent, user_prompt)
 
         # Ensure memory_id is set on all mentions
         for mention in extracted.mentions:
@@ -190,6 +191,8 @@ async def cluster_mentions(
         instructions=CLUSTERING_PROMPT,
     )
 
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     user_prompt = f"""Cluster these entity mentions by same real-world entity:
 
 {mentions_text}
@@ -198,8 +201,7 @@ async def cluster_mentions(
 Group mentions that refer to the same entity. Be conservative."""
 
     try:
-        result = await agent.run(user_prompt)
-        return result.output
+        return await run_agent_with_retry(agent, user_prompt)
 
     except Exception as e:
         logger.exception("Entity clustering failed: %s", e)

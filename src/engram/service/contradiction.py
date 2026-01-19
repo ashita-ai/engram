@@ -152,6 +152,8 @@ async def analyze_pair(
     """
     agent = get_conflict_agent(model)
     try:
+        from engram.workflows.llm_utils import run_agent_with_retry
+
         prompt = f"""Analyze these two memories for conflicts:
 
 MEMORY A:
@@ -162,8 +164,7 @@ MEMORY B:
 
 Determine if they contradict each other and explain why."""
 
-        result = await agent.run(prompt)
-        return result.output
+        return await run_agent_with_retry(agent, prompt)
     except Exception as e:
         logger.warning(f"Conflict analysis failed: {e}")
         return ConflictAnalysis(

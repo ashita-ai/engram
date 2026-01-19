@@ -203,6 +203,8 @@ Analyze the relationships between the new memory and each candidate.
 For each meaningful relationship found, specify the link type, confidence, and reasoning.
 Also suggest any metadata evolutions for existing memories if appropriate."""
 
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     agent: Agent[None, LinkDiscoveryResult] = Agent(
         settings.llm_model,
         output_type=LinkDiscoveryResult,
@@ -210,8 +212,7 @@ Also suggest any metadata evolutions for existing memories if appropriate."""
     )
 
     try:
-        result = await agent.run(user_prompt)
-        discovered = result.output
+        discovered = await run_agent_with_retry(agent, user_prompt)
 
         # Filter by confidence threshold
         discovered.links = [link for link in discovered.links if link.confidence >= min_confidence]
