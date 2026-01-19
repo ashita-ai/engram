@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from engram.models.base import ConfidenceScore
+
 if TYPE_CHECKING:
     from engram.embeddings import Embedder
     from engram.models import SemanticMemory
@@ -31,7 +33,10 @@ MIN_COMPRESSION_RATIO = 2.0
 
 
 class SummaryOutput(BaseModel):
-    """Structured output from the summarization LLM agent."""
+    """Structured output from the summarization LLM agent.
+
+    Includes both synthesis AND confidence assessment in a single LLM call.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -49,6 +54,18 @@ class SummaryOutput(BaseModel):
         description="Domain/theme (e.g., programming, work, personal)",
     )
 
+    # Confidence assessment (returned alongside synthesis)
+    confidence: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Overall confidence in the synthesis (0.0-1.0)",
+    )
+    confidence_reasoning: str = Field(
+        default="",
+        description="Brief explanation of the confidence assessment",
+    )
+
 
 class MapReduceSummary(BaseModel):
     """Output from map-reduce summarization of multiple chunks."""
@@ -58,6 +75,18 @@ class MapReduceSummary(BaseModel):
     summary: str = Field(description="Final unified summary")
     keywords: list[str] = Field(default_factory=list)
     context: str = Field(default="")
+
+    # Confidence assessment
+    confidence: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Overall confidence in the synthesis (0.0-1.0)",
+    )
+    confidence_reasoning: str = Field(
+        default="",
+        description="Brief explanation of the confidence assessment",
+    )
 
 
 class ConsolidationResult(BaseModel):
@@ -189,7 +218,17 @@ The summary should be:
 - Focused on lasting/stable information, not transient details
 
 Do NOT list individual facts. Create a coherent narrative summary.
-Be conservative - only include information that appears in the episodes."""
+Be conservative - only include information that appears in the episodes.
+
+CONFIDENCE ASSESSMENT:
+After creating the summary, assess your confidence in the synthesis (0.0-1.0):
+- 0.9-1.0: Strong source agreement, directly supported by multiple episodes
+- 0.7-0.9: Good source agreement, clearly implied by episodes
+- 0.5-0.7: Reasonable inference, some gaps in evidence
+- 0.3-0.5: Speculative, weak source agreement
+- 0.0-0.3: Sources conflict or don't clearly support the summary
+
+Synthesis should generally score lower than extraction. Be conservative."""
 
     agent: Agent[None, SummaryOutput] = Agent(
         settings.consolidation_model,
@@ -237,7 +276,17 @@ Create a single coherent summary that:
 - Is 3-6 sentences total
 - Preserves the most important facts from each summary
 
-Do not add information that wasn't in the original summaries."""
+Do not add information that wasn't in the original summaries.
+
+CONFIDENCE ASSESSMENT:
+After combining, assess your confidence in the unified summary (0.0-1.0):
+- 0.9-1.0: Summaries strongly agree, clear integration
+- 0.7-0.9: Good agreement, minor gaps
+- 0.5-0.7: Some disagreement or gaps
+- 0.3-0.5: Significant disagreement
+- 0.0-0.3: Summaries conflict or don't support the conclusion
+
+Be conservative - lower confidence is better than false certainty."""
 
     agent: Agent[None, MapReduceSummary] = Agent(
         settings.consolidation_model,
@@ -396,11 +445,15 @@ async def run_consolidation(
             final_summary = chunk_summaries[0].summary
             final_keywords = chunk_summaries[0].keywords
             final_context = chunk_summaries[0].context
+            final_confidence = chunk_summaries[0].confidence
+            final_confidence_reasoning = chunk_summaries[0].confidence_reasoning
         else:
             reduced = await _reduce_summaries(chunk_summaries)
             final_summary = reduced.summary
             final_keywords = reduced.keywords
             final_context = reduced.context
+            final_confidence = reduced.confidence
+            final_confidence_reasoning = reduced.confidence_reasoning
 
         # 6. Create semantic memory with source links
         all_episode_ids = [ep.id for ep in episodes]  # Include system prompts for audit
@@ -420,12 +473,13 @@ async def run_consolidation(
             keywords=final_keywords,
             context=final_context,
             derivation_method=f"consolidation:{settings.consolidation_model}",
+            # Use LLM-assessed confidence
+            confidence=ConfidenceScore.for_inferred(
+                confidence=final_confidence,
+                supporting_episodes=len(user_episode_ids),
+                reasoning=final_confidence_reasoning,
+            ),
         )
-
-        # Set confidence based on number of supporting episodes
-        memory.confidence.extraction_base = 0.7  # Summaries are inferred
-        memory.confidence.supporting_episodes = len(user_episode_ids)
-        memory.confidence.recompute()
 
         # Strengthen through consolidation
         memory.strengthen(delta=0.1)
@@ -575,7 +629,17 @@ Your task:
 - Identify stable facts vs transient details
 
 Write in third person ("The user...", "They work at...").
-Focus on lasting/stable information. Be conservative."""
+Focus on lasting/stable information. Be conservative.
+
+CONFIDENCE ASSESSMENT:
+After synthesizing, assess your confidence in the unified summary (0.0-1.0):
+- 0.9-1.0: Strong source agreement across all structured memories
+- 0.7-0.9: Good agreement, minor gaps or resolved contradictions
+- 0.5-0.7: Reasonable synthesis but some gaps in evidence
+- 0.3-0.5: Weak source agreement, speculative conclusions
+- 0.0-0.3: Sources conflict or don't support the synthesis
+
+Synthesis should generally score lower than extraction. Be conservative."""
 
     agent: Agent[None, SummaryOutput] = Agent(
         settings.consolidation_model,
@@ -682,12 +746,15 @@ async def run_consolidation_from_structured(
         keywords=synthesis.keywords,
         context=synthesis.context,
         derivation_method=f"consolidation:{settings.consolidation_model}",
+        # Use LLM-assessed confidence
+        confidence=ConfidenceScore.for_inferred(
+            confidence=synthesis.confidence,
+            supporting_episodes=len(structured),
+            reasoning=synthesis.confidence_reasoning,
+        ),
     )
 
-    # Set confidence based on structured input count
-    memory.confidence.extraction_base = 0.75  # Higher than raw episodes (0.7)
-    memory.confidence.supporting_episodes = len(structured)
-    memory.confidence.recompute()
+    # Strengthen through consolidation
     memory.strengthen(delta=0.1)
 
     await storage.store_semantic(memory)

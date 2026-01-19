@@ -317,6 +317,9 @@ class StructuredMemory(MemoryBase):
         embedding: list[float] | None = None,
         # Provenance
         derivation_method: str | None = None,
+        # LLM-assessed confidence (new architecture)
+        llm_confidence: float | None = None,
+        llm_confidence_reasoning: str | None = None,
     ) -> "StructuredMemory":
         """Create a rich-mode StructuredMemory (regex + LLM extracts).
 
@@ -324,10 +327,9 @@ class StructuredMemory(MemoryBase):
         - Deterministic: emails, phones, URLs (regex)
         - LLM: dates, people, orgs, locations, preferences, negations
 
-        Computes composite confidence based on what was extracted:
-        - If only deterministic data: 0.9 confidence
-        - If only LLM data: 0.8 confidence
-        - If both: weighted average (~0.85)
+        The LLM provides confidence assessment during extraction (single call).
+        Deterministic extracts are weighted at 0.9, LLM extracts use the
+        LLM-provided confidence (or 0.8 default).
 
         Args:
             source_episode_id: The Episode this was extracted from.
@@ -346,6 +348,8 @@ class StructuredMemory(MemoryBase):
             keywords: Key terms.
             embedding: Vector embedding.
             derivation_method: How this was extracted (e.g., 'rich:llm:gpt-4o-mini').
+            llm_confidence: LLM-assessed confidence (0.0-1.0).
+            llm_confidence_reasoning: LLM's explanation for the confidence.
 
         Returns:
             StructuredMemory instance in rich mode.
@@ -361,20 +365,28 @@ class StructuredMemory(MemoryBase):
             + len(negations or [])
         )
 
-        # Compute weighted confidence
-        if deterministic_count + llm_count == 0:
-            # No extracts, but we have a summary - LLM confidence
-            confidence_value = 0.8
-        elif deterministic_count > 0 and llm_count == 0:
-            # Only deterministic - high confidence
-            confidence_value = 0.9
-        elif deterministic_count == 0 and llm_count > 0:
-            # Only LLM - medium-high confidence
-            confidence_value = 0.8
+        # Use LLM-assessed confidence if provided, otherwise compute weighted confidence
+        if llm_confidence is not None:
+            # LLM provided confidence during extraction (new architecture)
+            # Weight deterministic extracts at 0.9, LLM extracts at LLM-provided confidence
+            if deterministic_count > 0 and llm_count > 0:
+                total = deterministic_count + llm_count
+                confidence_value = (0.9 * deterministic_count + llm_confidence * llm_count) / total
+            elif deterministic_count > 0:
+                confidence_value = 0.9
+            else:
+                confidence_value = llm_confidence
         else:
-            # Both - weighted average
-            total = deterministic_count + llm_count
-            confidence_value = (0.9 * deterministic_count + 0.8 * llm_count) / total
+            # Fallback: compute weighted confidence (legacy behavior)
+            if deterministic_count + llm_count == 0:
+                confidence_value = 0.8
+            elif deterministic_count > 0 and llm_count == 0:
+                confidence_value = 0.9
+            elif deterministic_count == 0 and llm_count > 0:
+                confidence_value = 0.8
+            else:
+                total = deterministic_count + llm_count
+                confidence_value = (0.9 * deterministic_count + 0.8 * llm_count) / total
 
         return cls(
             source_episode_id=source_episode_id,
@@ -398,7 +410,8 @@ class StructuredMemory(MemoryBase):
             confidence=ConfidenceScore(
                 value=confidence_value,
                 extraction_method=ExtractionMethod.INFERRED,
-                extraction_base=0.8,
+                extraction_base=llm_confidence if llm_confidence is not None else 0.8,
+                llm_reasoning=llm_confidence_reasoning,
             ),
         )
 
