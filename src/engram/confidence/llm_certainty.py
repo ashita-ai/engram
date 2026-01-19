@@ -190,14 +190,16 @@ SOURCE TEXT:
     user_prompt += "\n\nProvide your certainty assessment."
 
     try:
-        result = await agent.run(user_prompt)
+        from engram.workflows.llm_utils import run_agent_with_retry
+
+        result_output = await run_agent_with_retry(agent, user_prompt)
         logger.debug(
             "Extraction certainty for '%s': %.2f (%s)",
             extracted[:50],
-            result.output.certainty,
-            result.output.clarity,
+            result_output.certainty,
+            result_output.clarity,
         )
-        return result.output
+        return result_output
 
     except Exception as e:
         logger.warning("LLM certainty assessment failed: %s", e)
@@ -265,14 +267,16 @@ SOURCE MEMORIES:
     user_prompt += "\n\nProvide your certainty assessment."
 
     try:
-        result = await agent.run(user_prompt)
+        from engram.workflows.llm_utils import run_agent_with_retry
+
+        result_output = await run_agent_with_retry(agent, user_prompt)
         logger.debug(
             "Synthesis certainty for '%s': %.2f (%s)",
             synthesized[:50],
-            result.output.certainty,
-            result.output.source_agreement,
+            result_output.certainty,
+            result_output.source_agreement,
         )
-        return result.output
+        return result_output
 
     except Exception as e:
         logger.warning("LLM synthesis certainty assessment failed: %s", e)

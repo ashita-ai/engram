@@ -230,14 +230,15 @@ After creating the summary, assess your confidence in the synthesis (0.0-1.0):
 
 Synthesis should generally score lower than extraction. Be conservative."""
 
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     agent: Agent[None, SummaryOutput] = Agent(
         settings.consolidation_model,
         output_type=SummaryOutput,
         instructions=summarization_prompt,
     )
 
-    result = await agent.run(formatted_text)
-    return result.output
+    return await run_agent_with_retry(agent, formatted_text)
 
 
 async def _reduce_summaries(summaries: list[SummaryOutput]) -> MapReduceSummary:
@@ -288,16 +289,17 @@ After combining, assess your confidence in the unified summary (0.0-1.0):
 
 Be conservative - lower confidence is better than false certainty."""
 
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     agent: Agent[None, MapReduceSummary] = Agent(
         settings.consolidation_model,
         output_type=MapReduceSummary,
         instructions=reduce_prompt,
     )
 
-    result = await agent.run(formatted_text)
+    output = await run_agent_with_retry(agent, formatted_text)
 
     # Merge keywords from all chunks
-    output = result.output
     output.keywords = list(all_keywords.union(set(output.keywords)))[:15]
 
     # Use most common context or combine
@@ -641,14 +643,15 @@ After synthesizing, assess your confidence in the unified summary (0.0-1.0):
 
 Synthesis should generally score lower than extraction. Be conservative."""
 
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     agent: Agent[None, SummaryOutput] = Agent(
         settings.consolidation_model,
         output_type=SummaryOutput,
         instructions=synthesis_prompt,
     )
 
-    result = await agent.run(formatted_text)
-    return result.output
+    return await run_agent_with_retry(agent, formatted_text)
 
 
 async def run_consolidation_from_structured(

@@ -310,39 +310,42 @@ class CRUDMixin:
         Returns:
             Number of episodes updated.
         """
+        if not episode_ids:
+            return 0
+
         collection = self._collection_name("episodic")
-        updated = 0
 
-        for episode_id in episode_ids:
-            # Find and update each episode
-            results, _ = await self.client.scroll(
-                collection_name=collection,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="id",
-                            match=models.MatchValue(value=episode_id),
-                        ),
-                        models.FieldCondition(
-                            key="user_id",
-                            match=models.MatchValue(value=user_id),
-                        ),
-                    ]
-                ),
-                limit=1,
-                with_payload=True,
-            )
+        # Batch fetch all episodes in a single query
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchAny(any=episode_ids),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    ),
+                ]
+            ),
+            limit=len(episode_ids),
+            with_payload=True,
+        )
 
-            if results:
-                point = results[0]
-                await self.client.set_payload(
-                    collection_name=collection,
-                    payload={"consolidated": True},
-                    points=[point.id],
-                )
-                updated += 1
+        if not results:
+            return 0
 
-        return updated
+        # Batch update all points at once
+        point_ids = [point.id for point in results]
+        await self.client.set_payload(
+            collection_name=collection,
+            payload={"consolidated": True},
+            points=point_ids,
+        )
+
+        return len(point_ids)
 
     async def list_structured_memories(
         self,
@@ -486,42 +489,45 @@ class CRUDMixin:
         Returns:
             Number of episodes updated.
         """
+        if not episode_ids:
+            return 0
+
         collection = self._collection_name("episodic")
-        updated = 0
 
-        for episode_id in episode_ids:
-            # Find and update each episode
-            results, _ = await self.client.scroll(
-                collection_name=collection,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="id",
-                            match=models.MatchValue(value=episode_id),
-                        ),
-                        models.FieldCondition(
-                            key="user_id",
-                            match=models.MatchValue(value=user_id),
-                        ),
-                    ]
-                ),
-                limit=1,
-                with_payload=True,
-            )
+        # Batch fetch all episodes in a single query
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchAny(any=episode_ids),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    ),
+                ]
+            ),
+            limit=len(episode_ids),
+            with_payload=True,
+        )
 
-            if results:
-                point = results[0]
-                await self.client.set_payload(
-                    collection_name=collection,
-                    payload={
-                        "structured": True,
-                        "structured_into": structured_id,
-                    },
-                    points=[point.id],
-                )
-                updated += 1
+        if not results:
+            return 0
 
-        return updated
+        # Batch update all points at once
+        point_ids = [point.id for point in results]
+        await self.client.set_payload(
+            collection_name=collection,
+            payload={
+                "structured": True,
+                "structured_into": structured_id,
+            },
+            points=point_ids,
+        )
+
+        return len(point_ids)
 
     async def get_structured_for_episode(
         self,
@@ -649,41 +655,45 @@ class CRUDMixin:
         Returns:
             Number of memories updated.
         """
+        if not structured_ids:
+            return 0
+
         collection = self._collection_name("structured")
-        updated = 0
 
-        for struct_id in structured_ids:
-            results, _ = await self.client.scroll(
-                collection_name=collection,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="id",
-                            match=models.MatchValue(value=struct_id),
-                        ),
-                        models.FieldCondition(
-                            key="user_id",
-                            match=models.MatchValue(value=user_id),
-                        ),
-                    ]
-                ),
-                limit=1,
-                with_payload=True,
-            )
+        # Batch fetch all structured memories in a single query
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchAny(any=structured_ids),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    ),
+                ]
+            ),
+            limit=len(structured_ids),
+            with_payload=True,
+        )
 
-            if results:
-                point = results[0]
-                await self.client.set_payload(
-                    collection_name=collection,
-                    payload={
-                        "consolidated": True,
-                        "consolidated_into": semantic_id,
-                    },
-                    points=[point.id],
-                )
-                updated += 1
+        if not results:
+            return 0
 
-        return updated
+        # Batch update all points at once
+        point_ids = [point.id for point in results]
+        await self.client.set_payload(
+            collection_name=collection,
+            payload={
+                "consolidated": True,
+                "consolidated_into": semantic_id,
+            },
+            points=point_ids,
+        )
+
+        return len(point_ids)
 
     async def list_semantic_memories(
         self,
@@ -1030,42 +1040,45 @@ class CRUDMixin:
         Returns:
             Number of episodes updated.
         """
+        if not episode_ids:
+            return 0
+
         collection = self._collection_name("episodic")
-        updated = 0
 
-        for episode_id in episode_ids:
-            # Find and update each episode
-            results, _ = await self.client.scroll(
-                collection_name=collection,
-                scroll_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="id",
-                            match=models.MatchValue(value=episode_id),
-                        ),
-                        models.FieldCondition(
-                            key="user_id",
-                            match=models.MatchValue(value=user_id),
-                        ),
-                    ]
-                ),
-                limit=1,
-                with_payload=True,
-            )
+        # Batch fetch all episodes in a single query
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchAny(any=episode_ids),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    ),
+                ]
+            ),
+            limit=len(episode_ids),
+            with_payload=True,
+        )
 
-            if results:
-                point = results[0]
-                await self.client.set_payload(
-                    collection_name=collection,
-                    payload={
-                        "summarized": True,
-                        "summarized_into": semantic_id,
-                    },
-                    points=[point.id],
-                )
-                updated += 1
+        if not results:
+            return 0
 
-        return updated
+        # Batch update all points at once
+        point_ids = [point.id for point in results]
+        await self.client.set_payload(
+            collection_name=collection,
+            payload={
+                "summarized": True,
+                "summarized_into": semantic_id,
+            },
+            points=point_ids,
+        )
+
+        return len(point_ids)
 
     async def update_episode(
         self,

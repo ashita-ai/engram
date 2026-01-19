@@ -210,6 +210,7 @@ async def detect_state_changes_llm(
     from pydantic_ai import Agent
 
     from engram.config import settings
+    from engram.workflows.llm_utils import run_agent_with_retry
 
     agent: Agent[None, LLMStateChanges] = Agent(
         settings.llm_model,
@@ -218,8 +219,9 @@ async def detect_state_changes_llm(
     )
 
     try:
-        result = await agent.run(f"Analyze for temporal state changes:\n\n{text}")
-        llm_output = result.output
+        llm_output = await run_agent_with_retry(
+            agent, f"Analyze for temporal state changes:\n\n{text}"
+        )
 
         changes: list[StateChange] = []
         for change_data in llm_output.changes:

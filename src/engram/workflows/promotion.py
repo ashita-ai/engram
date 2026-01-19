@@ -124,14 +124,15 @@ Write in third person ("The user prefers...", "They tend to...").
 Format as a description, not a bulleted list.
 Only include patterns that appear across multiple summaries or are explicitly stated."""
 
+    from engram.workflows.llm_utils import run_agent_with_retry
+
     agent: Agent[None, SynthesisOutput] = Agent(
         settings.consolidation_model,
         output_type=SynthesisOutput,
         instructions=synthesis_prompt,
     )
 
-    result = await agent.run(formatted_text)
-    return result.output
+    return await run_agent_with_retry(agent, formatted_text)
 
 
 async def run_synthesis(
