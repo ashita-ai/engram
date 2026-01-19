@@ -2175,6 +2175,7 @@ async def delete_link(
 @router.post("/conflicts/detect", response_model=DetectConflictsResponse)
 async def detect_conflicts(
     request: DetectConflictsRequest,
+    service: ServiceDep,
 ) -> DetectConflictsResponse:
     """Detect contradictions between memories.
 
@@ -2183,11 +2184,11 @@ async def detect_conflicts(
 
     Args:
         request: Detection parameters including user_id and memory_type.
+        service: Engram service dependency.
 
     Returns:
         DetectConflictsResponse with detected conflicts.
     """
-    service = await get_service()
 
     try:
         if request.memory_type == "semantic":
@@ -2234,6 +2235,7 @@ async def detect_conflicts(
 @router.get("/conflicts", response_model=ConflictListResponse)
 async def list_conflicts(
     user_id: str,
+    service: ServiceDep,
     org_id: str | None = None,
     include_resolved: bool = False,
 ) -> ConflictListResponse:
@@ -2241,13 +2243,13 @@ async def list_conflicts(
 
     Args:
         user_id: User ID for multi-tenancy.
+        service: Engram service dependency.
         org_id: Optional organization ID filter.
         include_resolved: Whether to include resolved conflicts.
 
     Returns:
         ConflictListResponse with list of conflicts.
     """
-    service = await get_service()
 
     try:
         conflicts = service.get_conflicts(
@@ -2285,11 +2287,15 @@ async def list_conflicts(
 
 
 @router.get("/conflicts/{conflict_id}", response_model=ConflictResponse)
-async def get_conflict(conflict_id: str) -> ConflictResponse:
+async def get_conflict(
+    conflict_id: str,
+    service: ServiceDep,
+) -> ConflictResponse:
     """Get a specific conflict by ID.
 
     Args:
         conflict_id: The conflict ID.
+        service: Engram service dependency.
 
     Returns:
         ConflictResponse with conflict details.
@@ -2297,7 +2303,6 @@ async def get_conflict(conflict_id: str) -> ConflictResponse:
     Raises:
         HTTPException: 404 if conflict not found.
     """
-    service = await get_service()
 
     try:
         conflict = service.get_conflict(conflict_id)
@@ -2336,12 +2341,14 @@ async def get_conflict(conflict_id: str) -> ConflictResponse:
 async def resolve_conflict(
     conflict_id: str,
     request: ResolveConflictRequest,
+    service: ServiceDep,
 ) -> ConflictResponse:
     """Resolve a conflict with a given resolution.
 
     Args:
         conflict_id: The conflict ID.
         request: Resolution details.
+        service: Engram service dependency.
 
     Returns:
         Updated ConflictResponse.
@@ -2349,7 +2356,6 @@ async def resolve_conflict(
     Raises:
         HTTPException: 404 if conflict not found.
     """
-    service = await get_service()
 
     try:
         conflict = service.resolve_conflict(
@@ -2390,18 +2396,19 @@ async def resolve_conflict(
 @router.delete("/conflicts", status_code=status.HTTP_200_OK)
 async def clear_conflicts(
     user_id: str,
+    service: ServiceDep,
     org_id: str | None = None,
 ) -> dict[str, int]:
     """Clear all conflicts for a user.
 
     Args:
         user_id: User ID for multi-tenancy.
+        service: Engram service dependency.
         org_id: Optional organization ID filter.
 
     Returns:
         Number of conflicts cleared.
     """
-    service = await get_service()
 
     try:
         count = service.clear_conflicts(user_id=user_id, org_id=org_id)
