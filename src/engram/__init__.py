@@ -36,6 +36,9 @@ __version__ = "0.1.0"
 # Configuration
 from .config import ConfidenceWeights, Settings, settings
 
+# Context Manager
+from .context import get_current_memory, memory_context, scoped_memory
+
 # Exceptions
 from .exceptions import (
     AuthenticationError,
@@ -98,6 +101,10 @@ __all__ = [
     "bind_context",
     "clear_context",
     "unbind_context",
+    # Context Manager
+    "memory_context",
+    "scoped_memory",
+    "get_current_memory",
     # Models
     "ConfidenceScore",
     "ExtractionMethod",

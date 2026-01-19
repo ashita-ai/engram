@@ -295,6 +295,46 @@ class Settings(BaseSettings):
         description="Log output format",
     )
 
+    # Authentication
+    auth_enabled: bool = Field(
+        default=False,
+        description="Enable Bearer token authentication",
+    )
+    auth_secret_key: str = Field(
+        default="engram-dev-secret-key-change-in-production",
+        description="Secret key for token validation (HMAC)",
+    )
+    auth_algorithm: str = Field(
+        default="HS256",
+        description="JWT algorithm",
+    )
+    auth_token_expire_minutes: int = Field(
+        default=60,
+        ge=1,
+        description="Token expiration time in minutes",
+    )
+
+    # Rate Limiting
+    rate_limit_enabled: bool = Field(
+        default=False,
+        description="Enable rate limiting",
+    )
+    rate_limit_encode: int = Field(
+        default=100,
+        ge=1,
+        description="Max encode requests per minute per user",
+    )
+    rate_limit_recall: int = Field(
+        default=200,
+        ge=1,
+        description="Max recall requests per minute per user",
+    )
+    rate_limit_default: int = Field(
+        default=60,
+        ge=1,
+        description="Default rate limit per minute for other endpoints",
+    )
+
     model_config = {
         "env_prefix": "ENGRAM_",
         "env_file": ".env",
