@@ -34,7 +34,80 @@ Raw interactions stored as immutable episodic memories. All derived knowledge tr
 
 ### 2. Confidence Tracking
 
-Every derived memory carries a composite confidence score with full auditability:
+Every derived memory carries a confidence score appropriate to its type:
+
+```
+┌────────────────┬──────────────────────────────────────────────────┐
+│ Memory Type    │ Confidence Method                                │
+├────────────────┼──────────────────────────────────────────────────┤
+│ Episodic       │ 1.0 always (verbatim, immutable ground truth)    │
+│ Structured     │ LLM assesses during extraction (single call)     │
+│ Semantic       │ LLM assesses during synthesis (single call)      │
+│ Procedural     │ Bayesian updating with accumulating evidence     │
+└────────────────┴──────────────────────────────────────────────────┘
+```
+
+**Why this architecture?**
+- Episodic memories ARE the ground truth — no confidence needed beyond 1.0
+- Structured/Semantic use LLMs — LLMs should assess their own certainty
+- Procedural memories accumulate evidence — perfect for Bayesian updating
+
+#### LLM-Assessed Confidence (Structured/Semantic)
+
+The LLM returns confidence **alongside** the extraction/synthesis in a single call:
+
+```python
+class LLMExtractionOutput(BaseModel):
+    # Extracted data
+    summary: str
+    keywords: list[str]
+    people: list[Person]
+    preferences: list[Preference]
+    negations: list[Negation]
+
+    # Confidence assessment (same call)
+    confidence: float = Field(ge=0.0, le=1.0)
+    confidence_reasoning: str
+```
+
+This is efficient (no extra API call) and contextually aware — the LLM assesses confidence while it has full context of what it just extracted.
+
+**Scoring guide for LLM:**
+- 0.9-1.0: Explicitly stated, no hedging, clear and unambiguous
+- 0.7-0.9: Clearly implied or stated with minor hedging
+- 0.5-0.7: Reasonably inferred but not directly stated
+- 0.3-0.5: Speculative, significant hedging, or ambiguous
+- 0.0-0.3: Contradicted, heavily hedged, or likely wrong
+
+#### Bayesian Confidence (Procedural)
+
+Procedural memories track behavioral patterns observed over time. We use a Beta-Bernoulli model:
+
+```python
+from engram.confidence import BayesianConfidence
+
+# Start with a prior belief
+bc = BayesianConfidence.from_prior("weak")  # 50% initial
+
+# Update with observations
+bc.update(observed=True)   # Saw the behavior
+bc.update(observed=True)   # Saw it again
+bc.update(observed=False)  # Didn't see it
+
+# Check confidence
+print(bc.confidence)  # ~0.67
+print(bc.credible_interval_95)  # (0.35, 0.90)
+```
+
+Features:
+- **Priors**: uninformative, weak, optimistic, pessimistic
+- **Batch updates**: `bc.update_batch(confirmations=5, contradictions=2)`
+- **Decay**: `bc.decay(factor=0.95)` for time-based uncertainty
+- **Credible intervals**: Statistical bounds on confidence
+
+#### Composite Confidence Score
+
+All confidence information is wrapped in `ConfidenceScore` for auditability:
 
 ```python
 class ConfidenceScore(BaseModel):
@@ -44,57 +117,21 @@ class ConfidenceScore(BaseModel):
     supporting_episodes: int          # Corroboration count
     last_confirmed: datetime          # When last seen/confirmed
     contradictions: int               # Conflicting evidence count
+    llm_reasoning: str | None         # LLM's explanation (if applicable)
 ```
 
-**Hybrid formula (configurable weights with sane defaults):**
+**Composite formula (applied during recompute):**
 
 ```python
-class ConfidenceWeights(BaseModel):
-    extraction: float = 0.50          # How it was extracted
-    corroboration: float = 0.25       # How many sources support it
-    recency: float = 0.15             # How recently confirmed
-    verification: float = 0.10        # Format/validity checks
-    decay_half_life_days: int = 365   # How fast unconfirmed facts decay
-
-# Default weights sum to 1.0
 confidence = (
-    extraction_base * weights.extraction +
-    corroboration_score * weights.corroboration +
-    recency_score * weights.recency +
-    verification_score * weights.verification
+    extraction_base * 0.50 +           # How it was extracted
+    corroboration_score * 0.25 +       # How many sources support it
+    recency_score * 0.15 +             # How recently confirmed
+    verification_score * 0.10          # Format/validity checks
 )
 ```
 
-Configure via environment or constructor:
-```python
-memory = MemoryStore(
-    confidence_weights=ConfidenceWeights(
-        extraction=0.6,      # Trust extraction method more
-        corroboration=0.2,   # Less emphasis on multiple sources
-        recency=0.1,
-        verification=0.1,
-    )
-)
-```
-
-**Base scores by extraction method:**
-
-| Method | Base Score | Rationale |
-|--------|------------|-----------|
-| `verbatim` | 1.0 | Exact quote, immutable |
-| `extracted` | 0.9 | Deterministic pattern match |
-| `inferred` | 0.6 | LLM-derived, uncertain |
-
-**Corroboration boost:** Same fact from 5 episodes scores higher than 1 episode.
-
-**Confidence decay (configurable half-life):**
-```python
-# Default: ~63% retained after 1 year, configurable per use case
-decay_half_life_days: int = 365  # Can be set in ConfidenceWeights
-confidence *= exp(-days_since_confirmed / decay_half_life_days)
-```
-
-**Why auditable:** Every confidence score can be explained — "0.73 because: extracted (0.9 base), 3 supporting episodes, last confirmed 2 months ago, no contradictions."
+**Why auditable:** Every confidence score can be explained via `.explain()` — "0.73: inferred, 3 sources, confirmed 2 months ago, LLM: Clearly stated preference..."
 
 ### 3. Bi-Temporal Awareness
 
