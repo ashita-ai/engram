@@ -68,7 +68,11 @@ class ExtractedNegation(BaseModel):
 
 
 class LLMExtractionOutput(BaseModel):
-    """Structured output from the LLM extraction agent."""
+    """Structured output from the LLM extraction agent.
+
+    Includes both extracted information AND confidence assessment
+    in a single LLM call for performance.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -103,6 +107,18 @@ class LLMExtractionOutput(BaseModel):
     negations: list[ExtractedNegation] = Field(
         default_factory=list,
         description="Explicit negations or corrections",
+    )
+
+    # Confidence assessment (returned alongside extraction)
+    confidence: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description="Overall confidence in the extraction (0.0-1.0)",
+    )
+    confidence_reasoning: str = Field(
+        default="",
+        description="Brief explanation of the confidence assessment",
     )
 
 
@@ -198,6 +214,17 @@ For negations, look for:
 - "That's wrong, I actually..." → pattern for the wrong info
 
 Be conservative for other extractions, but be AGGRESSIVE about negations - missing a negation causes incorrect information to surface in recall.
+
+CONFIDENCE ASSESSMENT:
+After extracting, assess your overall confidence in the extractions (0.0-1.0):
+- 0.9-1.0: Information explicitly and clearly stated, no ambiguity
+- 0.7-0.9: Information clearly implied or stated with minor hedging
+- 0.5-0.7: Reasonable inference but not directly stated
+- 0.3-0.5: Speculative, significant hedging, or ambiguous
+- 0.0-0.3: Uncertain or likely incorrect
+
+Provide a brief reasoning for your confidence score. Be conservative - lower confidence is better than false certainty.
+
 Today's date is {datetime.now(UTC).strftime("%Y-%m-%d")} for resolving relative dates."""
 
     agent: Agent[None, LLMExtractionOutput] = Agent(
@@ -294,7 +321,7 @@ async def run_structure(
         f"{len(preferences)} preferences, {len(negations)} negations"
     )
 
-    # 4. Create StructuredMemory
+    # 4. Create StructuredMemory with LLM-assessed confidence
     from engram.config import settings
 
     model_spec = model or settings.consolidation_model
@@ -318,6 +345,9 @@ async def run_structure(
         keywords=llm_output.keywords,
         # Provenance
         derivation_method=f"rich:llm:{model_spec}",
+        # LLM-assessed confidence (single call)
+        llm_confidence=llm_output.confidence,
+        llm_confidence_reasoning=llm_output.confidence_reasoning,
     )
 
     # 5. Generate embedding from structured content

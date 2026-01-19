@@ -19,7 +19,7 @@ class ExtractionMethod(str, Enum):
 
     VERBATIM = "verbatim"  # Exact quote, immutable (confidence: 1.0)
     EXTRACTED = "extracted"  # Deterministic pattern match (confidence: 0.9)
-    INFERRED = "inferred"  # LLM-derived, uncertain (confidence: 0.6)
+    INFERRED = "inferred"  # LLM-derived, uncertain (confidence: LLM-assessed)
 
 
 class Staleness(str, Enum):
@@ -36,11 +36,14 @@ class Staleness(str, Enum):
 class ConfidenceScore(BaseModel):
     """Composite confidence score with full auditability.
 
-    Confidence is calculated from multiple factors:
-    - extraction_method: How reliably was this extracted?
-    - supporting_episodes: How many sources corroborate this?
-    - last_confirmed: How recently was this verified?
-    - contradictions: Is there conflicting evidence?
+    Confidence architecture by memory type:
+    - Episodic: 1.0 always (verbatim, immutable ground truth)
+    - Structured: LLM assesses confidence during extraction
+    - Semantic: LLM assesses confidence during synthesis
+    - Procedural: Bayesian updating with accumulating evidence
+
+    For LLM-derived memories, the LLM returns confidence alongside
+    the extraction/synthesis in a single call.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -55,6 +58,12 @@ class ConfidenceScore(BaseModel):
     contradictions: int = Field(default=0, ge=0, description="Number of conflicting evidence items")
     verified: bool = Field(default=False, description="Whether format validation passed")
 
+    # LLM-assessed confidence (set during extraction/synthesis)
+    llm_reasoning: str | None = Field(
+        default=None,
+        description="LLM's explanation for the confidence assessment",
+    )
+
     def recompute(
         self,
         extraction_weight: float = 0.50,
@@ -67,7 +76,7 @@ class ConfidenceScore(BaseModel):
         """Recompute confidence value from all factors.
 
         Uses weighted sum of:
-        - extraction_base: Base score from extraction method
+        - extraction_base: Base score from extraction method (or LLM-assessed)
         - corroboration: Logarithmic bonus for multiple sources
         - recency: Exponential decay based on time since confirmation
         - verification: Binary bonus if format validation passed
@@ -154,6 +163,8 @@ class ConfidenceScore(BaseModel):
             parts.append(
                 f"{self.contradictions} contradiction{'s' if self.contradictions != 1 else ''}"
             )
+        if self.llm_reasoning:
+            parts.append(f"LLM: {self.llm_reasoning[:50]}...")
         return f"{self.value:.2f}: " + ", ".join(parts)
 
     @staticmethod
@@ -200,13 +211,28 @@ class ConfidenceScore(BaseModel):
         )
 
     @classmethod
-    def for_inferred(cls, confidence: float = 0.6, supporting_episodes: int = 1) -> ConfidenceScore:
-        """Create confidence score for LLM-inferred content."""
+    def for_inferred(
+        cls,
+        confidence: float = 0.6,
+        supporting_episodes: int = 1,
+        reasoning: str | None = None,
+    ) -> ConfidenceScore:
+        """Create confidence score for LLM-inferred content.
+
+        Args:
+            confidence: LLM-assessed confidence (0.0-1.0).
+            supporting_episodes: Number of source episodes.
+            reasoning: LLM's explanation for the confidence.
+
+        Returns:
+            ConfidenceScore with LLM-assessed value.
+        """
         return cls(
             value=confidence,
             extraction_method=ExtractionMethod.INFERRED,
-            extraction_base=0.6,
+            extraction_base=confidence,  # LLM sets the base
             supporting_episodes=supporting_episodes,
+            llm_reasoning=reasoning,
         )
 
 
