@@ -36,6 +36,31 @@ __version__ = "0.1.0"
 # Configuration
 from .config import ConfidenceWeights, Settings, settings
 
+# Exceptions
+from .exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    ConfigurationError,
+    ConsolidationError,
+    EmbeddingError,
+    EngramError,
+    ExtractionError,
+    NotFoundError,
+    RateLimitError,
+    StorageError,
+    ValidationError,
+)
+
+# Logging
+from .logging import (
+    bind_context,
+    clear_context,
+    configure_logging,
+    get_logger,
+    logger,
+    unbind_context,
+)
+
 # Models
 from .models import (
     AuditEntry,
@@ -54,6 +79,25 @@ __all__ = [
     "Settings",
     "ConfidenceWeights",
     "settings",
+    # Exceptions
+    "EngramError",
+    "ValidationError",
+    "NotFoundError",
+    "StorageError",
+    "EmbeddingError",
+    "ExtractionError",
+    "ConsolidationError",
+    "RateLimitError",
+    "ConfigurationError",
+    "AuthenticationError",
+    "AuthorizationError",
+    # Logging
+    "configure_logging",
+    "get_logger",
+    "logger",
+    "bind_context",
+    "clear_context",
+    "unbind_context",
     # Models
     "ConfidenceScore",
     "ExtractionMethod",

@@ -285,16 +285,20 @@ class TestGetProvenance:
 
     @pytest.mark.asyncio
     async def test_get_provenance_not_found(self, mock_service):
-        """Should raise KeyError if memory not found."""
+        """Should raise NotFoundError if memory not found."""
+        from engram.exceptions import NotFoundError
+
         mock_service.storage.get_structured = AsyncMock(return_value=None)
 
-        with pytest.raises(KeyError):
+        with pytest.raises(NotFoundError):
             await mock_service.get_provenance("struct_notfound", "user_1")
 
     @pytest.mark.asyncio
     async def test_get_provenance_invalid_prefix(self, mock_service):
-        """Should raise ValueError for invalid memory ID prefix."""
-        with pytest.raises(ValueError):
+        """Should raise ValidationError for invalid memory ID prefix."""
+        from engram.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
             await mock_service.get_provenance("invalid_123", "user_1")
 
 

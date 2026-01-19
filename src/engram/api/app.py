@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from engram.config import Settings
+from engram.exceptions import (
+    AuthenticationError,
+    AuthorizationError,
+    EngramError,
+    NotFoundError,
+    RateLimitError,
+    ValidationError,
+)
+from engram.logging import configure_logging, get_logger
 from engram.service import EngramService
 from engram.workflows import init_workflows, shutdown_workflows
 
 from .router import router, set_service
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -25,6 +34,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     and cleans up on shutdown.
     """
     settings = Settings()
+
+    # Configure structured logging
+    configure_logging(level=settings.log_level, format=settings.log_format)
+    logger.info("Starting Engram API", log_level=settings.log_level, log_format=settings.log_format)
+
     service = EngramService.create(settings)
 
     # Initialize storage and set service
@@ -72,6 +86,58 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
     )
+
+    # Register exception handlers
+    @app.exception_handler(ValidationError)
+    async def validation_error_handler(request: Request, exc: ValidationError) -> JSONResponse:
+        """Handle validation errors with 400 status."""
+        logger.warning(
+            "Validation error", field=exc.field, error=exc.message, path=str(request.url)
+        )
+        return JSONResponse(status_code=400, content=exc.to_dict())
+
+    @app.exception_handler(NotFoundError)
+    async def not_found_error_handler(request: Request, exc: NotFoundError) -> JSONResponse:
+        """Handle not found errors with 404 status."""
+        logger.info(
+            "Resource not found",
+            resource_type=exc.resource_type,
+            resource_id=exc.resource_id,
+            path=str(request.url),
+        )
+        return JSONResponse(status_code=404, content=exc.to_dict())
+
+    @app.exception_handler(AuthenticationError)
+    async def authentication_error_handler(
+        request: Request, exc: AuthenticationError
+    ) -> JSONResponse:
+        """Handle authentication errors with 401 status."""
+        logger.warning("Authentication failed", error=exc.message, path=str(request.url))
+        return JSONResponse(status_code=401, content=exc.to_dict())
+
+    @app.exception_handler(AuthorizationError)
+    async def authorization_error_handler(
+        request: Request, exc: AuthorizationError
+    ) -> JSONResponse:
+        """Handle authorization errors with 403 status."""
+        logger.warning("Authorization failed", error=exc.message, path=str(request.url))
+        return JSONResponse(status_code=403, content=exc.to_dict())
+
+    @app.exception_handler(RateLimitError)
+    async def rate_limit_error_handler(request: Request, exc: RateLimitError) -> JSONResponse:
+        """Handle rate limit errors with 429 status."""
+        logger.warning("Rate limit exceeded", retry_after=exc.retry_after, path=str(request.url))
+        return JSONResponse(
+            status_code=429,
+            content=exc.to_dict(),
+            headers={"Retry-After": str(exc.retry_after)},
+        )
+
+    @app.exception_handler(EngramError)
+    async def engram_error_handler(request: Request, exc: EngramError) -> JSONResponse:
+        """Handle all other Engram errors with 500 status."""
+        logger.error("Engram error", error=exc.message, code=exc.code, path=str(request.url))
+        return JSONResponse(status_code=500, content=exc.to_dict())
 
     app.include_router(router, prefix="/api/v1")
 
