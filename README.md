@@ -12,17 +12,9 @@ A memory system for AI applications that preserves ground truth, tracks confiden
 
 AI memory systems have an accuracy crisis. Recent benchmarks show:
 
-> "All systems achieve answer accuracies below 56%, with hallucination rate and omission rate remaining high... Systems suffer omission rates above 50%."
+> "All systems achieve answer accuracies below 56%, with hallucination rate and omission rate remaining high."
 >
 > — [HaluMem: Hallucinations in LLM Memory Systems](https://arxiv.org/html/2511.03506)
-
-Why? Most systems use LLM extraction on every message. This compounds errors:
-
-| Approach | What Goes Wrong |
-|----------|----------------|
-| **Summarize conversations** | Loses details. Can't recall specifics. |
-| **LLM extraction on write** | Extraction errors become permanent. Hallucinations propagate. |
-| **Store in vector DB only** | No structure. Retrieves irrelevant noise. |
 
 The fundamental issue: once source data is lost, errors cannot be corrected.
 
@@ -31,239 +23,29 @@ The fundamental issue: once source data is lost, errors cannot be corrected.
 Engram preserves ground truth and tracks confidence:
 
 1. **Store first, derive later** — Raw conversations stored verbatim. LLM extraction happens in background where errors can be caught.
-
-2. **Track confidence** — Every memory carries a composite confidence score: extraction method + corroboration + recency + verification. Fully auditable.
-
+2. **Track confidence** — Every memory carries a composite score: extraction method + corroboration + recency + verification.
 3. **Verify on retrieval** — Applications filter by confidence. High-stakes queries use only trusted memories.
-
 4. **Enable recovery** — Derived memories trace to sources. Errors can be corrected by re-deriving.
 
-## How Trust Works
+## Quick Start
 
-```
-User: "My email is john@example.com"
-    ↓
-Episodic Memory (immutable, verbatim)
-    ↓
-Structured Memory: emails=["john@example.com"]
-├── Source: Episode #1234
-├── Extraction: regex pattern match (deterministic)
-└── Confidence: 0.9
+### Installation
 
-Later query: "What's the user's email?"
-    ↓
-Retrieval with min_confidence=0.9
-    ↓
-Returns: john@example.com (verified against source)
+```bash
+# Clone and install
+git clone https://github.com/ashita-ai/engram.git
+cd engram
+uv sync --extra dev
+
+# Start Qdrant (vector database)
+docker run -p 6333:6333 qdrant/qdrant
 ```
 
-## Memory Types
-
-```mermaid
-flowchart LR
-    subgraph INPUT [" "]
-        direction TB
-        WM([🧠 WORKING])
-    end
-
-    subgraph CORE [" "]
-        direction TB
-        EP([📝 EPISODIC])
-        STRUCT{{📊 STRUCTURED}}
-        SEM([💡 SEMANTIC])
-        PROC([⚙️ PROCEDURAL])
-    end
-
-    subgraph STORE [" "]
-        direction TB
-        QD[(🗄️ QDRANT)]
-    end
-
-    WM ==>|encode| EP
-    EP -->|extract| STRUCT
-    EP -->|consolidate| SEM
-    SEM -->|synthesize| PROC
-
-    EP -.->|store| QD
-    STRUCT -.->|store| QD
-    SEM -.->|store| QD
-    PROC -.->|store| QD
-
-    style WM fill:#fbbf24,stroke:#b45309,stroke-width:3px,color:#1c1917
-    style EP fill:#a78bfa,stroke:#7c3aed,stroke-width:3px,color:#1c1917
-    style STRUCT fill:#60a5fa,stroke:#2563eb,stroke-width:3px,color:#1c1917
-    style SEM fill:#34d399,stroke:#059669,stroke-width:3px,color:#1c1917
-    style PROC fill:#f472b6,stroke:#db2777,stroke-width:3px,color:#1c1917
-    style QD fill:#fb923c,stroke:#c2410c,stroke-width:3px,color:#1c1917
-
-    style INPUT fill:transparent,stroke:#fbbf24,stroke-width:2px,stroke-dasharray:5
-    style CORE fill:transparent,stroke:#a78bfa,stroke-width:2px,stroke-dasharray:5
-    style STORE fill:transparent,stroke:#fb923c,stroke-width:2px,stroke-dasharray:5
-```
-
-| Type | Confidence | Source | Use Case |
-|------|------------|--------|----------|
-| **Working** | N/A | Current context | Active conversation (in-memory, volatile) |
-| **Episodic** | Highest | Verbatim storage | Ground truth, audit trail |
-| **Structured** | High | Pattern extraction + LLM | Emails, phones, URLs, people, preferences, negations |
-| **Semantic** | Variable | LLM inference | Cross-episode knowledge synthesis |
-| **Procedural** | Variable | LLM inference | Behavioral patterns and preferences |
-
-## Hierarchical Memory Consolidation
-
-Engram implements **hierarchical compression** based on cognitive science research ([Complementary Learning Systems](https://www.sciencedirect.com/science/article/pii/S1364661318302821)):
-
-```
-EPISODIC (raw, immutable, automatic)
-    │
-    ├──→ STRUCTURED (per-episode extraction: emails, phones, negations)
-    │
-    └──→ SEMANTIC (LLM summary of N episodes → 1 memory)
-              │
-              └──→ PROCEDURAL (LLM synthesis → behavioral patterns)
-```
-
-### The Compression Pipeline
-
-| Stage | Input | Output | Compression |
-|-------|-------|--------|-------------|
-| **Encode** | 1 message | 1 episode + 1 structured | None (ground truth) |
-| **Consolidate** | N episodes | 1 semantic summary | N:1 |
-| **Synthesize** | All semantics | 1 procedural memory | ∞:1 |
-
-### Bidirectional Traceability
-
-Every derived memory links back to its sources:
-
-```python
-# Semantic memory → source episodes
-semantic.source_episode_ids  # ["ep_001", "ep_002", "ep_003"]
-
-# Episode → semantic memory it was summarized into
-episode.summarized_into  # "sem_abc123"
-
-# Procedural memory → source semantics
-procedural.source_semantic_ids  # ["sem_001", "sem_002"]
-```
-
-This enables full audit trails: any insight can be traced back to the original conversation.
-
-### Why Compression Matters
-
-| Without Compression | With Compression |
-|---------------------|------------------|
-| 1000 episodes = 1000 searches | 1000 episodes → 50 summaries |
-| Retrieval finds noise | Retrieval finds distilled knowledge |
-| Token cost grows linearly | Token cost stays bounded |
-| No cross-session patterns | Procedural captures behavior |
-
-## Semantic Search Everywhere
-
-**Every memory type is semantically searchable.** When you store or extract anything, Engram:
-
-1. **Embeds it** — Converts text to a vector representation
-2. **Stores in Qdrant** — Vector database enables similarity search
-3. **Searches semantically** — Query "contact info" finds emails, phones, addresses
-
-```
-User: "My email is user@example.com"
-                ↓
-┌─────────────────────────────────────────────────────────────┐
-│  Episode                                                    │
-│  ├── content: "My email is user@example.com"               │
-│  └── embedding: [0.12, -0.34, 0.56, ...]  ← semantic search │
-└─────────────────────────────────────────────────────────────┘
-                ↓ pattern extraction
-┌─────────────────────────────────────────────────────────────┐
-│  StructuredMemory                                           │
-│  ├── emails: ["user@example.com"]                          │
-│  ├── mode: "fast"                                          │
-│  └── embedding: [0.23, -0.45, 0.67, ...]  ← semantic search │
-└─────────────────────────────────────────────────────────────┘
-                ↓ consolidation (LLM)
-┌─────────────────────────────────────────────────────────────┐
-│  SemanticMemory                                             │
-│  ├── content: "User's primary email is user@example.com"   │
-│  └── embedding: [0.34, -0.56, 0.78, ...]  ← semantic search │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**The semantic layer is end-to-end:**
-
-| Stage | What happens | Semantic capability |
-|-------|--------------|---------------------|
-| **Encode** | Episode embedded | "contact" finds "my email is..." |
-| **Extract** | Structured embedded | "email" finds "user@example.com" |
-| **Consolidate** | Semantic memories embedded | "communication preferences" finds derived insights |
-| **Recall** | Query embedded, similarity search | Natural language queries work |
-
-**Pattern extraction is an optimization, not a limitation.** Deterministic extractors (emails, phones, dates) provide high-confidence data quickly. The embedding layer makes everything semantically discoverable regardless of extraction method.
-
-```python
-# These all work via semantic similarity:
-await engram.recall("contact information", user_id="u1")  # Finds emails, phones
-await engram.recall("how to reach the user", user_id="u1")  # Same results
-await engram.recall("user@example.com", user_id="u1")  # Exact match also works
-```
-
-## Preventing Hallucinations
-
-### 1. Deterministic Extraction First
-
-Pattern matching before LLMs — no hallucination possible:
-
-```python
-# High confidence, reproducible
-EMAIL_PATTERN = r'\b[\w.-]+@[\w.-]+\.\w+\b'
-emails = extract_patterns(message, [EMAIL_PATTERN])
-```
-
-### 2. Defer LLM Work
-
-Batch in background where errors can be caught:
-
-```python
-# Critical path: store ground truth + extract patterns
-result = await engram.encode(content, role="user", user_id="u1")  # Fast, no LLM
-# Emails, phones, URLs extracted immediately via regex
-
-# Background: derive semantics with oversight
-await engram.consolidate(user_id="u1")  # LLM extraction, batched
-```
-
-### 3. Confidence-Gated Retrieval
-
-Applications choose their trust level:
-
-```python
-# High-stakes: only verified memories
-trusted = await engram.recall(query, user_id="u1", min_confidence=0.9)
-
-# Exploratory: include inferences
-all_relevant = await engram.recall(query, user_id="u1", min_confidence=0.5)
-```
-
-### 4. Source Verification
-
-Trace any memory back to its source:
-
-```python
-# Debug: why does the system believe this?
-result = await engram.verify("sem_abc123", user_id="u1")
-print(result.explanation)
-# → "LLM-inferred from source episode(s). Source: ep_xyz (2024-01-15 10:30). Confidence: 0.90"
-
-# Get raw source episodes
-episodes = await engram.get_sources("sem_abc123", user_id="u1")
-# → Returns original conversation where info was mentioned
-```
-
-## Usage
+### Python SDK
 
 ```python
 from engram.service import EngramService
 
-# Initialize with async context manager
 async with EngramService.create() as engram:
     # Store interaction (immediate, preserves ground truth)
     result = await engram.encode(
@@ -271,74 +53,162 @@ async with EngramService.create() as engram:
         role="user",
         user_id="user_123",
     )
-    print(f"Stored episode {result.episode.id}")
-    print(f"Extracted emails: {result.structured.emails}")
+    print(f"Episode: {result.episode.id}")
+    print(f"Emails extracted: {result.structured.emails}")  # ["john@example.com"]
 
     # Retrieve with confidence filtering
     memories = await engram.recall(
         query="What's the user's email?",
         user_id="user_123",
-        memory_types=["structured", "semantic"],
         min_confidence=0.7,
     )
 
-    # Verify a specific memory
-    if memories:
-        verified = await engram.verify(memories[0].memory_id, user_id="user_123")
-        print(verified.explanation)
+    # Verify any memory back to source
+    verified = await engram.verify(memories[0].memory_id, user_id="user_123")
+    print(verified.explanation)
 ```
 
-See [examples/](examples/) for working demos of consolidation, procedural synthesis, and advanced features.
+### REST API
 
-## Design Principles
+```bash
+# Start the server
+uv run uvicorn engram.api.app:app --port 8000
 
-### Ground Truth is Sacred
+# Encode a memory
+curl -X POST http://localhost:8000/api/v1/encode \
+  -H "Content-Type: application/json" \
+  -d '{"content": "My email is john@example.com", "role": "user", "user_id": "user_123"}'
 
-Every derived memory points back to source episodes. If extraction makes a mistake, re-derive from the original.
+# Recall memories
+curl -X POST http://localhost:8000/api/v1/recall \
+  -H "Content-Type: application/json" \
+  -d '{"query": "email", "user_id": "user_123"}'
 
-### Confidence is Composite and Auditable
+# Batch encode (bulk import)
+curl -X POST http://localhost:8000/api/v1/encode/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user_123",
+    "items": [
+      {"content": "Message 1", "role": "user"},
+      {"content": "Response 1", "role": "assistant"}
+    ]
+  }'
+```
 
-Confidence isn't a single number — it's a composite score you can explain:
+## Memory Types
 
-| Factor | Weight | Example |
-|--------|--------|---------|
-| Extraction method | 50% | Pattern-matched = 0.9, LLM-inferred = 0.6 |
-| Corroboration | 25% | 5 supporting episodes > 1 episode |
-| Recency | 15% | Confirmed yesterday > confirmed last year |
-| Verification | 10% | Email format valid, date in range |
+| Type | Confidence | Purpose |
+|------|------------|---------|
+| **Working** | N/A | Current session context (in-memory, volatile) |
+| **Episodic** | Highest | Ground truth, verbatim storage, immutable |
+| **Structured** | High | Per-episode extraction (emails, phones, URLs, negations) |
+| **Semantic** | Variable | Cross-episode knowledge synthesis (LLM-derived) |
+| **Procedural** | Variable | Behavioral patterns and preferences |
 
-Every score is auditable: *"0.73 because: extracted (0.9 base), 3 sources, last confirmed 2 months ago."*
+### Memory Flow
 
-### Memories Get Smarter Over Time
+```
+Episode (raw, immutable)
+    │
+    ├──→ Structured (per-episode: emails, phones, negations)
+    │
+    └──→ Semantic (LLM consolidation: N episodes → 1 summary)
+              │
+              └──→ Procedural (behavioral synthesis)
+```
 
-Engram isn't just storage—it's a system that learns:
+## REST API Reference
 
-- **Frequently-used memories strengthen** — Every time a memory participates in consolidation or gets linked to new information, it gets stronger. Based on the [Testing Effect](https://www.sciencedirect.com/topics/psychology/testing-effect), one of the most robust findings in memory research.
+### Core Endpoints
 
-- **Related memories find each other** — When you say "prefer Python for scripts," that automatically links to "using Python at work." No manual organization needed.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/encode` | Store a memory and extract facts |
+| `POST` | `/encode/batch` | Bulk import multiple memories |
+| `POST` | `/recall` | Semantic search across all memory types |
+| `GET` | `/memories/{id}` | Get a specific memory by ID |
+| `GET` | `/memories` | List memories with filters |
+| `DELETE` | `/memories/{id}` | Delete a memory (with cascade options) |
+| `PATCH` | `/memories/{id}` | Update memory content/metadata |
+| `GET` | `/memories/{id}/sources` | Trace memory to source episodes |
+| `GET` | `/memories/{id}/verify` | Verify memory with explanation |
+| `GET` | `/memories/{id}/provenance` | Full derivation chain |
 
-- **Irrelevant stuff fades away** — Memories decay over time. Unimportant memories fade; important ones persist. This keeps the store relevant.
+### Workflow Endpoints
 
-- **Novel memories get priority** — Based on [Nagy et al. (2025)](https://arxiv.org/abs/2502.14842) adaptive compression, information-theoretic surprise increases importance scores. Content similar to existing memories is naturally deprioritized.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/workflows/consolidate` | Episodes → Semantic memories |
+| `POST` | `/workflows/decay` | Apply confidence decay |
+| `POST` | `/workflows/promote` | Semantic → Procedural synthesis |
+| `POST` | `/workflows/structure` | LLM extraction for single episode |
+| `POST` | `/workflows/structure/batch` | LLM extraction for multiple episodes |
 
-### Fast Path Stays Fast
+### Additional Features
 
-| Operation | When | Cost |
-|-----------|------|------|
-| Store episode | Every message | Low (embed + store) |
-| Extract structured | Every message | Low (regex, no LLM) |
-| Infer semantics | Background | Medium (LLM, batched) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/memories/{id}/links` | Create memory links |
+| `GET` | `/memories/{id}/links` | List memory links |
+| `DELETE` | `/memories/{id}/links/{target}` | Remove a link |
+| `POST` | `/conflicts/detect` | Detect contradictions |
+| `GET` | `/conflicts` | List detected conflicts |
+| `POST` | `/webhooks` | Register event webhooks |
+| `GET` | `/memories/{id}/history` | Memory change history |
+| `DELETE` | `/memories/user/{user_id}` | GDPR erasure |
+
+## Confidence Scoring
+
+Confidence is a composite score:
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Extraction method | 50% | verbatim=1.0, regex=0.9, LLM=0.6 |
+| Corroboration | 25% | Number of supporting sources |
+| Recency | 15% | How recently confirmed |
+| Verification | 10% | Format validation passed |
+
+Every score is auditable: *"0.73 because: extracted (0.9 base), 3 sources, confirmed 2 months ago."*
+
+## Configuration
+
+Environment variables (prefix: `ENGRAM_`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `QDRANT_URL` | `http://localhost:6333` | Qdrant connection |
+| `EMBEDDING_PROVIDER` | `fastembed` | Embedding backend |
+| `AUTH_ENABLED` | `false` | Enable Bearer token auth |
+| `RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
+| `BATCH_ENCODE_MAX_ITEMS` | `100` | Max batch size |
+
+See [docs/development.md](docs/development.md) for full configuration reference.
+
+## Development
+
+```bash
+# Run tests
+uv run pytest tests/ -v --no-cov
+
+# Code quality
+uv run ruff check src/engram/
+uv run mypy src/engram/
+
+# Pre-commit hooks
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — Memory types, data flow, storage
+- [Architecture](docs/architecture.md) — Memory types, data flow, storage design
 - [Development Guide](docs/development.md) — Setup, configuration, workflow
-- [Research Foundations](docs/research/overview.md) — Theoretical basis and the accuracy problem
-- [Competitive Analysis](docs/research/competitive.md) — How Engram compares to alternatives
+- [API Reference](docs/api.md) — Detailed endpoint documentation
 
 ## Status
 
-Pre-alpha. Architecture and design phase.
+Beta. Core functionality complete with comprehensive test coverage (800+ tests).
 
 ## License
 

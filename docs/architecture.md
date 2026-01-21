@@ -2,7 +2,7 @@
 
 Engram is a memory system for LLM applications built on Pydantic AI with durable execution.
 
-> **Status**: Pre-alpha. Core APIs (`encode`, `recall`, `verify`, `recall_at`) are implemented. Background workflows (`consolidate`, `decay`, `promote`) are functional.
+> **Status**: Beta. Core APIs, REST endpoints, and workflows fully implemented with 800+ tests.
 
 ## Stack
 
