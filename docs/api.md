@@ -4,7 +4,39 @@ Engram exposes a REST API for memory operations. All endpoints are prefixed with
 
 ## Authentication
 
-Currently no authentication is required. Multi-tenancy is enforced via `user_id` and optional `org_id` parameters.
+Authentication is optional and controlled via environment variables.
+
+### Bearer Token Authentication
+
+When `ENGRAM_AUTH_ENABLED=true`, all endpoints require a Bearer token:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/encode \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "...", "user_id": "user_123"}'
+```
+
+Tokens are HMAC-SHA256 signed with the `ENGRAM_AUTH_SECRET_KEY`.
+
+### Rate Limiting
+
+When `ENGRAM_RATE_LIMIT_ENABLED=true`, requests are limited per user:
+
+| Endpoint | Default Limit |
+|----------|---------------|
+| `/encode` | 100/minute |
+| `/recall` | 200/minute |
+| Other | 60/minute |
+
+Rate limit headers are returned with each response:
+- `X-RateLimit-Limit`
+- `X-RateLimit-Remaining`
+- `X-RateLimit-Reset`
+
+### Multi-Tenancy
+
+All endpoints require `user_id` for isolation. Optional `org_id` provides further scoping.
 
 ---
 
@@ -61,6 +93,73 @@ Store content as an episode and extract structured data.
     "confidence": 0.9
   },
   "extract_count": 1
+}
+```
+
+---
+
+### POST /encode/batch
+
+Bulk import multiple memories in a single request.
+
+**Request Body:**
+```json
+{
+  "user_id": "user_123",
+  "org_id": "org_456",
+  "session_id": "session_abc",
+  "items": [
+    {"content": "Message 1", "role": "user"},
+    {"content": "Response 1", "role": "assistant", "importance": 0.8},
+    {"content": "Message 2", "role": "user"}
+  ],
+  "enrich": false,
+  "continue_on_error": true
+}
+```
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `user_id` | string | Yes | - | User ID for all items |
+| `org_id` | string | No | `null` | Optional organization ID |
+| `session_id` | string | No | `null` | Optional session grouping |
+| `items` | array | Yes | - | Array of items to encode (1-100) |
+| `items[].content` | string | Yes | - | Text content |
+| `items[].role` | string | No | `"user"` | Speaker role |
+| `items[].importance` | float | No | auto | Importance score |
+| `enrich` | bool/string | No | `false` | LLM enrichment mode |
+| `continue_on_error` | bool | No | `true` | Continue after failures |
+
+**Response (201 Created):**
+```json
+{
+  "total": 3,
+  "succeeded": 3,
+  "failed": 0,
+  "results": [
+    {
+      "index": 0,
+      "success": true,
+      "episode": {"id": "ep_001", ...},
+      "structured": {"id": "struct_001", ...},
+      "extract_count": 0
+    },
+    ...
+  ]
+}
+```
+
+**Partial Failure (201 Created):**
+```json
+{
+  "total": 3,
+  "succeeded": 2,
+  "failed": 1,
+  "results": [
+    {"index": 0, "success": true, ...},
+    {"index": 1, "success": false, "error": "Validation error"},
+    {"index": 2, "success": true, ...}
+  ]
 }
 ```
 
