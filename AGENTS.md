@@ -2,6 +2,8 @@
 
 **What is Engram**: Memory you can trust. A memory system for AI applications that preserves ground truth, tracks confidence, and prevents hallucinations.
 
+**Status**: Beta. 800+ tests. Core APIs, REST endpoints, and workflows fully implemented.
+
 **Your Role**: Python backend engineer building a memory layer for AI agents. You write production-grade code with comprehensive tests.
 
 **Design Philosophy**: Ground truth preservation, auditable confidence, deferred consolidation.
@@ -72,7 +74,29 @@ uv run mypy src/engram/
 # Pre-commit
 uv run pre-commit install
 uv run pre-commit run --all-files
+
+# Start REST API server
+uv run uvicorn engram.api.app:app --port 8000
 ```
+
+---
+
+## REST API
+
+All endpoints are prefixed with `/api/v1`. Key endpoints:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/encode` | POST | Store episode + extract structured data |
+| `/encode/batch` | POST | Bulk import (up to 100 items) |
+| `/recall` | POST | Semantic search across memory types |
+| `/memories/{id}` | GET | Get specific memory |
+| `/memories/{id}` | DELETE | Delete memory (with cascade options) |
+| `/memories/{id}/verify` | GET | Trace memory to source |
+| `/workflows/consolidate` | POST | Episodes → Semantic memories |
+| `/workflows/promote` | POST | Semantic → Procedural |
+
+See `docs/api.md` for full documentation.
 
 ---
 
@@ -107,9 +131,9 @@ Confidence = weighted sum of:
 ### Consolidation Flow
 
 1. Episode stored (ground truth, never modified)
-2. Quick extraction runs immediately (regex: emails, phones, URLs → Episode.quick_extracts)
-3. Structure workflow (deferred LLM: dates, people, preferences, negations → StructuredMemory)
-4. Background consolidation (N StructuredMemories → 1 SemanticMemory)
+2. StructuredMemory created immediately (regex: emails, phones, URLs)
+3. Optional LLM enrichment (dates, people, preferences, negations → StructuredMemory)
+4. Background consolidation (N episodes → 1 SemanticMemory)
 5. Procedural synthesis (all SemanticMemories → 1 behavioral profile per user)
 6. Decay applied over time (confidence decreases without confirmation)
 
@@ -264,6 +288,10 @@ consolidation_agent = Agent(
 | `extraction/` | Pattern matchers and LLM extractors (Pydantic AI agents) |
 | `consolidation/` | Background processing workflows (Pydantic AI agents) |
 | `config.py` | Settings and confidence weights |
+| `api/router.py` | REST API endpoints |
+| `api/schemas.py` | Request/response Pydantic models |
+| `api/auth.py` | Authentication and rate limiting |
+| `context.py` | Memory context manager for SDK usage |
 
 ---
 
