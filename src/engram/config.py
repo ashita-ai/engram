@@ -335,6 +335,14 @@ class Settings(BaseSettings):
         description="Default rate limit per minute for other endpoints",
     )
 
+    # Batch Operations
+    batch_encode_max_items: int = Field(
+        default=100,
+        ge=1,
+        le=1000,
+        description="Maximum items allowed in a single batch encode request",
+    )
+
     model_config = {
         "env_prefix": "ENGRAM_",
         "env_file": ".env",

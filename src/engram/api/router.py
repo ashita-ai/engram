@@ -13,6 +13,9 @@ from engram.service import EngramService
 
 from .schemas import (
     ALL_MEMORY_TYPES,
+    BatchEncodeItemResult,
+    BatchEncodeRequest,
+    BatchEncodeResponse,
     BulkDeleteResponse,
     ConfidenceStats,
     ConflictListResponse,
@@ -202,6 +205,137 @@ async def encode(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while encoding the memory",
         ) from e
+
+
+@router.post(
+    "/encode/batch",
+    response_model=BatchEncodeResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["memory"],
+)
+async def encode_batch(
+    request: BatchEncodeRequest,
+    service: ServiceDep,
+) -> BatchEncodeResponse:
+    """Batch encode multiple memories in a single request.
+
+    This endpoint allows efficient bulk import of conversation history or
+    multiple memories. Each item is encoded independently, and partial
+    failures are handled gracefully based on the continue_on_error flag.
+
+    Args:
+        request: Batch encode request with user_id and items array.
+        service: Injected EngramService.
+
+    Returns:
+        Results for each item, including success/failure status.
+
+    Raises:
+        HTTPException: If batch size exceeds limit or critical error occurs.
+    """
+    from engram.config import settings
+
+    # Validate batch size
+    if len(request.items) > settings.batch_encode_max_items:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Batch size {len(request.items)} exceeds maximum allowed "
+            f"({settings.batch_encode_max_items})",
+        )
+
+    results: list[BatchEncodeItemResult] = []
+    succeeded = 0
+    failed = 0
+
+    for index, item in enumerate(request.items):
+        try:
+            result = await service.encode(
+                content=item.content,
+                role=item.role,
+                user_id=request.user_id,
+                org_id=request.org_id,
+                session_id=request.session_id,
+                importance=item.importance,
+                enrich=request.enrich,
+            )
+
+            # Convert to response models
+            episode_response = EpisodeResponse(
+                id=result.episode.id,
+                content=result.episode.content,
+                role=result.episode.role,
+                user_id=result.episode.user_id,
+                org_id=result.episode.org_id,
+                session_id=result.episode.session_id,
+                importance=result.episode.importance,
+                created_at=result.episode.timestamp.isoformat(),
+            )
+
+            structured_response = StructuredResponse(
+                id=result.structured.id,
+                source_episode_id=result.structured.source_episode_id,
+                mode=result.structured.mode,
+                enriched=result.structured.enriched,
+                emails=result.structured.emails,
+                phones=result.structured.phones,
+                urls=result.structured.urls,
+                confidence=result.structured.confidence.value,
+            )
+
+            extract_count = (
+                len(result.structured.emails)
+                + len(result.structured.phones)
+                + len(result.structured.urls)
+            )
+
+            results.append(
+                BatchEncodeItemResult(
+                    index=index,
+                    success=True,
+                    episode=episode_response,
+                    structured=structured_response,
+                    extract_count=extract_count,
+                )
+            )
+            succeeded += 1
+
+        except Exception as e:
+            error_msg = str(e) if str(e) else "Unknown error"
+            logger.warning(
+                "Batch encode item failed: index=%d, error=%s",
+                index,
+                error_msg,
+            )
+
+            results.append(
+                BatchEncodeItemResult(
+                    index=index,
+                    success=False,
+                    error=error_msg,
+                )
+            )
+            failed += 1
+
+            # Stop processing if continue_on_error is False
+            if not request.continue_on_error:
+                # Add skipped results for remaining items
+                for skip_index in range(index + 1, len(request.items)):
+                    results.append(
+                        BatchEncodeItemResult(
+                            index=skip_index,
+                            success=False,
+                            error="Skipped due to earlier failure",
+                        )
+                    )
+                    failed += 1
+                break
+
+    return BatchEncodeResponse(
+        total=len(request.items),
+        succeeded=succeeded,
+        failed=failed,
+        results=results,
+    )
 
 
 @router.post("/recall", response_model=RecallResponse, tags=["memory"])

@@ -195,6 +195,269 @@ class TestEncodeEndpoint:
         assert response.status_code == 503
 
 
+class TestBatchEncodeEndpoint:
+    """Tests for /encode/batch endpoint."""
+
+    def test_batch_encode_success(self, client, mock_service):
+        """Should encode multiple items and return results for each."""
+        # Create mock responses for two items
+        mock_episode1 = Episode(
+            content="Message 1",
+            role="user",
+            user_id="user_123",
+            embedding=[0.1, 0.2, 0.3],
+        )
+        mock_structured1 = StructuredMemory(
+            source_episode_id=mock_episode1.id,
+            mode="fast",
+            user_id="user_123",
+            emails=["test@example.com"],
+        )
+        mock_episode2 = Episode(
+            content="Response 1",
+            role="assistant",
+            user_id="user_123",
+            embedding=[0.4, 0.5, 0.6],
+        )
+        mock_structured2 = StructuredMemory(
+            source_episode_id=mock_episode2.id,
+            mode="fast",
+            user_id="user_123",
+        )
+
+        mock_service.encode.side_effect = [
+            EncodeResult(episode=mock_episode1, structured=mock_structured1),
+            EncodeResult(episode=mock_episode2, structured=mock_structured2),
+        ]
+
+        response = client.post(
+            "/api/v1/encode/batch",
+            json={
+                "user_id": "user_123",
+                "items": [
+                    {"content": "Message 1", "role": "user"},
+                    {"content": "Response 1", "role": "assistant"},
+                ],
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["total"] == 2
+        assert data["succeeded"] == 2
+        assert data["failed"] == 0
+        assert len(data["results"]) == 2
+        assert data["results"][0]["success"] is True
+        assert data["results"][0]["index"] == 0
+        assert data["results"][0]["extract_count"] == 1
+        assert data["results"][1]["success"] is True
+        assert data["results"][1]["index"] == 1
+
+    def test_batch_encode_partial_failure_continue(self, client, mock_service):
+        """Should continue processing after failure when continue_on_error=True."""
+        mock_episode = Episode(
+            content="Message 2",
+            role="user",
+            user_id="user_123",
+            embedding=[0.1],
+        )
+        mock_structured = StructuredMemory(
+            source_episode_id=mock_episode.id,
+            mode="fast",
+            user_id="user_123",
+        )
+
+        # First fails, second succeeds
+        mock_service.encode.side_effect = [
+            ValueError("First item failed"),
+            EncodeResult(episode=mock_episode, structured=mock_structured),
+        ]
+
+        response = client.post(
+            "/api/v1/encode/batch",
+            json={
+                "user_id": "user_123",
+                "items": [
+                    {"content": "Message 1", "role": "user"},
+                    {"content": "Message 2", "role": "user"},
+                ],
+                "continue_on_error": True,
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["total"] == 2
+        assert data["succeeded"] == 1
+        assert data["failed"] == 1
+        assert data["results"][0]["success"] is False
+        assert "First item failed" in data["results"][0]["error"]
+        assert data["results"][1]["success"] is True
+
+    def test_batch_encode_partial_failure_stop(self, client, mock_service):
+        """Should stop processing after failure when continue_on_error=False."""
+        mock_service.encode.side_effect = ValueError("First item failed")
+
+        response = client.post(
+            "/api/v1/encode/batch",
+            json={
+                "user_id": "user_123",
+                "items": [
+                    {"content": "Message 1", "role": "user"},
+                    {"content": "Message 2", "role": "user"},
+                    {"content": "Message 3", "role": "user"},
+                ],
+                "continue_on_error": False,
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["total"] == 3
+        assert data["succeeded"] == 0
+        assert data["failed"] == 3
+        # First failed, rest were skipped
+        assert data["results"][0]["error"] == "First item failed"
+        assert data["results"][1]["error"] == "Skipped due to earlier failure"
+        assert data["results"][2]["error"] == "Skipped due to earlier failure"
+
+    def test_batch_encode_with_session_and_org(self, client, mock_service):
+        """Should pass org_id and session_id to all items."""
+        mock_episode = Episode(
+            content="Hello",
+            role="user",
+            user_id="user_123",
+            org_id="org_456",
+            session_id="session_789",
+            embedding=[0.1],
+        )
+        mock_structured = StructuredMemory(
+            source_episode_id=mock_episode.id,
+            mode="fast",
+            user_id="user_123",
+        )
+        mock_service.encode.return_value = EncodeResult(
+            episode=mock_episode, structured=mock_structured
+        )
+
+        response = client.post(
+            "/api/v1/encode/batch",
+            json={
+                "user_id": "user_123",
+                "org_id": "org_456",
+                "session_id": "session_789",
+                "items": [{"content": "Hello", "role": "user"}],
+            },
+        )
+
+        assert response.status_code == 201
+        call_kwargs = mock_service.encode.call_args.kwargs
+        assert call_kwargs["org_id"] == "org_456"
+        assert call_kwargs["session_id"] == "session_789"
+
+    def test_batch_encode_empty_items(self, client, mock_service):
+        """Should reject empty items array."""
+        response = client.post(
+            "/api/v1/encode/batch",
+            json={
+                "user_id": "user_123",
+                "items": [],
+            },
+        )
+
+        assert response.status_code == 422
+
+    def test_batch_encode_exceeds_limit(self, client, mock_service, monkeypatch):
+        """Should reject batch exceeding max size limit."""
+        # Temporarily set a low limit for testing
+        from engram import config
+
+        original_settings = config.settings
+        test_settings = config.Settings(batch_encode_max_items=2, _env_file=None)
+        monkeypatch.setattr(config, "settings", test_settings)
+
+        response = client.post(
+            "/api/v1/encode/batch",
+            json={
+                "user_id": "user_123",
+                "items": [
+                    {"content": "Message 1"},
+                    {"content": "Message 2"},
+                    {"content": "Message 3"},
+                ],
+            },
+        )
+
+        assert response.status_code == 400
+        assert "exceeds maximum" in response.json()["detail"]
+
+        # Restore original settings
+        monkeypatch.setattr(config, "settings", original_settings)
+
+    def test_batch_encode_with_enrichment(self, client, mock_service):
+        """Should pass enrich option to all items."""
+        mock_episode = Episode(
+            content="Hello",
+            role="user",
+            user_id="user_123",
+            embedding=[0.1],
+        )
+        mock_structured = StructuredMemory(
+            source_episode_id=mock_episode.id,
+            mode="rich",
+            enriched=True,
+            user_id="user_123",
+        )
+        mock_service.encode.return_value = EncodeResult(
+            episode=mock_episode, structured=mock_structured
+        )
+
+        response = client.post(
+            "/api/v1/encode/batch",
+            json={
+                "user_id": "user_123",
+                "items": [{"content": "Hello"}],
+                "enrich": True,
+            },
+        )
+
+        assert response.status_code == 201
+        call_kwargs = mock_service.encode.call_args.kwargs
+        assert call_kwargs["enrich"] is True
+
+    def test_batch_encode_item_with_importance(self, client, mock_service):
+        """Should pass importance per-item."""
+        mock_episode = Episode(
+            content="Important message",
+            role="user",
+            user_id="user_123",
+            importance=0.9,
+            embedding=[0.1],
+        )
+        mock_structured = StructuredMemory(
+            source_episode_id=mock_episode.id,
+            mode="fast",
+            user_id="user_123",
+        )
+        mock_service.encode.return_value = EncodeResult(
+            episode=mock_episode, structured=mock_structured
+        )
+
+        response = client.post(
+            "/api/v1/encode/batch",
+            json={
+                "user_id": "user_123",
+                "items": [
+                    {"content": "Important message", "importance": 0.9},
+                ],
+            },
+        )
+
+        assert response.status_code == 201
+        call_kwargs = mock_service.encode.call_args.kwargs
+        assert call_kwargs["importance"] == 0.9
+
+
 class TestRecallEndpoint:
     """Tests for /recall endpoint."""
 

@@ -204,6 +204,105 @@ class EncodeResponse(BaseModel):
     extract_count: int = Field(description="Total number of extracts")
 
 
+# ============================================================================
+# Batch Encode Schemas
+# ============================================================================
+
+
+class BatchEncodeItem(BaseModel):
+    """A single item in a batch encode request.
+
+    Attributes:
+        content: The text content to encode.
+        role: Role of the speaker (user, assistant, system).
+        importance: Importance score (0.0-1.0).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(min_length=1, description="Text content to encode")
+    role: Literal["user", "assistant", "system"] = Field(
+        default="user", description="Role of the speaker"
+    )
+    importance: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Importance score (auto-calculated if not provided)",
+    )
+
+
+class BatchEncodeRequest(BaseModel):
+    """Request body for batch encoding multiple memories.
+
+    Attributes:
+        user_id: User ID for multi-tenancy isolation.
+        org_id: Optional organization ID.
+        session_id: Optional session ID for grouping.
+        items: Array of encode items.
+        enrich: LLM enrichment mode for all items.
+        continue_on_error: If True, continue processing even if some items fail.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(min_length=1, description="User ID for isolation")
+    org_id: str | None = Field(default=None, description="Optional org ID")
+    session_id: str | None = Field(default=None, description="Optional session ID")
+    items: list[BatchEncodeItem] = Field(
+        min_length=1,
+        description="Array of items to encode",
+    )
+    enrich: bool | Literal["background"] = Field(
+        default=False,
+        description="LLM enrichment: False=regex only, True=sync LLM, 'background'=async",
+    )
+    continue_on_error: bool = Field(
+        default=True,
+        description="Continue processing even if some items fail",
+    )
+
+
+class BatchEncodeItemResult(BaseModel):
+    """Result for a single item in batch encode.
+
+    Attributes:
+        index: Index of this item in the original request.
+        success: Whether encoding succeeded.
+        episode: The stored episode (if successful).
+        structured: The structured memory with extractions (if successful).
+        extract_count: Total number of extracts (if successful).
+        error: Error message (if failed).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=0, description="Index in the original request")
+    success: bool = Field(description="Whether encoding succeeded")
+    episode: EpisodeResponse | None = Field(default=None, description="Stored episode")
+    structured: StructuredResponse | None = Field(default=None, description="Structured memory")
+    extract_count: int | None = Field(default=None, description="Number of extracts")
+    error: str | None = Field(default=None, description="Error message if failed")
+
+
+class BatchEncodeResponse(BaseModel):
+    """Response body for batch encode operation.
+
+    Attributes:
+        total: Total number of items in the request.
+        succeeded: Number of items that succeeded.
+        failed: Number of items that failed.
+        results: Individual results for each item.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    total: int = Field(ge=0, description="Total items in request")
+    succeeded: int = Field(ge=0, description="Number of successful encodes")
+    failed: int = Field(ge=0, description="Number of failed encodes")
+    results: list[BatchEncodeItemResult] = Field(description="Individual results")
+
+
 class RecallRequest(BaseModel):
     """Request body for recalling memories.
 
