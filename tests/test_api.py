@@ -1984,3 +1984,226 @@ class TestDeleteMemoryEndpoint:
         response = client.delete("/api/v1/memories/ep_test123")
 
         assert response.status_code == 422
+
+
+class TestSessionEndpoints:
+    """Tests for session management endpoints."""
+
+    def test_list_sessions_success(self, client, mock_service):
+        """Should list all sessions for a user."""
+        mock_service.storage.list_sessions = AsyncMock(
+            return_value=[
+                {
+                    "session_id": "session_1",
+                    "episode_count": 5,
+                    "first_episode_at": "2025-01-01T10:00:00+00:00",
+                    "last_episode_at": "2025-01-01T11:00:00+00:00",
+                },
+                {
+                    "session_id": "session_2",
+                    "episode_count": 3,
+                    "first_episode_at": "2025-01-02T10:00:00+00:00",
+                    "last_episode_at": "2025-01-02T10:30:00+00:00",
+                },
+            ]
+        )
+
+        response = client.get("/api/v1/sessions?user_id=user_123")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 2
+        assert len(data["sessions"]) == 2
+        assert data["sessions"][0]["session_id"] == "session_1"
+        assert data["sessions"][0]["episode_count"] == 5
+        mock_service.storage.list_sessions.assert_called_once_with(user_id="user_123", org_id=None)
+
+    def test_list_sessions_with_org_id(self, client, mock_service):
+        """Should filter sessions by org_id."""
+        mock_service.storage.list_sessions = AsyncMock(return_value=[])
+
+        response = client.get("/api/v1/sessions?user_id=user_123&org_id=org_456")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 0
+        mock_service.storage.list_sessions.assert_called_once_with(
+            user_id="user_123", org_id="org_456"
+        )
+
+    def test_list_sessions_empty(self, client, mock_service):
+        """Should return empty list when no sessions exist."""
+        mock_service.storage.list_sessions = AsyncMock(return_value=[])
+
+        response = client.get("/api/v1/sessions?user_id=user_123")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 0
+        assert data["sessions"] == []
+
+    def test_list_sessions_missing_user_id(self, client, mock_service):
+        """Should return 422 when user_id is missing."""
+        response = client.get("/api/v1/sessions")
+
+        assert response.status_code == 422
+
+    def test_get_session_success(self, client, mock_service):
+        """Should return session details with episodes."""
+        from datetime import UTC, datetime
+
+        mock_episodes = [
+            Episode(
+                id="ep_1",
+                content="Hello",
+                role="user",
+                user_id="user_123",
+                session_id="session_1",
+                timestamp=datetime(2025, 1, 1, 10, 0, 0, tzinfo=UTC),
+                embedding=[0.1, 0.2],
+            ),
+            Episode(
+                id="ep_2",
+                content="Hi there",
+                role="assistant",
+                user_id="user_123",
+                session_id="session_1",
+                timestamp=datetime(2025, 1, 1, 10, 1, 0, tzinfo=UTC),
+                embedding=[0.2, 0.3],
+            ),
+        ]
+        mock_service.storage.get_session_episodes = AsyncMock(return_value=mock_episodes)
+
+        response = client.get("/api/v1/sessions/session_1?user_id=user_123")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_id"] == "session_1"
+        assert data["user_id"] == "user_123"
+        assert data["episode_count"] == 2
+        assert len(data["episodes"]) == 2
+        assert data["episodes"][0]["id"] == "ep_1"
+        assert data["episodes"][1]["id"] == "ep_2"
+        mock_service.storage.get_session_episodes.assert_called_once_with(
+            session_id="session_1", user_id="user_123", org_id=None
+        )
+
+    def test_get_session_not_found(self, client, mock_service):
+        """Should return 404 when session doesn't exist."""
+        mock_service.storage.get_session_episodes = AsyncMock(return_value=[])
+
+        response = client.get("/api/v1/sessions/nonexistent?user_id=user_123")
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"]
+
+    def test_get_session_missing_user_id(self, client, mock_service):
+        """Should return 422 when user_id is missing."""
+        response = client.get("/api/v1/sessions/session_1")
+
+        assert response.status_code == 422
+
+    def test_delete_session_success(self, client, mock_service):
+        """Should delete all episodes in a session."""
+        mock_service.storage.delete_session = AsyncMock(
+            return_value={
+                "deleted": True,
+                "episodes_deleted": 5,
+                "structured_deleted": 5,
+                "semantic_deleted": 1,
+                "semantic_updated": 0,
+                "procedural_deleted": 0,
+                "procedural_updated": 1,
+            }
+        )
+
+        response = client.delete("/api/v1/sessions/session_1?user_id=user_123")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] is True
+        assert data["session_id"] == "session_1"
+        assert data["episodes_deleted"] == 5
+        assert data["structured_deleted"] == 5
+        assert data["semantic_deleted"] == 1
+        mock_service.storage.delete_session.assert_called_once_with(
+            session_id="session_1", user_id="user_123", org_id=None, cascade="soft"
+        )
+
+    def test_delete_session_with_cascade_hard(self, client, mock_service):
+        """Should delete session with hard cascade."""
+        mock_service.storage.delete_session = AsyncMock(
+            return_value={
+                "deleted": True,
+                "episodes_deleted": 3,
+                "structured_deleted": 3,
+                "semantic_deleted": 2,
+                "semantic_updated": 0,
+                "procedural_deleted": 1,
+                "procedural_updated": 0,
+            }
+        )
+
+        response = client.delete("/api/v1/sessions/session_1?user_id=user_123&cascade=hard")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["semantic_deleted"] == 2
+        mock_service.storage.delete_session.assert_called_once_with(
+            session_id="session_1", user_id="user_123", org_id=None, cascade="hard"
+        )
+
+    def test_delete_session_with_cascade_none(self, client, mock_service):
+        """Should delete session without cascade."""
+        mock_service.storage.delete_session = AsyncMock(
+            return_value={
+                "deleted": True,
+                "episodes_deleted": 3,
+                "structured_deleted": 0,
+                "semantic_deleted": 0,
+                "semantic_updated": 0,
+                "procedural_deleted": 0,
+                "procedural_updated": 0,
+            }
+        )
+
+        response = client.delete("/api/v1/sessions/session_1?user_id=user_123&cascade=none")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["structured_deleted"] == 0
+        mock_service.storage.delete_session.assert_called_once_with(
+            session_id="session_1", user_id="user_123", org_id=None, cascade="none"
+        )
+
+    def test_delete_session_not_found(self, client, mock_service):
+        """Should return 404 when session doesn't exist."""
+        mock_service.storage.delete_session = AsyncMock(
+            return_value={
+                "deleted": False,
+                "episodes_deleted": 0,
+                "structured_deleted": 0,
+                "semantic_deleted": 0,
+                "semantic_updated": 0,
+                "procedural_deleted": 0,
+                "procedural_updated": 0,
+            }
+        )
+
+        response = client.delete("/api/v1/sessions/nonexistent?user_id=user_123")
+
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"]
+
+    def test_delete_session_invalid_cascade(self, client, mock_service):
+        """Should return 400 for invalid cascade mode."""
+        response = client.delete("/api/v1/sessions/session_1?user_id=user_123&cascade=invalid")
+
+        assert response.status_code == 400
+        assert "Invalid cascade mode" in response.json()["detail"]
+
+    def test_delete_session_missing_user_id(self, client, mock_service):
+        """Should return 422 when user_id is missing."""
+        response = client.delete("/api/v1/sessions/session_1")
+
+        assert response.status_code == 422

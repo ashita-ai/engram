@@ -1720,3 +1720,205 @@ class CRUDMixin:
                 )
 
         return memories
+
+    # ========================================================================
+    # Session Management
+    # ========================================================================
+
+    async def list_sessions(
+        self,
+        user_id: str,
+        org_id: str | None = None,
+    ) -> list[dict[str, object]]:
+        """List all sessions for a user with episode counts and date ranges.
+
+        Args:
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+
+        Returns:
+            List of session summaries with session_id, episode_count,
+            first_episode_at, and last_episode_at.
+        """
+        from engram.models import Episode
+
+        collection = self._collection_name("episodic")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=10000,
+            with_payload=True,
+            with_vectors=False,
+        )
+
+        # Group episodes by session_id
+        sessions: dict[str, list[Episode]] = {}
+        for point in results:
+            if point.payload is not None:
+                episode = self._payload_to_memory(point.payload, Episode)
+                if episode.session_id is not None:
+                    if episode.session_id not in sessions:
+                        sessions[episode.session_id] = []
+                    sessions[episode.session_id].append(episode)
+
+        # Build session summaries
+        session_list: list[dict[str, object]] = []
+        for session_id, episodes in sessions.items():
+            episodes.sort(key=lambda e: e.timestamp)
+            session_list.append(
+                {
+                    "session_id": session_id,
+                    "episode_count": len(episodes),
+                    "first_episode_at": episodes[0].timestamp.isoformat(),
+                    "last_episode_at": episodes[-1].timestamp.isoformat(),
+                }
+            )
+
+        # Sort by last_episode_at descending (most recent first)
+        session_list.sort(key=lambda s: str(s["last_episode_at"]), reverse=True)
+
+        return session_list
+
+    async def get_session_episodes(
+        self,
+        session_id: str,
+        user_id: str,
+        org_id: str | None = None,
+    ) -> list[Episode]:
+        """Get all episodes for a specific session.
+
+        Args:
+            session_id: Session identifier.
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+
+        Returns:
+            List of Episodes in the session, ordered by timestamp.
+        """
+        from engram.models import Episode
+
+        collection = self._collection_name("episodic")
+
+        filters: list[models.FieldCondition] = [
+            models.FieldCondition(
+                key="user_id",
+                match=models.MatchValue(value=user_id),
+            ),
+            models.FieldCondition(
+                key="session_id",
+                match=models.MatchValue(value=session_id),
+            ),
+        ]
+
+        if org_id is not None:
+            filters.append(
+                models.FieldCondition(
+                    key="org_id",
+                    match=models.MatchValue(value=org_id),
+                )
+            )
+
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(must=filters),
+            limit=10000,
+            with_payload=True,
+            with_vectors=True,
+        )
+
+        episodes: list[Episode] = []
+        for point in results:
+            if point.payload is not None:
+                episode = self._payload_to_memory(point.payload, Episode)
+                if isinstance(point.vector, list):
+                    episode.embedding = point.vector
+                episodes.append(episode)
+
+        # Sort by timestamp
+        episodes.sort(key=lambda e: e.timestamp)
+
+        return episodes
+
+    async def delete_session(
+        self,
+        session_id: str,
+        user_id: str,
+        org_id: str | None = None,
+        cascade: str = "soft",
+    ) -> dict[str, object]:
+        """Delete all episodes in a session with optional cascade.
+
+        Args:
+            session_id: Session identifier.
+            user_id: User ID for isolation.
+            org_id: Optional org ID filter.
+            cascade: Cascade mode:
+                - "none": Delete only episodes, leave derived memories orphaned
+                - "soft": Remove episode references, reduce confidence, delete empty
+                - "hard": Delete all derived memories that reference session episodes
+
+        Returns:
+            Dict with deletion statistics.
+        """
+        # Get all episodes in the session
+        episodes = await self.get_session_episodes(session_id, user_id, org_id)
+
+        if not episodes:
+            return {
+                "deleted": False,
+                "episodes_deleted": 0,
+                "structured_deleted": 0,
+                "semantic_deleted": 0,
+                "semantic_updated": 0,
+                "procedural_deleted": 0,
+                "procedural_updated": 0,
+            }
+
+        # Track cascade statistics
+        total_structured_deleted = 0
+        total_semantic_deleted = 0
+        total_semantic_updated = 0
+        total_procedural_deleted = 0
+        total_procedural_updated = 0
+
+        # Delete each episode with cascade
+        for episode in episodes:
+            result = await self.delete_episode(episode.id, user_id, cascade=cascade)
+            if result.get("deleted"):
+                # Cast values from dict[str, object] to int
+                structured = result.get("structured_deleted", 0)
+                semantic_del = result.get("semantic_deleted", 0)
+                semantic_upd = result.get("semantic_updated", 0)
+                procedural_del = result.get("procedural_deleted", 0)
+                procedural_upd = result.get("procedural_updated", 0)
+                total_structured_deleted += structured if isinstance(structured, int) else 0
+                total_semantic_deleted += semantic_del if isinstance(semantic_del, int) else 0
+                total_semantic_updated += semantic_upd if isinstance(semantic_upd, int) else 0
+                total_procedural_deleted += procedural_del if isinstance(procedural_del, int) else 0
+                total_procedural_updated += procedural_upd if isinstance(procedural_upd, int) else 0
+
+        return {
+            "deleted": True,
+            "episodes_deleted": len(episodes),
+            "structured_deleted": total_structured_deleted,
+            "semantic_deleted": total_semantic_deleted,
+            "semantic_updated": total_semantic_updated,
+            "procedural_deleted": total_procedural_deleted,
+            "procedural_updated": total_procedural_updated,
+        }
