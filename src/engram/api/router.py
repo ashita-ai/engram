@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from engram.models import AuditEntry, HistoryEntry
 from engram.service import EngramService
 
+from .helpers import episode_to_response, get_memory_type_from_id
 from .schemas import (
     ALL_MEMORY_TYPES,
     BatchEncodeItemResult,
@@ -32,7 +33,6 @@ from .schemas import (
     DetectConflictsResponse,
     EncodeRequest,
     EncodeResponse,
-    EpisodeResponse,
     GetMemoryResponse,
     HealthResponse,
     HistoryEntryResponse,
@@ -164,16 +164,7 @@ async def encode(
         )
 
         # Convert to response models
-        episode_response = EpisodeResponse(
-            id=result.episode.id,
-            content=result.episode.content,
-            role=result.episode.role,
-            user_id=result.episode.user_id,
-            org_id=result.episode.org_id,
-            session_id=result.episode.session_id,
-            importance=result.episode.importance,
-            created_at=result.episode.timestamp.isoformat(),
-        )
+        episode_response = episode_to_response(result.episode)
 
         structured_response = StructuredResponse(
             id=result.structured.id,
@@ -264,16 +255,7 @@ async def encode_batch(
             )
 
             # Convert to response models
-            episode_response = EpisodeResponse(
-                id=result.episode.id,
-                content=result.episode.content,
-                role=result.episode.role,
-                user_id=result.episode.user_id,
-                org_id=result.episode.org_id,
-                session_id=result.episode.session_id,
-                importance=result.episode.importance,
-                created_at=result.episode.timestamp.isoformat(),
-            )
+            episode_response = episode_to_response(result.episode)
 
             structured_response = StructuredResponse(
                 id=result.structured.id,
@@ -691,19 +673,7 @@ async def get_working_memory(
     """
     episodes = service.get_working_memory()
 
-    episode_responses = [
-        EpisodeResponse(
-            id=ep.id,
-            content=ep.content,
-            role=ep.role,
-            user_id=ep.user_id,
-            org_id=ep.org_id,
-            session_id=ep.session_id,
-            importance=ep.importance,
-            created_at=ep.timestamp.isoformat(),
-        )
-        for ep in episodes
-    ]
+    episode_responses = [episode_to_response(ep) for ep in episodes]
 
     return WorkingMemoryResponse(
         episodes=episode_responses,
@@ -757,15 +727,8 @@ async def get_memory(
         HTTPException: 404 if memory not found.
     """
     # Determine memory type from ID prefix
-    if memory_id.startswith("ep_"):
-        memory_type = "episodic"
-    elif memory_id.startswith("struct_"):
-        memory_type = "structured"
-    elif memory_id.startswith("sem_"):
-        memory_type = "semantic"
-    elif memory_id.startswith("proc_"):
-        memory_type = "procedural"
-    else:
+    memory_type = get_memory_type_from_id(memory_id)
+    if memory_type is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid memory ID format: {memory_id}. "
@@ -921,19 +884,7 @@ async def get_sources(
     try:
         episodes = await service.get_sources(memory_id, user_id)
 
-        episode_responses = [
-            EpisodeResponse(
-                id=ep.id,
-                content=ep.content,
-                role=ep.role,
-                user_id=ep.user_id,
-                org_id=ep.org_id,
-                session_id=ep.session_id,
-                importance=ep.importance,
-                created_at=ep.timestamp.isoformat(),
-            )
-            for ep in episodes
-        ]
+        episode_responses = [episode_to_response(ep) for ep in episodes]
 
         return SourcesResponse(
             memory_id=memory_id,
@@ -1243,15 +1194,8 @@ async def delete_memory(
         )
 
     # Determine memory type from ID prefix and call appropriate delete method
-    if memory_id.startswith("ep_"):
-        memory_type = "episodic"
-    elif memory_id.startswith("struct_"):
-        memory_type = "structured"
-    elif memory_id.startswith("sem_"):
-        memory_type = "semantic"
-    elif memory_id.startswith("proc_"):
-        memory_type = "procedural"
-    else:
+    memory_type = get_memory_type_from_id(memory_id)
+    if memory_type is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid memory ID format: {memory_id}. "
@@ -1395,22 +1339,19 @@ async def update_memory(
     """
     start_time = time.time()
 
+    # Determine memory type from ID prefix
+    memory_type = get_memory_type_from_id(memory_id)
+
     # Episodic memories are immutable
-    if memory_id.startswith("ep_"):
+    if memory_type == "episodic":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Episodic memories are immutable and cannot be updated. "
             "Create a new episode or use derived memory types instead.",
         )
 
-    # Determine memory type from ID prefix
-    if memory_id.startswith("struct_"):
-        memory_type = "structured"
-    elif memory_id.startswith("sem_"):
-        memory_type = "semantic"
-    elif memory_id.startswith("proc_"):
-        memory_type = "procedural"
-    else:
+    # Validate memory type is updatable
+    if memory_type not in ("structured", "semantic", "procedural"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid memory ID format: {memory_id}. "
@@ -3304,19 +3245,7 @@ async def get_session(
             )
 
         # Convert episodes to response format
-        episode_responses = [
-            EpisodeResponse(
-                id=ep.id,
-                content=ep.content,
-                role=ep.role,
-                user_id=ep.user_id,
-                org_id=ep.org_id,
-                session_id=ep.session_id,
-                importance=ep.importance,
-                created_at=ep.timestamp.isoformat(),
-            )
-            for ep in episodes
-        ]
+        episode_responses = [episode_to_response(ep) for ep in episodes]
 
         return SessionDetailResponse(
             session_id=session_id,

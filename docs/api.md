@@ -1016,6 +1016,114 @@ Clear all conflicts for a user.
 
 ---
 
+## Session Endpoints
+
+Session management endpoints for listing and managing memory sessions.
+
+### GET /sessions
+
+List all sessions for a user with episode counts and date ranges.
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `user_id` | string | Yes | User ID for isolation |
+| `org_id` | string | No | Optional org filter |
+
+**Response (200 OK):**
+```json
+{
+  "sessions": [
+    {
+      "session_id": "session_abc123",
+      "episode_count": 5,
+      "first_episode_at": "2025-01-01T10:00:00Z",
+      "last_episode_at": "2025-01-01T11:00:00Z"
+    }
+  ],
+  "count": 1
+}
+```
+
+---
+
+### GET /sessions/{session_id}
+
+Get details for a specific session including all episodes.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Session identifier |
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `user_id` | string | Yes | User ID for isolation |
+| `org_id` | string | No | Optional org filter |
+
+**Response (200 OK):**
+```json
+{
+  "session_id": "session_abc123",
+  "user_id": "user_123",
+  "org_id": null,
+  "episodes": [
+    {
+      "id": "ep_xyz789",
+      "content": "Hello",
+      "role": "user",
+      "user_id": "user_123",
+      "session_id": "session_abc123",
+      "importance": 0.5,
+      "created_at": "2025-01-01T10:00:00Z"
+    }
+  ],
+  "episode_count": 1,
+  "first_episode_at": "2025-01-01T10:00:00Z",
+  "last_episode_at": "2025-01-01T10:00:00Z"
+}
+```
+
+---
+
+### DELETE /sessions/{session_id}
+
+Delete all episodes in a session with optional cascade to derived memories.
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `session_id` | string | Session identifier |
+
+**Query Parameters:**
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `user_id` | string | Yes | User ID for isolation |
+| `org_id` | string | No | Optional org filter |
+| `cascade` | string | No | Cascade mode: `none`, `soft` (default), `hard` |
+
+**Cascade Modes:**
+- `none`: Delete only episodes, leave derived memories orphaned
+- `soft`: Remove references, reduce confidence, delete empty derived memories
+- `hard`: Delete all derived memories that reference session episodes
+
+**Response (200 OK):**
+```json
+{
+  "session_id": "session_abc123",
+  "deleted": true,
+  "episodes_deleted": 5,
+  "structured_deleted": 5,
+  "semantic_deleted": 1,
+  "semantic_updated": 0,
+  "procedural_deleted": 0,
+  "procedural_updated": 1
+}
+```
+
+---
+
 ## Error Responses
 
 All endpoints return standard error responses:

@@ -156,7 +156,15 @@ Episode (raw, immutable)
 | `GET` | `/conflicts` | List detected conflicts |
 | `POST` | `/webhooks` | Register event webhooks |
 | `GET` | `/memories/{id}/history` | Memory change history |
-| `DELETE` | `/memories/user/{user_id}` | GDPR erasure |
+| `DELETE` | `/users/{user_id}/memories` | GDPR erasure |
+
+### Session Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/sessions` | List sessions for a user |
+| `GET` | `/sessions/{session_id}` | Get session details with episodes |
+| `DELETE` | `/sessions/{session_id}` | Delete session (with cascade options) |
 
 ## Confidence Scoring
 

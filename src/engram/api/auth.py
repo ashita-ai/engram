@@ -12,11 +12,11 @@ import hashlib
 import hmac
 import time
 from collections import defaultdict
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, ConfigDict, Field
 
 from engram.exceptions import AuthenticationError, RateLimitError
 from engram.logging import get_logger
@@ -30,8 +30,7 @@ logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)
 
 
-@dataclass
-class AuthenticatedUser:
+class AuthenticatedUser(BaseModel):
     """Represents an authenticated user.
 
     Attributes:
@@ -40,13 +39,14 @@ class AuthenticatedUser:
         scopes: List of permission scopes.
     """
 
-    user_id: str
-    org_id: str | None = None
-    scopes: list[str] = field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+
+    user_id: str = Field(description="Unique identifier for the user")
+    org_id: str | None = Field(default=None, description="Optional organization ID")
+    scopes: list[str] = Field(default_factory=list, description="Permission scopes")
 
 
-@dataclass
-class RateLimitInfo:
+class RateLimitInfo(BaseModel):
     """Rate limit tracking for a user/endpoint combination.
 
     Attributes:
@@ -55,9 +55,11 @@ class RateLimitInfo:
         reset_at: Unix timestamp when the window resets.
     """
 
-    limit: int
-    remaining: int
-    reset_at: int
+    model_config = ConfigDict(extra="forbid")
+
+    limit: int = Field(ge=0, description="Maximum requests allowed per window")
+    remaining: int = Field(ge=0, description="Requests remaining in current window")
+    reset_at: int = Field(description="Unix timestamp when the window resets")
 
 
 class TokenValidator:
