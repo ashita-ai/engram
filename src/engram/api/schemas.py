@@ -1394,3 +1394,94 @@ class WebhookDeliveryListResponse(BaseModel):
 
     deliveries: list[WebhookDeliveryResponse] = Field(default_factory=list)
     count: int = Field(ge=0, description="Number of deliveries")
+
+
+# ============================================================================
+# Session Management Schemas
+# ============================================================================
+
+
+class SessionSummary(BaseModel):
+    """Summary of a session for listing.
+
+    Attributes:
+        session_id: Session identifier.
+        episode_count: Number of episodes in this session.
+        first_episode_at: Timestamp of the first episode.
+        last_episode_at: Timestamp of the most recent episode.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(description="Session identifier")
+    episode_count: int = Field(ge=0, description="Number of episodes in session")
+    first_episode_at: str = Field(description="Timestamp of first episode (ISO format)")
+    last_episode_at: str = Field(description="Timestamp of last episode (ISO format)")
+
+
+class SessionListResponse(BaseModel):
+    """Response for listing sessions.
+
+    Attributes:
+        sessions: List of session summaries.
+        count: Total number of sessions.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    sessions: list[SessionSummary] = Field(default_factory=list)
+    count: int = Field(ge=0, description="Total number of sessions")
+
+
+class SessionDetailResponse(BaseModel):
+    """Response for session details.
+
+    Attributes:
+        session_id: Session identifier.
+        user_id: User ID.
+        org_id: Optional org ID.
+        episodes: List of episodes in this session.
+        episode_count: Number of episodes.
+        first_episode_at: Timestamp of the first episode.
+        last_episode_at: Timestamp of the most recent episode.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(description="Session identifier")
+    user_id: str = Field(description="User ID")
+    org_id: str | None = Field(default=None, description="Org ID")
+    episodes: list[EpisodeResponse] = Field(default_factory=list)
+    episode_count: int = Field(ge=0, description="Number of episodes")
+    first_episode_at: str | None = Field(
+        default=None, description="Timestamp of first episode (ISO format)"
+    )
+    last_episode_at: str | None = Field(
+        default=None, description="Timestamp of last episode (ISO format)"
+    )
+
+
+class SessionDeleteResponse(BaseModel):
+    """Response for session deletion.
+
+    Attributes:
+        session_id: Session that was deleted.
+        deleted: Whether deletion succeeded.
+        episodes_deleted: Number of episodes deleted (if cascade).
+        structured_deleted: Number of structured memories deleted (if cascade).
+        semantic_deleted: Number of semantic memories deleted (if cascade).
+        semantic_updated: Number of semantic memories updated (if soft cascade).
+        procedural_deleted: Number of procedural memories deleted (if cascade).
+        procedural_updated: Number of procedural memories updated (if soft cascade).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(description="Session that was deleted")
+    deleted: bool = Field(description="Whether deletion succeeded")
+    episodes_deleted: int = Field(ge=0, description="Episodes deleted")
+    structured_deleted: int = Field(ge=0, default=0, description="Structured memories deleted")
+    semantic_deleted: int = Field(ge=0, default=0, description="Semantic memories deleted")
+    semantic_updated: int = Field(ge=0, default=0, description="Semantic memories updated")
+    procedural_deleted: int = Field(ge=0, default=0, description="Procedural memories deleted")
+    procedural_updated: int = Field(ge=0, default=0, description="Procedural memories updated")

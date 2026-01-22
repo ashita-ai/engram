@@ -52,6 +52,10 @@ from .schemas import (
     RecallResponse,
     RecallResultResponse,
     ResolveConflictRequest,
+    SessionDeleteResponse,
+    SessionDetailResponse,
+    SessionListResponse,
+    SessionSummary,
     SourceEpisodeDetail,
     SourceEpisodeSummary,
     SourcesResponse,
@@ -3202,4 +3206,218 @@ async def get_webhook_logs(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An internal error occurred while retrieving delivery logs",
+        ) from e
+
+
+# =============================================================================
+# Session Management Endpoints
+# =============================================================================
+
+
+@router.get(
+    "/sessions",
+    response_model=SessionListResponse,
+    tags=["sessions"],
+    summary="List sessions",
+    description="List all sessions for a user with episode counts and date ranges.",
+)
+async def list_sessions(
+    service: ServiceDep,
+    user_id: Annotated[str, Query(min_length=1, description="User ID for isolation")],
+    org_id: Annotated[str | None, Query(description="Optional org ID filter")] = None,
+) -> SessionListResponse:
+    """List all sessions for a user.
+
+    Args:
+        service: Engram service instance.
+        user_id: User ID for multi-tenancy isolation.
+        org_id: Optional organization filter.
+
+    Returns:
+        List of session summaries with episode counts and date ranges.
+    """
+    try:
+        sessions = await service.storage.list_sessions(
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+        return SessionListResponse(
+            sessions=[
+                SessionSummary(
+                    session_id=str(s["session_id"]),
+                    episode_count=s["episode_count"] if isinstance(s["episode_count"], int) else 0,
+                    first_episode_at=str(s["first_episode_at"]),
+                    last_episode_at=str(s["last_episode_at"]),
+                )
+                for s in sessions
+            ],
+            count=len(sessions),
+        )
+
+    except Exception as e:
+        logger.exception("Failed to list sessions for user %s", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while listing sessions",
+        ) from e
+
+
+@router.get(
+    "/sessions/{session_id}",
+    response_model=SessionDetailResponse,
+    tags=["sessions"],
+    summary="Get session details",
+    description="Get all episodes in a session with metadata.",
+)
+async def get_session(
+    service: ServiceDep,
+    session_id: str,
+    user_id: Annotated[str, Query(min_length=1, description="User ID for isolation")],
+    org_id: Annotated[str | None, Query(description="Optional org ID filter")] = None,
+) -> SessionDetailResponse:
+    """Get details for a specific session.
+
+    Args:
+        service: Engram service instance.
+        session_id: Session identifier.
+        user_id: User ID for multi-tenancy isolation.
+        org_id: Optional organization filter.
+
+    Returns:
+        Session details including all episodes.
+
+    Raises:
+        HTTPException: 404 if session not found.
+    """
+    try:
+        episodes = await service.storage.get_session_episodes(
+            session_id=session_id,
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+        if not episodes:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session '{session_id}' not found or has no episodes",
+            )
+
+        # Convert episodes to response format
+        episode_responses = [
+            EpisodeResponse(
+                id=ep.id,
+                content=ep.content,
+                role=ep.role,
+                user_id=ep.user_id,
+                org_id=ep.org_id,
+                session_id=ep.session_id,
+                importance=ep.importance,
+                created_at=ep.timestamp.isoformat(),
+            )
+            for ep in episodes
+        ]
+
+        return SessionDetailResponse(
+            session_id=session_id,
+            user_id=user_id,
+            org_id=org_id,
+            episodes=episode_responses,
+            episode_count=len(episodes),
+            first_episode_at=episodes[0].timestamp.isoformat() if episodes else None,
+            last_episode_at=episodes[-1].timestamp.isoformat() if episodes else None,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to get session %s for user %s", session_id, user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while retrieving session",
+        ) from e
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    response_model=SessionDeleteResponse,
+    tags=["sessions"],
+    summary="Delete session",
+    description="Delete all episodes in a session with optional cascade to derived memories.",
+)
+async def delete_session(
+    service: ServiceDep,
+    session_id: str,
+    user_id: Annotated[str, Query(min_length=1, description="User ID for isolation")],
+    org_id: Annotated[str | None, Query(description="Optional org ID filter")] = None,
+    cascade: Annotated[
+        str,
+        Query(
+            description="Cascade mode: 'none' (orphan derived), 'soft' (reduce confidence), 'hard' (delete all)"
+        ),
+    ] = "soft",
+) -> SessionDeleteResponse:
+    """Delete all episodes in a session.
+
+    Args:
+        service: Engram service instance.
+        session_id: Session identifier.
+        user_id: User ID for multi-tenancy isolation.
+        org_id: Optional organization filter.
+        cascade: Cascade mode for derived memories:
+            - "none": Delete only episodes, leave derived memories orphaned
+            - "soft": Remove references, reduce confidence, delete empty
+            - "hard": Delete all derived memories that reference session episodes
+
+    Returns:
+        Deletion statistics including cascade counts.
+
+    Raises:
+        HTTPException: 404 if session not found.
+        HTTPException: 400 if cascade mode is invalid.
+    """
+    # Validate cascade mode
+    if cascade not in ("none", "soft", "hard"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid cascade mode: {cascade}. Must be 'none', 'soft', or 'hard'.",
+        )
+
+    try:
+        result = await service.storage.delete_session(
+            session_id=session_id,
+            user_id=user_id,
+            org_id=org_id,
+            cascade=cascade,
+        )
+
+        if not result.get("deleted"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Session '{session_id}' not found or has no episodes",
+            )
+
+        # Extract and validate int values from result dict
+        def get_int(key: str) -> int:
+            val = result.get(key, 0)
+            return val if isinstance(val, int) else 0
+
+        return SessionDeleteResponse(
+            session_id=session_id,
+            deleted=True,
+            episodes_deleted=get_int("episodes_deleted"),
+            structured_deleted=get_int("structured_deleted"),
+            semantic_deleted=get_int("semantic_deleted"),
+            semantic_updated=get_int("semantic_updated"),
+            procedural_deleted=get_int("procedural_deleted"),
+            procedural_updated=get_int("procedural_updated"),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete session %s for user %s", session_id, user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An internal error occurred while deleting session",
         ) from e
