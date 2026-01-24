@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from qdrant_client import models
 
+from engram.config import settings
+
 if TYPE_CHECKING:
     from engram.models import (
         AuditEntry,
@@ -274,7 +276,7 @@ class CRUDMixin:
                     ),
                 ]
             ),
-            limit=10000,
+            limit=settings.storage_max_scroll_limit,
             with_payload=True,
             with_vectors=True,
         )
@@ -321,7 +323,7 @@ class CRUDMixin:
                     ),
                 ]
             ),
-            limit=10000,
+            limit=settings.storage_max_scroll_limit,
             with_payload=True,
             with_vectors=True,
         )
@@ -1480,7 +1482,7 @@ class CRUDMixin:
         results, _ = await self.client.scroll(
             collection_name=collection,
             scroll_filter=models.Filter(must=filters),
-            limit=10000,  # Fetch all, filter/paginate in Python
+            limit=settings.storage_max_scroll_limit,  # Configurable via ENGRAM_STORAGE_MAX_SCROLL_LIMIT
             with_payload=True,
             with_vectors=False,
         )
@@ -1543,7 +1545,7 @@ class CRUDMixin:
         results, _ = await self.client.scroll(
             collection_name=collection,
             scroll_filter=models.Filter(must=filters),
-            limit=10000,
+            limit=settings.storage_max_scroll_limit,
             with_payload=True,
             with_vectors=False,
         )
@@ -1618,7 +1620,7 @@ class CRUDMixin:
         results, _ = await self.client.scroll(
             collection_name=collection,
             scroll_filter=models.Filter(must=filters),
-            limit=10000,
+            limit=settings.storage_max_scroll_limit,
             with_payload=True,
             with_vectors=False,
         )
@@ -1685,7 +1687,7 @@ class CRUDMixin:
         results, _ = await self.client.scroll(
             collection_name=collection,
             scroll_filter=models.Filter(must=filters),
-            limit=10000,
+            limit=settings.storage_max_scroll_limit,
             with_payload=True,
             with_vectors=False,
         )
@@ -1762,7 +1764,7 @@ class CRUDMixin:
         results, _ = await self.client.scroll(
             collection_name=collection,
             scroll_filter=models.Filter(must=filters),
-            limit=10000,
+            limit=settings.storage_max_scroll_limit,
             with_payload=True,
             with_vectors=False,
         )
@@ -1837,7 +1839,7 @@ class CRUDMixin:
         results, _ = await self.client.scroll(
             collection_name=collection,
             scroll_filter=models.Filter(must=filters),
-            limit=10000,
+            limit=settings.storage_max_scroll_limit,
             with_payload=True,
             with_vectors=True,
         )

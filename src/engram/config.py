@@ -408,6 +408,19 @@ class Settings(BaseSettings):
         description="Maximum items allowed in a single batch encode request",
     )
 
+    # Storage Pagination
+    storage_max_scroll_limit: int = Field(
+        default=10000,
+        ge=100,
+        le=100000,
+        description=(
+            "Maximum records to fetch in a single scroll operation. "
+            "This affects memory usage for list operations across collections. "
+            "For users with very large memory stores (>10k per collection), "
+            "reduce this limit to prevent OOM issues."
+        ),
+    )
+
     model_config = {
         "env_prefix": "ENGRAM_",
         "env_file": ".env",

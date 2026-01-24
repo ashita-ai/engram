@@ -218,3 +218,33 @@ class TestSecuritySettings:
         """Test environment should disable auth by default."""
         settings = Settings(env="test", _env_file=None)
         assert settings.is_auth_enabled is False
+
+
+class TestStorageSettings:
+    """Tests for storage-related settings."""
+
+    def test_storage_max_scroll_limit_default(self):
+        """Default scroll limit should be 10000."""
+        settings = Settings(_env_file=None)
+        assert settings.storage_max_scroll_limit == 10000
+
+    def test_storage_max_scroll_limit_custom(self):
+        """Custom scroll limit should be accepted."""
+        settings = Settings(storage_max_scroll_limit=5000, _env_file=None)
+        assert settings.storage_max_scroll_limit == 5000
+
+    def test_storage_max_scroll_limit_bounds(self):
+        """Scroll limit must be between 100 and 100000."""
+        # Test lower bound
+        with pytest.raises(ValidationError):
+            Settings(storage_max_scroll_limit=50, _env_file=None)
+
+        # Test upper bound
+        with pytest.raises(ValidationError):
+            Settings(storage_max_scroll_limit=200000, _env_file=None)
+
+    def test_storage_max_scroll_limit_from_env(self):
+        """ENGRAM_STORAGE_MAX_SCROLL_LIMIT should override default."""
+        with patch.dict(os.environ, {"ENGRAM_STORAGE_MAX_SCROLL_LIMIT": "2500"}):
+            settings = Settings()
+            assert settings.storage_max_scroll_limit == 2500
