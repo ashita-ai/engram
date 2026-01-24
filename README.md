@@ -208,11 +208,31 @@ uv run pre-commit install
 uv run pre-commit run --all-files
 ```
 
+## Claude Code Integration
+
+Engram provides an MCP server for direct integration with Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/engram", "--extra", "mcp", "python", "-m", "engram.mcp"]
+    }
+  }
+}
+```
+
+This exposes four tools: `engram_encode`, `engram_recall`, `engram_verify`, and `engram_stats`.
+
+See [docs/mcp.md](docs/mcp.md) for full setup instructions.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — Memory types, data flow, storage design
 - [Development Guide](docs/development.md) — Setup, configuration, workflow
 - [API Reference](docs/api.md) — Detailed endpoint documentation
+- [MCP Integration](docs/mcp.md) — Claude Code and MCP client setup
 
 ## Status
 
