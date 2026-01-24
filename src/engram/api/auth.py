@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import time
 from collections import defaultdict
+from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import Depends, Request, Response
@@ -210,31 +211,49 @@ class RateLimiter:
         )
 
 
-# Global instances (initialized lazily)
-_token_validator: TokenValidator | None = None
-_rate_limiter: RateLimiter | None = None
+# Singleton instances using functools.lru_cache for thread-safe caching
+# This approach avoids global mutable state while maintaining singleton behavior
 
 
-def get_token_validator(settings: Settings) -> TokenValidator:
-    """Get or create the token validator singleton."""
-    global _token_validator
-    if _token_validator is None:
-        _token_validator = TokenValidator(settings.auth_secret_key)
-    return _token_validator
+@lru_cache(maxsize=1)
+def get_token_validator(secret_key: str) -> TokenValidator:
+    """Get or create the token validator singleton.
+
+    Uses lru_cache for thread-safe singleton behavior.
+    The secret_key parameter ensures a new validator is created if the key changes.
+
+    Args:
+        secret_key: The secret key for token validation.
+
+    Returns:
+        TokenValidator instance.
+    """
+    return TokenValidator(secret_key)
 
 
-def get_rate_limiter() -> RateLimiter:
-    """Get or create the rate limiter singleton."""
-    global _rate_limiter
-    if _rate_limiter is None:
-        _rate_limiter = RateLimiter()
-    return _rate_limiter
+@lru_cache(maxsize=1)
+def get_rate_limiter(window_seconds: int = 60) -> RateLimiter:
+    """Get or create the rate limiter singleton.
+
+    Uses lru_cache for thread-safe singleton behavior.
+
+    Args:
+        window_seconds: The sliding window size in seconds.
+
+    Returns:
+        RateLimiter instance.
+    """
+    return RateLimiter(window_seconds)
 
 
-def reset_rate_limiter() -> None:
-    """Reset the rate limiter (for testing)."""
-    global _rate_limiter
-    _rate_limiter = None
+def reset_auth_singletons() -> None:
+    """Reset all auth singletons (for testing).
+
+    Clears the lru_cache for both token validator and rate limiter,
+    allowing new instances to be created with fresh state.
+    """
+    get_token_validator.cache_clear()
+    get_rate_limiter.cache_clear()
 
 
 class AuthDependency:
@@ -262,13 +281,13 @@ class AuthDependency:
         If auth is disabled, returns None (endpoints use user_id from request body).
         If auth is enabled, validates the Bearer token.
         """
-        if not self.settings.auth_enabled:
+        if not self.settings.is_auth_enabled:
             return None
 
         if credentials is None:
             raise AuthenticationError("Missing authentication credentials")
 
-        validator = get_token_validator(self.settings)
+        validator = get_token_validator(self.settings.auth_secret_key)
         user = validator.validate_token(credentials.credentials)
 
         logger.debug(

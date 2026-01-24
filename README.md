@@ -185,11 +185,18 @@ Environment variables (prefix: `ENGRAM_`):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `ENV` | `development` | Environment: `development`, `production`, or `test` |
 | `QDRANT_URL` | `http://localhost:6333` | Qdrant connection |
 | `EMBEDDING_PROVIDER` | `fastembed` | Embedding backend |
-| `AUTH_ENABLED` | `false` | Enable Bearer token auth |
+| `AUTH_ENABLED` | auto | Enable Bearer token auth (auto: true in production) |
+| `AUTH_SECRET_KEY` | - | Secret key for auth (required in production) |
 | `RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
 | `BATCH_ENCODE_MAX_ITEMS` | `100` | Max batch size |
+
+**Security Notes:**
+- In production (`ENGRAM_ENV=production`), auth is enabled by default
+- Using the default secret key in production will raise an error
+- Generate a secret key: `python -c "import secrets; print(secrets.token_hex(32))"`
 
 See [docs/development.md](docs/development.md) for full configuration reference.
 

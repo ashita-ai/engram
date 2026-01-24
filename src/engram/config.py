@@ -1,9 +1,13 @@
 """Configuration management for Engram."""
 
+import logging
+import warnings
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings
+
+logger = logging.getLogger(__name__)
 
 
 class RerankWeights(BaseModel):
@@ -148,7 +152,18 @@ class Settings(BaseSettings):
     the ENGRAM_ prefix. For example:
         ENGRAM_QDRANT_URL=http://localhost:6333
         ENGRAM_EMBEDDING_PROVIDER=fastembed
+
+    Security Notes:
+        - In production (ENGRAM_ENV=production), auth is enabled by default
+        - Using the default secret key in production will raise an error
+        - Disabling auth in production will log a warning
     """
+
+    # Environment
+    env: Literal["development", "production", "test"] = Field(
+        default="development",
+        description="Environment: development, production, or test",
+    )
 
     # Storage
     qdrant_url: str = Field(
@@ -296,13 +311,16 @@ class Settings(BaseSettings):
     )
 
     # Authentication
-    auth_enabled: bool = Field(
-        default=False,
-        description="Enable Bearer token authentication",
+    auth_enabled: bool | None = Field(
+        default=None,
+        description=(
+            "Enable Bearer token authentication. "
+            "If not set, defaults to True in production, False otherwise."
+        ),
     )
     auth_secret_key: str = Field(
         default="engram-dev-secret-key-change-in-production",
-        description="Secret key for token validation (HMAC)",
+        description="Secret key for token validation (HMAC). MUST be changed in production.",
     )
     auth_algorithm: str = Field(
         default="HS256",
@@ -313,6 +331,53 @@ class Settings(BaseSettings):
         ge=1,
         description="Token expiration time in minutes",
     )
+
+    # Constant for detecting default secret
+    _DEFAULT_SECRET_KEY: str = "engram-dev-secret-key-change-in-production"
+
+    @model_validator(mode="after")
+    def validate_security_settings(self) -> "Settings":
+        """Validate security settings based on environment.
+
+        - In production, using the default secret key raises an error
+        - In production, disabling auth logs a warning
+        - Resolves auth_enabled default based on environment
+        """
+        is_production = self.env == "production"
+
+        # Resolve auth_enabled default based on environment
+        if self.auth_enabled is None:
+            # In production, auth is enabled by default
+            # In development/test, auth is disabled by default
+            object.__setattr__(self, "auth_enabled", is_production)
+
+        # Production security checks
+        if is_production:
+            # Fail-fast if using default secret in production
+            if self.auth_secret_key == self._DEFAULT_SECRET_KEY:
+                raise ValueError(
+                    "ENGRAM_AUTH_SECRET_KEY must be set to a secure value in production. "
+                    'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+                )
+
+            # Warn if auth is explicitly disabled in production
+            if not self.auth_enabled:
+                warnings.warn(
+                    "Authentication is disabled in production environment. "
+                    "This is a security risk. Set ENGRAM_AUTH_ENABLED=true to enable.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                logger.warning("Authentication disabled in production - this is a security risk")
+
+        return self
+
+    @property
+    def is_auth_enabled(self) -> bool:
+        """Get resolved auth_enabled value (always bool, never None)."""
+        if self.auth_enabled is None:
+            return self.env == "production"
+        return self.auth_enabled
 
     # Rate Limiting
     rate_limit_enabled: bool = Field(

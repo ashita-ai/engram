@@ -149,3 +149,72 @@ class TestSettings:
         assert settings.llm_provider == "openai"
         assert settings.llm_model == "gpt-4o-mini"
         assert settings.consolidation_model == "openai:gpt-4o-mini"
+
+
+class TestSecuritySettings:
+    """Tests for security-related settings validation."""
+
+    def test_auth_disabled_by_default_in_development(self):
+        """Auth should be disabled by default in development environment."""
+        settings = Settings(env="development", _env_file=None)
+        assert settings.is_auth_enabled is False
+
+    def test_auth_enabled_by_default_in_production(self):
+        """Auth should be enabled by default in production environment."""
+        # Must provide a custom secret key in production
+        settings = Settings(
+            env="production",
+            auth_secret_key="custom-secure-key-for-testing-only",
+            _env_file=None,
+        )
+        assert settings.is_auth_enabled is True
+
+    def test_production_requires_custom_secret_key(self):
+        """Production environment should reject default secret key."""
+        with pytest.raises(ValueError, match="ENGRAM_AUTH_SECRET_KEY must be set"):
+            Settings(env="production", _env_file=None)
+
+    def test_production_allows_custom_secret_key(self):
+        """Production environment should accept custom secret key."""
+        settings = Settings(
+            env="production",
+            auth_secret_key="my-super-secure-secret-key-32bytes",
+            _env_file=None,
+        )
+        assert settings.auth_secret_key == "my-super-secure-secret-key-32bytes"
+
+    def test_auth_can_be_explicitly_disabled_in_production(self):
+        """Auth can be explicitly disabled in production (with warning)."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            settings = Settings(
+                env="production",
+                auth_enabled=False,
+                auth_secret_key="custom-secret-key-for-testing",
+                _env_file=None,
+            )
+            assert settings.is_auth_enabled is False
+            # Should have warned about disabled auth
+            assert len(w) == 1
+            assert "Authentication is disabled in production" in str(w[0].message)
+
+    def test_auth_can_be_explicitly_enabled_in_development(self):
+        """Auth can be explicitly enabled in development."""
+        settings = Settings(
+            env="development",
+            auth_enabled=True,
+            _env_file=None,
+        )
+        assert settings.is_auth_enabled is True
+
+    def test_env_defaults_to_development(self):
+        """Environment should default to development."""
+        settings = Settings(_env_file=None)
+        assert settings.env == "development"
+
+    def test_test_environment_disables_auth_by_default(self):
+        """Test environment should disable auth by default."""
+        settings = Settings(env="test", _env_file=None)
+        assert settings.is_auth_enabled is False
