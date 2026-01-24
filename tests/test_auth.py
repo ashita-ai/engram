@@ -9,7 +9,7 @@ from engram.api.auth import (
     RateLimiter,
     RateLimitInfo,
     TokenValidator,
-    reset_rate_limiter,
+    reset_auth_singletons,
 )
 from engram.exceptions import AuthenticationError, RateLimitError
 
@@ -184,19 +184,42 @@ class TestAuthenticatedUser:
 
 
 class TestGlobalSingletons:
-    """Tests for global singleton behavior."""
+    """Tests for singleton behavior using lru_cache."""
 
     def setup_method(self):
         """Reset singletons before each test."""
-        reset_rate_limiter()
+        reset_auth_singletons()
 
-    def test_reset_rate_limiter(self):
-        """reset_rate_limiter should clear the singleton."""
+    def test_reset_auth_singletons(self):
+        """reset_auth_singletons should clear the cached instances."""
         from engram.api.auth import get_rate_limiter
 
         limiter1 = get_rate_limiter()
-        reset_rate_limiter()
+        reset_auth_singletons()
         limiter2 = get_rate_limiter()
 
-        # Should be different instances
+        # Should be different instances after cache clear
         assert limiter1 is not limiter2
+
+    def test_token_validator_singleton(self):
+        """get_token_validator should return same instance for same key."""
+        from engram.api.auth import get_token_validator
+
+        validator1 = get_token_validator("secret-key")
+        validator2 = get_token_validator("secret-key")
+
+        # Should be same instance (cached)
+        assert validator1 is validator2
+
+    def test_token_validator_different_keys(self):
+        """get_token_validator should return different instances for different keys."""
+        from engram.api.auth import get_token_validator
+
+        # Clear cache first
+        reset_auth_singletons()
+
+        validator1 = get_token_validator("secret-key-1")
+        validator2 = get_token_validator("secret-key-2")
+
+        # Should be different instances (different cache keys)
+        assert validator1 is not validator2

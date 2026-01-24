@@ -166,11 +166,16 @@ class TestGetProvenance:
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
         settings = Settings(openai_api_key="sk-test-dummy-key")
+        workflow_backend = AsyncMock()
 
-        return EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        return EngramService.model_construct(
             storage=storage,
             embedder=embedder,
             settings=settings,
+            workflow_backend=workflow_backend,
+            _working_memory=[],
+            _conflicts={},
         )
 
     @pytest.mark.asyncio
@@ -312,11 +317,16 @@ class TestProvenanceTimeline:
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
         settings = Settings(openai_api_key="sk-test-dummy-key")
+        workflow_backend = AsyncMock()
 
-        return EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        return EngramService.model_construct(
             storage=storage,
             embedder=embedder,
             settings=settings,
+            workflow_backend=workflow_backend,
+            _working_memory=[],
+            _conflicts={},
         )
 
     @pytest.mark.asyncio

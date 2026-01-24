@@ -101,10 +101,16 @@ class TestEncodeRecallWorkflow:
     def service(self, mock_storage, mock_embedder):
         """Create a service with mock dependencies."""
         settings = Settings(openai_api_key="sk-test-dummy")
-        return EngramService(
+        workflow_backend = AsyncMock()
+
+        # Use model_construct to bypass Pydantic validation for mocks
+        return EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=settings,
+            workflow_backend=workflow_backend,
+            _working_memory=[],
+            _conflicts={},
         )
 
     @pytest.mark.asyncio
@@ -249,10 +255,16 @@ class TestExtractionIntegration:
         embedder.embed_batch = AsyncMock(side_effect=lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
 
         settings = Settings(openai_api_key="sk-test-dummy")
-        return EngramService(
+        workflow_backend = AsyncMock()
+
+        # Use model_construct to bypass Pydantic validation for mocks
+        return EngramService.model_construct(
             storage=storage,
             embedder=embedder,
             settings=settings,
+            workflow_backend=workflow_backend,
+            _working_memory=[],
+            _conflicts={},
         )
 
     @pytest.mark.asyncio
@@ -713,10 +725,14 @@ class TestBiTemporalRecall:
         """Test that recall_at filters memories by the as_of timestamp."""
         from datetime import datetime, timedelta
 
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         now = datetime.now()
@@ -737,10 +753,14 @@ class TestBiTemporalRecall:
         """Test that recall_at with future timestamp returns all memories."""
         from datetime import datetime, timedelta
 
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         # Query as of tomorrow (should get both)
@@ -762,10 +782,14 @@ class TestBiTemporalRecall:
         """Test that recall_at does NOT include working memory (by design)."""
         from datetime import datetime
 
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         # recall_at should not have include_working parameter - it's bi-temporal
@@ -840,10 +864,14 @@ class TestVerifyWorkflow:
     @pytest.mark.asyncio
     async def test_verify_structured_success(self, mock_storage, mock_embedder):
         """Test verifying a structured memory traces back to its source episode."""
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         # Encode an email to get structured memory
@@ -872,10 +900,14 @@ class TestVerifyWorkflow:
         """Test verify raises NotFoundError for non-existent structured memory."""
         from engram.exceptions import NotFoundError
 
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         with pytest.raises(NotFoundError, match="StructuredMemory not found"):
@@ -886,10 +918,14 @@ class TestVerifyWorkflow:
         """Test verify raises ValidationError for invalid memory ID format."""
         from engram.exceptions import ValidationError
 
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         with pytest.raises(ValidationError, match="Cannot determine memory type"):
@@ -968,10 +1004,14 @@ class TestFreshnessHints:
         """Test that recall returns staleness information for memories."""
         from engram.models import Staleness
 
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         # Encode a message
@@ -1004,10 +1044,14 @@ class TestFreshnessHints:
     async def test_recall_returns_different_memory_types(self, mock_storage, mock_embedder):
         """Test that recall returns multiple memory types."""
 
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         # Encode a message
@@ -1034,10 +1078,14 @@ class TestFreshnessHints:
     @pytest.mark.asyncio
     async def test_working_memory_included_in_recall(self, mock_storage, mock_embedder):
         """Test that working memory is included in recall results."""
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         # Encode a message (adds to working memory)
@@ -1059,10 +1107,14 @@ class TestFreshnessHints:
     @pytest.mark.asyncio
     async def test_recall_freshness_modes(self, mock_storage, mock_embedder):
         """Test that freshness modes work as expected."""
-        service = EngramService(
+        # Use model_construct to bypass Pydantic validation for mocks
+        service = EngramService.model_construct(
             storage=mock_storage,
             embedder=mock_embedder,
             settings=Settings(_env_file=None),
+            workflow_backend=AsyncMock(),
+            _working_memory=[],
+            _conflicts={},
         )
 
         # Encode a message

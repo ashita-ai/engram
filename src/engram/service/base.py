@@ -29,8 +29,9 @@ Example:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any, Self
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
 from engram.config import Settings
 from engram.embeddings import Embedder, get_embedder
@@ -48,12 +49,8 @@ from .encode import EncodeMixin
 from .operations import OperationsMixin
 from .recall import RecallMixin
 
-if TYPE_CHECKING:
-    pass
 
-
-@dataclass
-class EngramService(EncodeMixin, RecallMixin, OperationsMixin, ConflictMixin):
+class EngramService(BaseModel, EncodeMixin, RecallMixin, OperationsMixin, ConflictMixin):
     """High-level Engram service for encoding and recalling memories.
 
     This service provides a simple interface for:
@@ -74,21 +71,28 @@ class EngramService(EncodeMixin, RecallMixin, OperationsMixin, ConflictMixin):
         workflow_backend: Backend for durable workflow execution (optional, defaults to InProcessBackend).
     """
 
-    storage: EngramStorage
-    embedder: Embedder
-    settings: Settings
-    workflow_backend: WorkflowBackend | None = field(default=None)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    storage: EngramStorage = Field(description="Storage backend (Qdrant)")
+    embedder: Embedder = Field(description="Embedding provider")
+    settings: Settings = Field(description="Configuration settings")
+    workflow_backend: WorkflowBackend | None = Field(
+        default=None, description="Backend for durable workflow execution"
+    )
+
+    # Private attributes: not part of the model, not serialized
     # Working memory: in-memory episodes for current session (not persisted separately)
-    _working_memory: list[Episode] = field(default_factory=list, init=False, repr=False)
+    _working_memory: list[Episode] = PrivateAttr(default_factory=list)
 
     # Detected conflicts: in-memory storage for conflict detection results
-    _conflicts: dict[str, ConflictDetection] = field(default_factory=dict, init=False, repr=False)
+    _conflicts: dict[str, ConflictDetection] = PrivateAttr(default_factory=dict)
 
-    def __post_init__(self) -> None:
-        """Initialize optional fields after dataclass construction."""
+    @model_validator(mode="after")
+    def set_default_workflow_backend(self) -> Self:
+        """Initialize optional fields after model construction."""
         if self.workflow_backend is None:
-            self.workflow_backend = InProcessBackend(self.settings)
+            object.__setattr__(self, "workflow_backend", InProcessBackend(self.settings))
+        return self
 
     @classmethod
     def create(cls, settings: Settings | None = None) -> EngramService:

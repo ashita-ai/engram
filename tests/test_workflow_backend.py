@@ -199,18 +199,27 @@ class TestEngramServiceWithBackend:
     """Tests for EngramService workflow backend integration."""
 
     def test_service_creates_default_backend(self):
-        """Test that EngramService creates InProcessBackend by default."""
+        """Test that EngramService creates InProcessBackend by default when workflow_backend is None."""
         from unittest.mock import AsyncMock
 
         from engram.service import EngramService
 
         settings = Settings(openai_api_key="sk-test-dummy-key")
-        service = EngramService(
+
+        # Use model_construct to bypass Pydantic type validation for mocks
+        # Then manually call the model_validator to test the default backend creation
+        service = EngramService.model_construct(
             storage=AsyncMock(),
             embedder=AsyncMock(),
             settings=settings,
+            workflow_backend=None,
+            _working_memory=[],
+            _conflicts={},
         )
-        # After __post_init__, workflow_backend should be set
+        # Manually call the validator to simulate what would happen during normal construction
+        service = service.set_default_workflow_backend()
+
+        # After model_validator runs, workflow_backend should be set
         assert service.workflow_backend is not None
         assert isinstance(service.workflow_backend, InProcessBackend)
 
@@ -225,11 +234,15 @@ class TestEngramServiceWithBackend:
             openai_api_key="sk-test-dummy-key",
         )
         custom_backend = DBOSBackend(settings)
-        service = EngramService(
+
+        # Use model_construct to bypass Pydantic type validation for mocks
+        service = EngramService.model_construct(
             storage=AsyncMock(),
             embedder=AsyncMock(),
             settings=settings,
             workflow_backend=custom_backend,
+            _working_memory=[],
+            _conflicts={},
         )
         assert service.workflow_backend is custom_backend
 
