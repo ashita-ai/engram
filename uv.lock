@@ -999,6 +999,9 @@ google = [
 groq = [
     { name = "groq" },
 ]
+mcp = [
+    { name = "mcp" },
+]
 prefect = [
     { name = "prefect" },
 ]
@@ -1030,6 +1033,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.25" },
     { name = "langdetect", specifier = ">=1.0.9" },
     { name = "marimo", marker = "extra == 'demo'", specifier = ">=0.1" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8" },
     { name = "nameparser", specifier = ">=1.1.3" },
     { name = "openai", specifier = ">=1.0" },
@@ -1054,7 +1058,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.20" },
     { name = "validators", specifier = ">=0.20" },
 ]
-provides-extras = ["dev", "demo", "anthropic", "google", "groq", "cohere", "sentence-transformers", "prefect", "all"]
+provides-extras = ["dev", "demo", "anthropic", "google", "groq", "cohere", "sentence-transformers", "prefect", "mcp", "all"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pre-commit", specifier = ">=4.5.1" }]

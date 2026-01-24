@@ -78,6 +78,9 @@ sentence-transformers = ["sentence-transformers>=2.3"]
 # Durable execution backends
 prefect = ["prefect>=2.0"]
 
+# MCP server for Claude Code integration
+mcp = ["mcp>=1.2.0"]
+
 # All providers
 all = [
     "anthropic>=0.18",
