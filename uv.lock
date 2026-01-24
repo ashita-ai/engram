@@ -1005,6 +1005,9 @@ mcp = [
 prefect = [
     { name = "prefect" },
 ]
+redis = [
+    { name = "redis" },
+]
 sentence-transformers = [
     { name = "sentence-transformers" },
 ]
@@ -1050,6 +1053,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "python-stdnum", specifier = ">=2.2" },
     { name = "qdrant-client", specifier = ">=1.7" },
+    { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.2" },
     { name = "sentence-transformers", marker = "extra == 'all'", specifier = ">=2.3" },
     { name = "sentence-transformers", marker = "extra == 'sentence-transformers'", specifier = ">=2.3" },
@@ -1058,7 +1062,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.20" },
     { name = "validators", specifier = ">=0.20" },
 ]
-provides-extras = ["dev", "demo", "anthropic", "google", "groq", "cohere", "sentence-transformers", "prefect", "mcp", "all"]
+provides-extras = ["dev", "demo", "anthropic", "google", "groq", "cohere", "sentence-transformers", "prefect", "mcp", "redis", "all"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pre-commit", specifier = ">=4.5.1" }]
