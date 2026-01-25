@@ -151,14 +151,27 @@ class StorageBase:
         return f"{h[:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
 
     async def _ensure_collections(self) -> None:
-        """Ensure all required collections exist with proper schemas."""
+        """Ensure all required collections exist with proper schemas.
+
+        Uses check-and-create with exception handling to handle race conditions
+        when multiple instances start concurrently. If a collection already exists
+        when we try to create it (race condition), we catch the exception and
+        continue, since the collection exists (which is what we wanted).
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        collections = await self.client.get_collections()
+        existing = {c.name for c in collections.collections}
+
         for memory_type in COLLECTION_NAMES:
             collection_name = self._collection_name(memory_type)
 
-            collections = await self.client.get_collections()
-            existing = [c.name for c in collections.collections]
+            if collection_name in existing:
+                continue
 
-            if collection_name not in existing:
+            try:
                 await self.client.create_collection(
                     collection_name=collection_name,
                     vectors_config=models.VectorParams(
@@ -167,6 +180,17 @@ class StorageBase:
                     ),
                 )
                 await self._create_indexes(collection_name)
+            except Exception as e:
+                # Handle race condition: collection may have been created by another instance
+                # Check if it's the "already exists" error from Qdrant
+                error_msg = str(e).lower()
+                if "already exists" in error_msg or "conflict" in error_msg:
+                    logger.debug(
+                        f"Collection {collection_name} already exists (created by another instance)"
+                    )
+                else:
+                    # Re-raise unexpected errors
+                    raise
 
     async def _create_indexes(self, collection_name: str) -> None:
         """Create payload indexes for efficient filtering."""

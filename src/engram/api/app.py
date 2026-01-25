@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from engram.config import Settings
@@ -78,6 +79,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Run with: uvicorn engram.api:app --reload
         ```
     """
+    if settings is None:
+        settings = Settings()
+
     app = FastAPI(
         title="Engram",
         description="Memory you can trust. A memory system for AI applications.",
@@ -86,6 +90,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
     )
+
+    # Add CORS middleware if enabled
+    if settings.cors_enabled:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_allow_origins,
+            allow_credentials=settings.cors_allow_credentials,
+            allow_methods=settings.cors_allow_methods,
+            allow_headers=settings.cors_allow_headers,
+            max_age=settings.cors_max_age,
+        )
 
     # Register exception handlers
     @app.exception_handler(ValidationError)

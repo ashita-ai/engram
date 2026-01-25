@@ -1082,3 +1082,101 @@ class TestImportanceCalculation:
             base_importance=0.0,  # Start at 0
         )
         assert importance == 0.0  # 0.0 - 0.1 = -0.1 -> clamped to 0.0
+
+
+class TestWorkingMemoryLimit:
+    """Tests for working memory size limit functionality (#169)."""
+
+    @pytest.fixture
+    def mock_service_with_limit(self):
+        """Create a service with a small working memory limit for testing."""
+        storage = AsyncMock()
+        storage.store_episode = AsyncMock(return_value="ep_123")
+        storage.update_episode = AsyncMock()
+        storage.store_structured = AsyncMock(return_value="struct_123")
+        storage.log_audit = AsyncMock()
+        storage.search_episodes.return_value = []
+
+        embedder = AsyncMock()
+        embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+
+        # Small limit for testing (min is 10)
+        settings = Settings(openai_api_key="sk-test-dummy-key", working_memory_max_size=10)
+        workflow_backend = AsyncMock()
+
+        return EngramService.model_construct(
+            storage=storage,
+            embedder=embedder,
+            settings=settings,
+            workflow_backend=workflow_backend,
+            _working_memory=[],
+            _conflicts={},
+        )
+
+    @pytest.mark.asyncio
+    async def test_working_memory_enforces_limit(self, mock_service_with_limit):
+        """Working memory should evict oldest entries when limit exceeded."""
+        # Add 15 episodes (limit is 10)
+        for i in range(15):
+            await mock_service_with_limit.encode(
+                content=f"Episode {i}",
+                role="user",
+                user_id="user_123",
+            )
+
+        working = mock_service_with_limit.get_working_memory()
+        # Should only have 10 episodes (oldest 5 evicted)
+        assert len(working) == 10
+        # Should be the 10 most recent (FIFO eviction)
+        assert working[0].content == "Episode 5"
+        assert working[9].content == "Episode 14"
+
+    @pytest.mark.asyncio
+    async def test_working_memory_preserves_order(self, mock_service_with_limit):
+        """Remaining episodes should maintain chronological order."""
+        for i in range(20):
+            await mock_service_with_limit.encode(
+                content=f"Episode {i}",
+                role="user",
+                user_id="user_123",
+            )
+
+        working = mock_service_with_limit.get_working_memory()
+        contents = [ep.content for ep in working]
+        # Should have episodes 10-19 in order
+        expected = [f"Episode {i}" for i in range(10, 20)]
+        assert contents == expected
+
+    def test_enforce_limit_method_directly(self, mock_service_with_limit):
+        """_enforce_working_memory_limit should work correctly when called directly."""
+        # Add episodes directly to working memory
+        for i in range(15):
+            episode = Episode(
+                content=f"Episode {i}",
+                role="user",
+                user_id="user_123",
+                embedding=[0.1, 0.2, 0.3],
+            )
+            mock_service_with_limit._working_memory.append(episode)
+
+        # Call enforce limit
+        mock_service_with_limit._enforce_working_memory_limit()
+
+        assert len(mock_service_with_limit._working_memory) == 10
+        assert mock_service_with_limit._working_memory[0].content == "Episode 5"
+        assert mock_service_with_limit._working_memory[9].content == "Episode 14"
+
+    def test_under_limit_no_eviction(self, mock_service_with_limit):
+        """Episodes under limit should not be evicted."""
+        for i in range(8):
+            episode = Episode(
+                content=f"Episode {i}",
+                role="user",
+                user_id="user_123",
+                embedding=[0.1, 0.2, 0.3],
+            )
+            mock_service_with_limit._working_memory.append(episode)
+
+        mock_service_with_limit._enforce_working_memory_limit()
+
+        assert len(mock_service_with_limit._working_memory) == 8

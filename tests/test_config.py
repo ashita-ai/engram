@@ -286,3 +286,113 @@ class TestStorageSettings:
         with patch.dict(os.environ, {"ENGRAM_STORAGE_MAX_SCROLL_LIMIT": "2500"}):
             settings = Settings()
             assert settings.storage_max_scroll_limit == 2500
+
+
+class TestCORSSettings:
+    """Tests for CORS middleware settings (#173)."""
+
+    def test_cors_enabled_by_default(self):
+        """CORS should be enabled by default."""
+        settings = Settings(_env_file=None)
+        assert settings.cors_enabled is True
+
+    def test_cors_default_origins(self):
+        """Default CORS origins should allow all (dev mode)."""
+        settings = Settings(_env_file=None)
+        assert settings.cors_allow_origins == ["*"]
+
+    def test_cors_custom_origins(self):
+        """Custom CORS origins should be accepted."""
+        settings = Settings(
+            cors_allow_origins=["https://app.example.com", "https://admin.example.com"],
+            _env_file=None,
+        )
+        assert settings.cors_allow_origins == [
+            "https://app.example.com",
+            "https://admin.example.com",
+        ]
+
+    def test_cors_default_methods(self):
+        """Default CORS methods should include common HTTP methods."""
+        settings = Settings(_env_file=None)
+        assert "GET" in settings.cors_allow_methods
+        assert "POST" in settings.cors_allow_methods
+        assert "DELETE" in settings.cors_allow_methods
+        assert "OPTIONS" in settings.cors_allow_methods
+
+    def test_cors_credentials_default_false(self):
+        """Credentials should be disabled by default."""
+        settings = Settings(_env_file=None)
+        assert settings.cors_allow_credentials is False
+
+    def test_cors_max_age_default(self):
+        """Default CORS max age should be 600 seconds."""
+        settings = Settings(_env_file=None)
+        assert settings.cors_max_age == 600
+
+    def test_cors_max_age_bounds(self):
+        """CORS max age must be between 0 and 86400."""
+        # Test upper bound
+        with pytest.raises(ValidationError):
+            Settings(cors_max_age=100000, _env_file=None)
+
+    def test_cors_can_be_disabled(self):
+        """CORS can be explicitly disabled."""
+        settings = Settings(cors_enabled=False, _env_file=None)
+        assert settings.cors_enabled is False
+
+
+class TestPhoneSettings:
+    """Tests for phone extraction settings (#171)."""
+
+    def test_phone_default_region(self):
+        """Default phone region should be US."""
+        settings = Settings(_env_file=None)
+        assert settings.phone_default_region == "US"
+
+    def test_phone_region_custom(self):
+        """Custom phone region should be accepted."""
+        settings = Settings(phone_default_region="GB", _env_file=None)
+        assert settings.phone_default_region == "GB"
+
+    def test_phone_region_length(self):
+        """Phone region must be exactly 2 characters."""
+        with pytest.raises(ValidationError):
+            Settings(phone_default_region="USA", _env_file=None)
+        with pytest.raises(ValidationError):
+            Settings(phone_default_region="U", _env_file=None)
+
+    def test_phone_region_from_env(self):
+        """ENGRAM_PHONE_DEFAULT_REGION should override default."""
+        with patch.dict(os.environ, {"ENGRAM_PHONE_DEFAULT_REGION": "DE"}):
+            settings = Settings()
+            assert settings.phone_default_region == "DE"
+
+
+class TestWorkingMemorySettings:
+    """Tests for working memory size limit settings (#169)."""
+
+    def test_working_memory_max_size_default(self):
+        """Default working memory max size should be 1000."""
+        settings = Settings(_env_file=None)
+        assert settings.working_memory_max_size == 1000
+
+    def test_working_memory_max_size_custom(self):
+        """Custom working memory max size should be accepted."""
+        settings = Settings(working_memory_max_size=500, _env_file=None)
+        assert settings.working_memory_max_size == 500
+
+    def test_working_memory_max_size_bounds(self):
+        """Working memory max size must be between 10 and 10000."""
+        # Test lower bound
+        with pytest.raises(ValidationError):
+            Settings(working_memory_max_size=5, _env_file=None)
+        # Test upper bound
+        with pytest.raises(ValidationError):
+            Settings(working_memory_max_size=20000, _env_file=None)
+
+    def test_working_memory_max_size_from_env(self):
+        """ENGRAM_WORKING_MEMORY_MAX_SIZE should override default."""
+        with patch.dict(os.environ, {"ENGRAM_WORKING_MEMORY_MAX_SIZE": "2000"}):
+            settings = Settings()
+            assert settings.working_memory_max_size == 2000

@@ -5,10 +5,10 @@ Provides vector similarity search methods for all memory types.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from pydantic import BaseModel, ConfigDict, Field
 from qdrant_client import models
 
 if TYPE_CHECKING:
@@ -24,17 +24,21 @@ if TYPE_CHECKING:
 MemoryT = TypeVar("MemoryT")
 
 
-@dataclass
-class ScoredResult(Generic[MemoryT]):
+class ScoredResult(BaseModel, Generic[MemoryT]):
     """A search result with similarity score.
 
     Attributes:
         memory: The matched memory object.
-        score: Similarity score from vector search (0.0-1.0).
+        score: Similarity score from vector search (typically 0.0-1.0, but may
+            slightly exceed due to floating-point precision in vector DBs).
     """
 
-    memory: MemoryT
-    score: float
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    memory: MemoryT = Field(description="The matched memory object")
+    # Note: ge/le bounds removed since vector DBs can return scores slightly
+    # outside [0, 1] due to floating-point precision (e.g., 1.0000000051628855)
+    score: float = Field(description="Similarity score from vector search")
 
 
 class SearchMixin:
@@ -198,7 +202,7 @@ class SearchMixin:
             limit=fetch_limit,
         )
 
-        scored_results = [
+        scored_results: list[ScoredResult[SemanticMemory]] = [
             ScoredResult(
                 memory=self._payload_to_memory(r.payload, SemanticMemory),
                 score=r.score,
@@ -293,7 +297,7 @@ class SearchMixin:
             limit=limit,
         )
 
-        scored_results = [
+        scored_results: list[ScoredResult[ProceduralMemory]] = [
             ScoredResult(
                 memory=self._payload_to_memory(r.payload, ProceduralMemory),
                 score=r.score,
