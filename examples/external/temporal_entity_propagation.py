@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demo script for Phase 7 advanced memory features.
+"""Temporal reasoning, entity resolution, and confidence propagation demo.
 
 Demonstrates:
 1. Temporal Reasoning - Detecting state changes from text
@@ -7,6 +7,9 @@ Demonstrates:
 3. Confidence Propagation - PageRank-style confidence spreading
 
 Requires OPENAI_API_KEY or ANTHROPIC_API_KEY for LLM features.
+
+Usage:
+    uv run python examples/external/temporal_entity_propagation.py
 """
 
 import asyncio
@@ -321,10 +324,10 @@ async def demo_confidence_propagation() -> None:
 
 
 async def main() -> None:
-    """Run all Phase 7 demos."""
+    """Run temporal reasoning, entity resolution, and confidence propagation demos."""
     print()
     print("╔" + "═" * 58 + "╗")
-    print("║" + " PHASE 7: ADVANCED MEMORY FEATURES DEMO ".center(58) + "║")
+    print("║" + " TEMPORAL, ENTITY & PROPAGATION DEMO ".center(58) + "║")
     print("╚" + "═" * 58 + "╝")
 
     await demo_temporal_reasoning()
@@ -333,7 +336,7 @@ async def main() -> None:
 
     print()
     print_section("DEMO COMPLETE")
-    print("Phase 7 features demonstrated:")
+    print("Features demonstrated:")
     print("  ✓ Temporal Reasoning - State change detection")
     print("  ✓ Entity Resolution - Extraction and alias management")
     print("  ✓ Confidence Propagation - PageRank-style spreading")

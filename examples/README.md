@@ -6,15 +6,18 @@ Comprehensive examples demonstrating all of Engram's features.
 
 ```
 examples/
-├── local/              # No external dependencies
-│   ├── extraction.py   # Pattern extraction (email, phone, URL)
-│   ├── confidence.py   # Confidence scoring system
-│   └── memory_types.py # All 5 memory types explained
-└── external/           # Requires Qdrant + API keys
-    ├── quickstart.py   # Core encode/recall/verify workflow
-    ├── structured.py   # StructuredMemory + LLM enrichment
-    ├── advanced.py     # Multi-hop, negation filtering
-    └── consolidation.py # LLM consolidation + linking
+├── local/                            # No external dependencies
+│   ├── extraction.py                 # Pattern extraction (email, phone, URL)
+│   ├── confidence.py                 # Confidence scoring system
+│   └── memory_types.py               # All 5 memory types explained
+└── external/                         # Requires Qdrant + API keys
+    ├── quickstart.py                 # Core encode/recall/verify workflow
+    ├── structured.py                 # StructuredMemory + LLM enrichment
+    ├── advanced.py                   # Multi-hop, negation filtering
+    ├── consolidation.py              # LLM consolidation + linking
+    ├── query_contradiction.py        # Query expansion, diversity, contradiction detection
+    ├── link_discovery_demo.py        # LLM relationship discovery between memories
+    └── temporal_entity_propagation.py # Temporal reasoning, entity resolution, confidence propagation
 ```
 
 ## Quick Start
@@ -143,6 +146,32 @@ LLM-powered semantic extraction:
 - Incremental consolidation
 - Verify derived memories back to sources
 
+### Query Enhancement & Contradiction Detection
+**`external/query_contradiction.py`**
+
+Query improvement and conflict resolution:
+- **Query Expansion** - LLM expands queries with related terms for better recall
+- **Diversity Sampling** - MMR (Maximal Marginal Relevance) reranking for varied results
+- **Contradiction Detection** - Find and resolve conflicts between memories
+- **Memory Update** - Correct/update existing memories (except immutable episodic)
+
+### Link Discovery
+**`external/link_discovery_demo.py`**
+
+LLM-powered relationship discovery:
+- Discover links between new and existing memories
+- Relationship types: related, causal, temporal, contradicts, elaborates, supersedes, generalizes, exemplifies
+- Confidence scoring for discovered links
+- Suggested memory evolutions
+
+### Temporal, Entity & Propagation
+**`external/temporal_entity_propagation.py`**
+
+Advanced memory features (no Qdrant required):
+- **Temporal Reasoning** - Detect state changes from natural language (switched, started, stopped, upgraded)
+- **Entity Resolution** - Create canonical entities with alias management and merging
+- **Confidence Propagation** - PageRank-style confidence spreading across memory networks
+
 ---
 
 ## Feature Coverage
@@ -165,6 +194,14 @@ LLM-powered semantic extraction:
 | LLM consolidation | - | `consolidation.py` |
 | Memory linking | - | `consolidation.py` |
 | Consolidation strength | - | `consolidation.py` |
+| Query expansion | - | `query_contradiction.py` |
+| Diversity sampling (MMR) | - | `query_contradiction.py` |
+| Contradiction detection | - | `query_contradiction.py` |
+| Memory update | - | `query_contradiction.py` |
+| LLM link discovery | - | `link_discovery_demo.py` |
+| Temporal reasoning | - | `temporal_entity_propagation.py` |
+| Entity resolution | - | `temporal_entity_propagation.py` |
+| Confidence propagation | - | `temporal_entity_propagation.py` |
 
 ---
 
@@ -179,3 +216,6 @@ LLM-powered semantic extraction:
 | external/structured.py | ✅ | ✅ |
 | external/advanced.py | ✅ | ✅ |
 | external/consolidation.py | ✅ | ✅ |
+| external/query_contradiction.py | ✅ | ✅ |
+| external/link_discovery_demo.py | ✅ | ✅ |
+| external/temporal_entity_propagation.py | - | ✅ |
