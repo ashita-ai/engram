@@ -8,6 +8,7 @@ from __future__ import annotations
 import phonenumbers
 from phonenumbers import Leniency, PhoneNumberFormat
 
+from engram.config import settings
 from engram.models import Episode
 
 from .base import Extractor
@@ -31,14 +32,15 @@ class PhoneExtractor(Extractor):
 
     name: str = "phone"
 
-    def __init__(self, default_region: str = "US") -> None:
+    def __init__(self, default_region: str | None = None) -> None:
         """Initialize phone extractor.
 
         Args:
             default_region: Default region for parsing numbers without country code.
                            Uses ISO 3166-1 alpha-2 codes (e.g., "US", "GB", "DE").
+                           If not provided, uses ENGRAM_PHONE_DEFAULT_REGION setting.
         """
-        self.default_region = default_region
+        self.default_region = default_region or settings.phone_default_region
 
     def extract(self, episode: Episode) -> list[str]:
         """Extract phone numbers from episode content.

@@ -131,8 +131,9 @@ class EncodeMixin:
         # Store episode
         await self.storage.store_episode(episode)
 
-        # Add to working memory for current session
+        # Add to working memory for current session (with size limit enforcement)
         self._working_memory.append(episode)
+        self._enforce_working_memory_limit()
 
         # Create StructuredMemory (always, fast mode by default)
         structured = StructuredMemory.from_episode_fast(
@@ -443,6 +444,25 @@ class EncodeMixin:
                 )
         except Exception as e:
             logger.warning(f"High-importance consolidation failed: {e}")
+
+    def _enforce_working_memory_limit(self) -> None:
+        """Enforce the working memory size limit.
+
+        When working memory exceeds the configured limit, removes the oldest
+        episodes (FIFO) to stay within bounds. This prevents unbounded memory
+        growth in long-running sessions.
+
+        The limit is controlled by settings.working_memory_max_size.
+        """
+        max_size = self.settings.working_memory_max_size
+        if len(self._working_memory) > max_size:
+            # Remove oldest entries (FIFO eviction)
+            evicted_count = len(self._working_memory) - max_size
+            self._working_memory = self._working_memory[-max_size:]
+            logger.debug(
+                f"Working memory limit enforced: evicted {evicted_count} oldest episodes "
+                f"(max_size={max_size})"
+            )
 
 
 __all__ = ["EncodeMixin"]

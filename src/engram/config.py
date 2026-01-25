@@ -475,6 +475,63 @@ class Settings(BaseSettings):
         ),
     )
 
+    # CORS Configuration
+    cors_enabled: bool = Field(
+        default=True,
+        description="Enable CORS middleware",
+    )
+    cors_allow_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description=(
+            "List of allowed CORS origins. Use ['*'] for permissive mode (dev only). "
+            "In production, specify exact origins like ['https://app.example.com']."
+        ),
+    )
+    cors_allow_methods: list[str] = Field(
+        default_factory=lambda: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        description="Allowed HTTP methods for CORS requests",
+    )
+    cors_allow_headers: list[str] = Field(
+        default_factory=lambda: ["*"],
+        description="Allowed headers for CORS requests",
+    )
+    cors_allow_credentials: bool = Field(
+        default=False,
+        description=(
+            "Allow credentials (cookies, auth headers) in CORS requests. "
+            "Cannot be True when cors_allow_origins is ['*']."
+        ),
+    )
+    cors_max_age: int = Field(
+        default=600,
+        ge=0,
+        le=86400,
+        description="Max age (seconds) for CORS preflight cache",
+    )
+
+    # Phone Extraction Configuration
+    phone_default_region: str = Field(
+        default="US",
+        min_length=2,
+        max_length=2,
+        description=(
+            "Default region for phone number parsing (ISO 3166-1 alpha-2 code). "
+            "Used when parsing numbers without country codes."
+        ),
+    )
+
+    # Working Memory Configuration
+    working_memory_max_size: int = Field(
+        default=1000,
+        ge=10,
+        le=10000,
+        description=(
+            "Maximum number of episodes to keep in working memory. "
+            "When exceeded, oldest episodes are evicted (FIFO). "
+            "Prevents unbounded memory growth in long sessions."
+        ),
+    )
+
     model_config = {
         "env_prefix": "ENGRAM_",
         "env_file": ".env",
