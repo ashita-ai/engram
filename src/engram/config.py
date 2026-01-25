@@ -1,6 +1,7 @@
 """Configuration management for Engram."""
 
 import logging
+import secrets
 import warnings
 from typing import Literal
 
@@ -8,6 +9,21 @@ from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
+
+
+def _generate_dev_secret_key() -> str:
+    """Generate a random secret key for development use.
+
+    In development/test environments, if no secret key is provided,
+    we generate a random one at startup. This ensures:
+    1. No hardcoded secrets in source code
+    2. Tokens are invalidated on restart (acceptable for dev)
+    3. Production always requires explicit key configuration
+
+    Returns:
+        A cryptographically secure random hex string (64 characters).
+    """
+    return secrets.token_hex(32)
 
 
 class RerankWeights(BaseModel):
@@ -318,9 +334,12 @@ class Settings(BaseSettings):
             "If not set, defaults to True in production, False otherwise."
         ),
     )
-    auth_secret_key: str = Field(
-        default="engram-dev-secret-key-change-in-production",
-        description="Secret key for token validation (HMAC). MUST be changed in production.",
+    auth_secret_key: str | None = Field(
+        default=None,
+        description=(
+            "Secret key for token validation (HMAC). "
+            "REQUIRED in production. In dev/test, a random key is generated if not set."
+        ),
     )
     auth_algorithm: str = Field(
         default="HS256",
@@ -332,14 +351,15 @@ class Settings(BaseSettings):
         description="Token expiration time in minutes",
     )
 
-    # Constant for detecting default secret
-    _DEFAULT_SECRET_KEY: str = "engram-dev-secret-key-change-in-production"
+    # Runtime-generated dev secret (not from env, generated at startup if needed)
+    _runtime_dev_secret: str | None = None
 
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":
         """Validate security settings based on environment.
 
-        - In production, using the default secret key raises an error
+        - In production, a secret key MUST be explicitly provided
+        - In dev/test, a random key is generated if not provided
         - In production, disabling auth logs a warning
         - Resolves auth_enabled default based on environment
         """
@@ -353,10 +373,10 @@ class Settings(BaseSettings):
 
         # Production security checks
         if is_production:
-            # Fail-fast if using default secret in production
-            if self.auth_secret_key == self._DEFAULT_SECRET_KEY:
+            # Fail-fast if no secret key in production
+            if self.auth_secret_key is None:
                 raise ValueError(
-                    "ENGRAM_AUTH_SECRET_KEY must be set to a secure value in production. "
+                    "ENGRAM_AUTH_SECRET_KEY must be set in production. "
                     'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
                 )
 
@@ -369,6 +389,13 @@ class Settings(BaseSettings):
                     stacklevel=2,
                 )
                 logger.warning("Authentication disabled in production - this is a security risk")
+        else:
+            # Dev/test: generate a random secret if not provided
+            if self.auth_secret_key is None:
+                object.__setattr__(self, "_runtime_dev_secret", _generate_dev_secret_key())
+                logger.debug(
+                    "Generated random auth secret for development (tokens invalid after restart)"
+                )
 
         return self
 
@@ -378,6 +405,28 @@ class Settings(BaseSettings):
         if self.auth_enabled is None:
             return self.env == "production"
         return self.auth_enabled
+
+    @property
+    def effective_auth_secret_key(self) -> str:
+        """Get the effective secret key for authentication.
+
+        In production, this is always the explicitly configured key.
+        In dev/test, this returns the configured key if set, otherwise
+        the runtime-generated random key.
+
+        Returns:
+            The secret key to use for token operations.
+
+        Raises:
+            ValueError: If no secret key is available (should not happen
+                after validation).
+        """
+        if self.auth_secret_key is not None:
+            return self.auth_secret_key
+        if self._runtime_dev_secret is not None:
+            return self._runtime_dev_secret
+        # This should never happen after validation
+        raise ValueError("No auth secret key available")
 
     # Rate Limiting
     rate_limit_enabled: bool = Field(

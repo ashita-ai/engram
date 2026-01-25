@@ -251,13 +251,41 @@ class InMemoryRateLimiter(RateLimiter):
 
 
 class RedisRateLimiter(RateLimiter):
-    """Redis-based rate limiter using sliding window.
+    """Redis-based rate limiter using sliding window with atomic Lua script.
 
     Uses Redis for distributed rate limiting across multiple instances.
     Requires the 'redis' extra: uv sync --extra redis
 
     Uses a sorted set per user/endpoint with timestamps as scores.
-    Old entries are automatically removed by ZREMRANGEBYSCORE.
+    A Lua script ensures atomic check-and-increment to prevent race conditions.
+    """
+
+    # Lua script for atomic rate limit check-and-increment
+    # This prevents the TOCTOU race condition that existed with separate pipeline calls
+    _RATE_LIMIT_SCRIPT = """
+    local key = KEYS[1]
+    local limit = tonumber(ARGV[1])
+    local window_start = tonumber(ARGV[2])
+    local now = tonumber(ARGV[3])
+    local member = ARGV[4]
+    local ttl = tonumber(ARGV[5])
+
+    -- Remove entries outside the window
+    redis.call('ZREMRANGEBYSCORE', key, 0, window_start)
+
+    -- Count current entries
+    local count = redis.call('ZCARD', key)
+
+    -- Check if limit exceeded BEFORE adding
+    if count >= limit then
+        return {0, count}  -- Rejected: 0 = not allowed
+    end
+
+    -- Add the new request atomically
+    redis.call('ZADD', key, now, member)
+    redis.call('EXPIRE', key, ttl)
+
+    return {1, count}  -- Accepted: 1 = allowed, count = previous count
     """
 
     def __init__(self, redis_url: str, window_seconds: int = 60) -> None:
@@ -267,6 +295,10 @@ class RedisRateLimiter(RateLimiter):
         self.window_seconds = window_seconds
         self._redis = redis.Redis.from_url(redis_url, decode_responses=True)
         self._key_prefix = "engram:ratelimit:"
+
+        # Register the Lua script for atomic execution
+        # Cast to str to satisfy mypy (script_load returns str for sync client)
+        self._rate_limit_sha: str = str(self._redis.script_load(self._RATE_LIMIT_SCRIPT))
 
         # Test connection
         try:
@@ -288,9 +320,12 @@ class RedisRateLimiter(RateLimiter):
     ) -> RateLimitInfo:
         """Check if request is within rate limit using Redis.
 
-        Uses a sorted set with timestamps as scores. Each request adds
-        a member with the current timestamp. Old entries are removed
-        before counting.
+        Uses a Lua script for atomic check-and-increment to prevent race conditions.
+        The script:
+        1. Removes entries outside the sliding window
+        2. Counts current entries
+        3. If under limit, adds the new request atomically
+        4. Returns whether the request was allowed
 
         Args:
             user_id: User making the request.
@@ -308,20 +343,41 @@ class RedisRateLimiter(RateLimiter):
         reset_at = int(now) + self.window_seconds
         key = self._get_key(user_id, endpoint)
 
-        # Use pipeline for atomic operations
-        pipe = self._redis.pipeline()
+        # Create unique member for this request
+        member = f"{now}:{id(self)}:{hash(time.time_ns())}"
+        ttl = self.window_seconds + 10  # TTL slightly longer than window
 
-        # Remove entries outside the window
-        pipe.zremrangebyscore(key, 0, window_start)
+        # Execute atomic Lua script
+        try:
+            result = self._redis.evalsha(
+                self._rate_limit_sha,
+                1,  # Number of keys
+                key,  # KEYS[1]
+                limit,  # ARGV[1]
+                window_start,  # ARGV[2]
+                now,  # ARGV[3]
+                member,  # ARGV[4]
+                ttl,  # ARGV[5]
+            )
+        except redis.exceptions.NoScriptError:
+            # Script was flushed from cache, reload it
+            self._rate_limit_sha = str(self._redis.script_load(self._RATE_LIMIT_SCRIPT))
+            result = self._redis.evalsha(
+                self._rate_limit_sha,
+                1,
+                key,
+                limit,
+                window_start,
+                now,
+                member,
+                ttl,
+            )
 
-        # Count current entries
-        pipe.zcard(key)
+        # Result is a list of [allowed (0/1), count]
+        result_list = list(result)  # type: ignore[arg-type]
+        allowed, request_count = int(result_list[0]), int(result_list[1])
 
-        # Execute pipeline
-        results = pipe.execute()
-        request_count = results[1]
-
-        if request_count >= limit:
+        if not allowed:
             retry_after = int(reset_at - now)
             logger.warning(
                 "Rate limit exceeded",
@@ -332,14 +388,6 @@ class RedisRateLimiter(RateLimiter):
                 backend="redis",
             )
             raise RateLimitError(retry_after)
-
-        # Record this request with unique member (timestamp:random)
-        # Using timestamp as both score and part of member for uniqueness
-        member = f"{now}:{id(self)}"
-        pipe = self._redis.pipeline()
-        pipe.zadd(key, {member: now})
-        pipe.expire(key, self.window_seconds + 10)  # TTL slightly longer than window
-        pipe.execute()
 
         return RateLimitInfo(
             limit=limit,
@@ -432,7 +480,7 @@ class AuthDependency:
         if credentials is None:
             raise AuthenticationError("Missing authentication credentials")
 
-        validator = get_token_validator(self.settings.auth_secret_key)
+        validator = get_token_validator(self.settings.effective_auth_secret_key)
         user = validator.validate_token(credentials.credentials)
 
         logger.debug(

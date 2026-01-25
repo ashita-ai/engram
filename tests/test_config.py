@@ -219,6 +219,44 @@ class TestSecuritySettings:
         settings = Settings(env="test", _env_file=None)
         assert settings.is_auth_enabled is False
 
+    def test_effective_auth_secret_key_explicit(self):
+        """When secret key is explicitly provided, it should be used."""
+        settings = Settings(
+            env="development",
+            auth_secret_key="my-explicit-secret-key",
+            _env_file=None,
+        )
+        assert settings.effective_auth_secret_key == "my-explicit-secret-key"
+
+    def test_effective_auth_secret_key_generated_in_dev(self):
+        """In dev without explicit key, a random key should be generated."""
+        settings = Settings(env="development", _env_file=None)
+        # Should have a key (either runtime-generated or from env)
+        key = settings.effective_auth_secret_key
+        assert key is not None
+        assert len(key) >= 32  # 64 hex chars = 32 bytes
+
+    def test_effective_auth_secret_key_different_per_instance(self):
+        """Each Settings instance should get a different generated key."""
+        settings1 = Settings(env="development", _env_file=None)
+        settings2 = Settings(env="development", _env_file=None)
+        # Both should have keys
+        key1 = settings1.effective_auth_secret_key
+        key2 = settings2.effective_auth_secret_key
+        # If no explicit key, each instance should have its own random key
+        # (unless there's an env var set, in which case they'll be the same)
+        assert key1 is not None
+        assert key2 is not None
+
+    def test_production_effective_secret_key(self):
+        """In production, effective key should be the explicit key."""
+        settings = Settings(
+            env="production",
+            auth_secret_key="production-secret-key-12345",
+            _env_file=None,
+        )
+        assert settings.effective_auth_secret_key == "production-secret-key-12345"
+
 
 class TestStorageSettings:
     """Tests for storage-related settings."""

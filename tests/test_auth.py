@@ -240,14 +240,16 @@ class TestGlobalSingletons:
         if not REDIS_AVAILABLE:
             pytest.skip("Redis not installed")
 
+        import redis as redis_lib
+
         reset_auth_singletons()
 
         # This will fail if Redis isn't running, but tests the type selection
         try:
             limiter = get_rate_limiter(redis_url="redis://localhost:6379")
             assert isinstance(limiter, RedisRateLimiter)
-        except RuntimeError as e:
-            if "Failed to connect to Redis" in str(e):
+        except (RuntimeError, redis_lib.exceptions.ConnectionError) as e:
+            if "Failed to connect to Redis" in str(e) or "Connection refused" in str(e):
                 pytest.skip("Redis server not running")
             raise
 
@@ -267,13 +269,15 @@ class TestRedisRateLimiter:
         if not REDIS_AVAILABLE:
             pytest.skip("Redis not installed")
 
+        import redis as redis_lib
+
         try:
             limiter = RedisRateLimiter(redis_url="redis://localhost:6379", window_seconds=1)
             # Clean up any existing test keys
             limiter._redis.delete(limiter._get_key("test_user", "endpoint"))
             return limiter
-        except RuntimeError as e:
-            if "Failed to connect to Redis" in str(e):
+        except (RuntimeError, redis_lib.exceptions.ConnectionError) as e:
+            if "Failed to connect to Redis" in str(e) or "Connection refused" in str(e):
                 pytest.skip("Redis server not running")
             raise
 
