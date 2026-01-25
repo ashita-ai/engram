@@ -6,7 +6,7 @@ import pytest
 
 from engram.api.auth import (
     AuthenticatedUser,
-    RateLimiter,
+    InMemoryRateLimiter,
     RateLimitInfo,
     TokenValidator,
     reset_auth_singletons,
@@ -92,12 +92,12 @@ class TestTokenValidator:
 
 
 class TestRateLimiter:
-    """Tests for rate limiting."""
+    """Tests for in-memory rate limiting."""
 
     @pytest.fixture
     def limiter(self):
-        """Create a rate limiter with short window for testing."""
-        return RateLimiter(window_seconds=1)
+        """Create an in-memory rate limiter with short window for testing."""
+        return InMemoryRateLimiter(window_seconds=1)
 
     def test_allows_requests_under_limit(self, limiter):
         """Should allow requests under the limit."""
@@ -223,3 +223,104 @@ class TestGlobalSingletons:
 
         # Should be different instances (different cache keys)
         assert validator1 is not validator2
+
+    def test_get_rate_limiter_returns_inmemory_by_default(self):
+        """get_rate_limiter should return InMemoryRateLimiter when no redis_url."""
+        from engram.api.auth import get_rate_limiter
+
+        reset_auth_singletons()
+        limiter = get_rate_limiter()
+
+        assert isinstance(limiter, InMemoryRateLimiter)
+
+    def test_get_rate_limiter_returns_redis_when_url_provided(self):
+        """get_rate_limiter should return RedisRateLimiter when redis_url is provided."""
+        from engram.api.auth import REDIS_AVAILABLE, RedisRateLimiter, get_rate_limiter
+
+        if not REDIS_AVAILABLE:
+            pytest.skip("Redis not installed")
+
+        reset_auth_singletons()
+
+        # This will fail if Redis isn't running, but tests the type selection
+        try:
+            limiter = get_rate_limiter(redis_url="redis://localhost:6379")
+            assert isinstance(limiter, RedisRateLimiter)
+        except RuntimeError as e:
+            if "Failed to connect to Redis" in str(e):
+                pytest.skip("Redis server not running")
+            raise
+
+
+class TestRedisRateLimiter:
+    """Tests for Redis-based rate limiting.
+
+    These tests require Redis to be running. They are skipped if Redis
+    is not available or not running.
+    """
+
+    @pytest.fixture
+    def redis_limiter(self):
+        """Create a Redis rate limiter with short window for testing."""
+        from engram.api.auth import REDIS_AVAILABLE, RedisRateLimiter
+
+        if not REDIS_AVAILABLE:
+            pytest.skip("Redis not installed")
+
+        try:
+            limiter = RedisRateLimiter(redis_url="redis://localhost:6379", window_seconds=1)
+            # Clean up any existing test keys
+            limiter._redis.delete(limiter._get_key("test_user", "endpoint"))
+            return limiter
+        except RuntimeError as e:
+            if "Failed to connect to Redis" in str(e):
+                pytest.skip("Redis server not running")
+            raise
+
+    def test_redis_allows_requests_under_limit(self, redis_limiter):
+        """Should allow requests under the limit."""
+        for i in range(5):
+            info = redis_limiter.check_rate_limit("test_user", "endpoint", limit=10)
+            assert info.remaining == 10 - i - 1
+
+    def test_redis_rejects_requests_over_limit(self, redis_limiter):
+        """Should reject requests over the limit."""
+        # Make 5 requests (the limit)
+        for _ in range(5):
+            redis_limiter.check_rate_limit("test_user", "endpoint", limit=5)
+
+        # Next request should fail
+        with pytest.raises(RateLimitError) as exc_info:
+            redis_limiter.check_rate_limit("test_user", "endpoint", limit=5)
+
+        assert exc_info.value.retry_after >= 0
+
+    def test_redis_different_users_have_separate_limits(self, redis_limiter):
+        """Each user should have their own limit."""
+        # Clean up keys
+        redis_limiter._redis.delete(redis_limiter._get_key("user_1", "endpoint"))
+        redis_limiter._redis.delete(redis_limiter._get_key("user_2", "endpoint"))
+
+        # User 1 hits limit
+        for _ in range(5):
+            redis_limiter.check_rate_limit("user_1", "endpoint", limit=5)
+
+        # User 2 should still be able to make requests
+        info = redis_limiter.check_rate_limit("user_2", "endpoint", limit=5)
+        assert info.remaining == 4
+
+    def test_redis_window_resets_after_time(self, redis_limiter):
+        """Rate limit should reset after window expires."""
+        # Clean up key
+        redis_limiter._redis.delete(redis_limiter._get_key("test_user", "endpoint"))
+
+        # Hit the limit
+        for _ in range(5):
+            redis_limiter.check_rate_limit("test_user", "endpoint", limit=5)
+
+        # Wait for window to expire
+        time.sleep(1.1)
+
+        # Should be able to make requests again
+        info = redis_limiter.check_rate_limit("test_user", "endpoint", limit=5)
+        assert info.remaining == 4

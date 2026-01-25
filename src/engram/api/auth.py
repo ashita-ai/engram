@@ -2,7 +2,7 @@
 
 Provides:
 - Bearer token authentication with JWT
-- Per-user rate limiting with in-memory tracking
+- Per-user rate limiting with in-memory or Redis-based tracking
 - FastAPI dependencies for route protection
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from functools import lru_cache
 from typing import TYPE_CHECKING, Annotated
@@ -26,6 +27,14 @@ if TYPE_CHECKING:
     from engram.config import Settings
 
 logger = get_logger(__name__)
+
+# Track if Redis is available (optional dependency)
+try:
+    import redis
+
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
 
 # Security scheme for OpenAPI docs
 security = HTTPBearer(auto_error=False)
@@ -145,11 +154,41 @@ class TokenValidator:
             raise AuthenticationError(f"Invalid token: {e}") from e
 
 
-class RateLimiter:
+class RateLimiter(ABC):
+    """Abstract base class for rate limiters.
+
+    All rate limiters must implement check_rate_limit() which tracks
+    request counts per user/endpoint with automatic window reset.
+    """
+
+    @abstractmethod
+    def check_rate_limit(
+        self,
+        user_id: str,
+        endpoint: str,
+        limit: int,
+    ) -> RateLimitInfo:
+        """Check if request is within rate limit.
+
+        Args:
+            user_id: User making the request.
+            endpoint: API endpoint being accessed.
+            limit: Maximum requests per window.
+
+        Returns:
+            RateLimitInfo with current status.
+
+        Raises:
+            RateLimitError: If rate limit exceeded.
+        """
+        ...
+
+
+class InMemoryRateLimiter(RateLimiter):
     """In-memory rate limiter using sliding window.
 
     Tracks request counts per user/endpoint with automatic window reset.
-    For production, use Redis or similar for distributed rate limiting.
+    Not suitable for multi-instance deployments - use RedisRateLimiter instead.
     """
 
     def __init__(self, window_seconds: int = 60) -> None:
@@ -211,6 +250,104 @@ class RateLimiter:
         )
 
 
+class RedisRateLimiter(RateLimiter):
+    """Redis-based rate limiter using sliding window.
+
+    Uses Redis for distributed rate limiting across multiple instances.
+    Requires the 'redis' extra: uv sync --extra redis
+
+    Uses a sorted set per user/endpoint with timestamps as scores.
+    Old entries are automatically removed by ZREMRANGEBYSCORE.
+    """
+
+    def __init__(self, redis_url: str, window_seconds: int = 60) -> None:
+        if not REDIS_AVAILABLE:
+            raise ImportError("Redis is not installed. Install with: uv sync --extra redis")
+
+        self.window_seconds = window_seconds
+        self._redis = redis.Redis.from_url(redis_url, decode_responses=True)
+        self._key_prefix = "engram:ratelimit:"
+
+        # Test connection
+        try:
+            self._redis.ping()
+        except redis.ConnectionError as e:
+            raise RuntimeError(f"Failed to connect to Redis at {redis_url}: {e}") from e
+
+        logger.info("Redis rate limiter initialized", redis_url=redis_url)
+
+    def _get_key(self, user_id: str, endpoint: str) -> str:
+        """Generate Redis key for user/endpoint combination."""
+        return f"{self._key_prefix}{user_id}:{endpoint}"
+
+    def check_rate_limit(
+        self,
+        user_id: str,
+        endpoint: str,
+        limit: int,
+    ) -> RateLimitInfo:
+        """Check if request is within rate limit using Redis.
+
+        Uses a sorted set with timestamps as scores. Each request adds
+        a member with the current timestamp. Old entries are removed
+        before counting.
+
+        Args:
+            user_id: User making the request.
+            endpoint: API endpoint being accessed.
+            limit: Maximum requests per window.
+
+        Returns:
+            RateLimitInfo with current status.
+
+        Raises:
+            RateLimitError: If rate limit exceeded.
+        """
+        now = time.time()
+        window_start = now - self.window_seconds
+        reset_at = int(now) + self.window_seconds
+        key = self._get_key(user_id, endpoint)
+
+        # Use pipeline for atomic operations
+        pipe = self._redis.pipeline()
+
+        # Remove entries outside the window
+        pipe.zremrangebyscore(key, 0, window_start)
+
+        # Count current entries
+        pipe.zcard(key)
+
+        # Execute pipeline
+        results = pipe.execute()
+        request_count = results[1]
+
+        if request_count >= limit:
+            retry_after = int(reset_at - now)
+            logger.warning(
+                "Rate limit exceeded",
+                user_id=user_id,
+                endpoint=endpoint,
+                limit=limit,
+                retry_after=retry_after,
+                backend="redis",
+            )
+            raise RateLimitError(retry_after)
+
+        # Record this request with unique member (timestamp:random)
+        # Using timestamp as both score and part of member for uniqueness
+        member = f"{now}:{id(self)}"
+        pipe = self._redis.pipeline()
+        pipe.zadd(key, {member: now})
+        pipe.expire(key, self.window_seconds + 10)  # TTL slightly longer than window
+        pipe.execute()
+
+        return RateLimitInfo(
+            limit=limit,
+            remaining=limit - request_count - 1,
+            reset_at=reset_at,
+        )
+
+
 # Singleton instances using functools.lru_cache for thread-safe caching
 # This approach avoids global mutable state while maintaining singleton behavior
 
@@ -232,18 +369,26 @@ def get_token_validator(secret_key: str) -> TokenValidator:
 
 
 @lru_cache(maxsize=1)
-def get_rate_limiter(window_seconds: int = 60) -> RateLimiter:
+def get_rate_limiter(redis_url: str | None = None, window_seconds: int = 60) -> RateLimiter:
     """Get or create the rate limiter singleton.
 
     Uses lru_cache for thread-safe singleton behavior.
+    If redis_url is provided, uses RedisRateLimiter for distributed rate limiting.
+    Otherwise, uses InMemoryRateLimiter (not suitable for multi-instance deployments).
 
     Args:
+        redis_url: Optional Redis URL for distributed rate limiting.
         window_seconds: The sliding window size in seconds.
 
     Returns:
-        RateLimiter instance.
+        RateLimiter instance (either InMemoryRateLimiter or RedisRateLimiter).
     """
-    return RateLimiter(window_seconds)
+    if redis_url:
+        logger.info("Using Redis rate limiter", redis_url=redis_url)
+        return RedisRateLimiter(redis_url, window_seconds)
+    else:
+        logger.info("Using in-memory rate limiter (not distributed)")
+        return InMemoryRateLimiter(window_seconds)
 
 
 def reset_auth_singletons() -> None:
@@ -348,7 +493,7 @@ class RateLimitDependency:
             else:
                 limit = self.settings.rate_limit_default
 
-        limiter = get_rate_limiter()
+        limiter = get_rate_limiter(redis_url=self.settings.rate_limit_redis_url)
         return limiter.check_rate_limit(user_id, self.endpoint, limit)
 
 

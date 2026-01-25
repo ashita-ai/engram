@@ -399,6 +399,11 @@ class Settings(BaseSettings):
         ge=1,
         description="Default rate limit per minute for other endpoints",
     )
+    rate_limit_redis_url: str | None = Field(
+        default=None,
+        description="Redis URL for distributed rate limiting (e.g., redis://localhost:6379). "
+        "If not set, uses in-memory rate limiting (not suitable for multi-instance deployments).",
+    )
 
     # Batch Operations
     batch_encode_max_items: int = Field(
