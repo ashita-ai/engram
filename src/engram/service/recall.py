@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
-import re
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -16,8 +15,16 @@ from typing import TYPE_CHECKING
 from engram.models import AuditEntry, Episode, Staleness
 
 from .helpers import cosine_similarity, mmr_rerank
-from .models import RecallResult, SourceEpisodeSummary
+from .models import RecallResult
 from .query_expansion import get_combined_embedding
+from .recall_utils import (
+    apply_negation_filtering,
+    enrich_with_sources,
+    get_result_embedding,
+)
+from .recall_utils import (
+    follow_links as traverse_memory_links,
+)
 
 if TYPE_CHECKING:
     from engram.config import Settings
@@ -156,8 +163,14 @@ class RecallMixin:
 
         # Apply negation filtering
         if apply_negation_filter:
-            results = await self._apply_negation_filtering(
-                results, user_id, org_id, negation_similarity_threshold
+            results = await apply_negation_filtering(
+                results=results,
+                user_id=user_id,
+                storage=self.storage,
+                embedder=self.embedder,
+                working_memory=self._working_memory,
+                org_id=org_id,
+                similarity_threshold=negation_similarity_threshold,
             )
 
         # Apply freshness filtering
@@ -184,16 +197,17 @@ class RecallMixin:
 
         # Multi-hop reasoning: follow links to related memories
         if follow_links and max_hops > 0:
-            final_results = await self._follow_links(
+            final_results = await traverse_memory_links(
                 results=final_results,
                 user_id=user_id,
                 max_hops=max_hops,
                 limit=limit,
+                storage=self.storage,
             )
 
         # Include source episodes if requested
         if include_sources:
-            final_results = await self._enrich_with_sources(final_results, user_id)
+            final_results = await enrich_with_sources(final_results, user_id, self.storage)
 
         # Testing Effect: strengthen retrieved memories
         if self.settings.retrieval_strengthening_enabled:
@@ -559,305 +573,6 @@ class RecallMixin:
 
         return results
 
-    async def _apply_negation_filtering(
-        self,
-        results: list[RecallResult],
-        user_id: str,
-        org_id: str | None = None,
-        similarity_threshold: float | None = 0.75,
-    ) -> list[RecallResult]:
-        """Filter out memories that match negated patterns.
-
-        Uses negations from StructuredMemory.negations field.
-
-        Args:
-            results: List of recall results to filter.
-            user_id: User ID for multi-tenancy.
-            org_id: Optional organization ID filter.
-            similarity_threshold: Threshold for semantic similarity filtering.
-
-        Returns:
-            Filtered list of results.
-        """
-        # Collect negation patterns from StructuredMemory.negations
-        negated_patterns: set[str] = set()
-
-        # Get structured memories with negations
-        structured_with_negations = await self.storage.list_structured_memories(
-            user_id, org_id, with_negations_only=True
-        )
-        for struct in structured_with_negations:
-            for negation in struct.negations:
-                negated_patterns.add(negation.pattern.lower())
-
-        if not negated_patterns:
-            return results
-
-        # Prepare embedding-based filtering if threshold is set
-        pattern_embeddings: dict[str, list[float]] = {}
-        if similarity_threshold is not None:
-            unique_patterns = list(negated_patterns)
-            if unique_patterns:
-                embeddings = await self.embedder.embed_batch(unique_patterns)
-                pattern_embeddings = dict(zip(unique_patterns, embeddings, strict=True))
-
-        filtered_results: list[RecallResult] = []
-        pattern_filtered = 0
-        semantic_filtered = 0
-
-        for result in results:
-            # Phase 1: Pattern-based filtering (word boundary match)
-            content_lower = result.content.lower()
-            is_pattern_negated = False
-
-            for pattern in negated_patterns:
-                if len(pattern) <= 3:
-                    # Use word boundary regex for short patterns
-                    if re.search(rf"\b{re.escape(pattern)}\b", content_lower):
-                        is_pattern_negated = True
-                        break
-                else:
-                    # Substring match for longer patterns
-                    if pattern in content_lower:
-                        is_pattern_negated = True
-                        break
-
-            if is_pattern_negated:
-                pattern_filtered += 1
-                logger.debug(f"Pattern-filtered {result.memory_type} {result.memory_id}")
-                continue
-
-            # Phase 2: Embedding-based filtering (semantic similarity)
-            is_semantic_negated = False
-            if similarity_threshold is not None and pattern_embeddings:
-                result_embedding = await self._get_result_embedding(result, user_id)
-
-                if result_embedding is not None:
-                    for pattern, pattern_emb in pattern_embeddings.items():
-                        similarity = cosine_similarity(result_embedding, pattern_emb)
-                        if similarity >= similarity_threshold:
-                            is_semantic_negated = True
-                            semantic_filtered += 1
-                            logger.debug(
-                                f"Semantic-filtered {result.memory_type} {result.memory_id}: "
-                                f"similarity {similarity:.2f} to '{pattern}'"
-                            )
-                            break
-
-            if not is_semantic_negated:
-                filtered_results.append(result)
-
-        total_filtered = pattern_filtered + semantic_filtered
-        if total_filtered > 0:
-            logger.info(
-                f"Negation filter: {pattern_filtered} pattern-based, "
-                f"{semantic_filtered} semantic-based"
-            )
-
-        return filtered_results
-
-    async def _get_result_embedding(
-        self,
-        result: RecallResult,
-        user_id: str,
-    ) -> list[float] | None:
-        """Get embedding for a recall result from storage."""
-        if result.memory_type == "episodic":
-            ep = await self.storage.get_episode(result.memory_id, user_id)
-            return ep.embedding if ep else None
-
-        elif result.memory_type == "structured":
-            struct = await self.storage.get_structured(result.memory_id, user_id)
-            return struct.embedding if struct else None
-
-        elif result.memory_type == "semantic":
-            sem = await self.storage.get_semantic(result.memory_id, user_id)
-            return sem.embedding if sem else None
-
-        elif result.memory_type == "procedural":
-            proc = await self.storage.get_procedural(result.memory_id, user_id)
-            return proc.embedding if proc else None
-
-        elif result.memory_type == "working":
-            for ep in self._working_memory:
-                if ep.id == result.memory_id:
-                    return ep.embedding
-            return None
-
-        return None
-
-    async def _follow_links(
-        self,
-        results: list[RecallResult],
-        user_id: str,
-        max_hops: int,
-        limit: int,
-    ) -> list[RecallResult]:
-        """Follow related_ids links to discover connected memories."""
-        all_results = list(results)
-        seen_ids: set[str] = {r.memory_id for r in results}
-        current_frontier = results
-
-        for hop in range(1, max_hops + 1):
-            related_ids_to_fetch: set[str] = set()
-            for r in current_frontier:
-                for related_id in r.related_ids:
-                    if related_id not in seen_ids:
-                        related_ids_to_fetch.add(related_id)
-
-            if not related_ids_to_fetch:
-                break
-
-            next_frontier: list[RecallResult] = []
-            for related_id in related_ids_to_fetch:
-                if len(all_results) >= limit:
-                    break
-
-                memory_result = await self._fetch_memory_by_id(related_id, user_id, hop)
-                if memory_result:
-                    next_frontier.append(memory_result)
-                    all_results.append(memory_result)
-                    seen_ids.add(related_id)
-
-            current_frontier = next_frontier
-
-        return all_results[:limit]
-
-    async def _fetch_memory_by_id(
-        self,
-        memory_id: str,
-        user_id: str,
-        hop_distance: int,
-    ) -> RecallResult | None:
-        """Fetch a memory by ID and convert to RecallResult."""
-        if memory_id.startswith("sem_"):
-            sem = await self.storage.get_semantic(memory_id, user_id)
-            if sem:
-                return RecallResult(
-                    memory_type="semantic",
-                    content=sem.content,
-                    score=0.0,
-                    confidence=sem.confidence.value,
-                    memory_id=sem.id,
-                    source_episode_ids=sem.source_episode_ids,
-                    related_ids=sem.related_ids,
-                    hop_distance=hop_distance,
-                    staleness=Staleness.FRESH,
-                    consolidated_at=sem.derived_at.isoformat(),
-                    metadata={"linked": True},
-                )
-
-        elif memory_id.startswith("proc_"):
-            proc = await self.storage.get_procedural(memory_id, user_id)
-            if proc:
-                return RecallResult(
-                    memory_type="procedural",
-                    content=proc.content,
-                    score=0.0,
-                    confidence=proc.confidence.value,
-                    memory_id=proc.id,
-                    source_episode_ids=proc.source_episode_ids,
-                    related_ids=proc.related_ids,
-                    hop_distance=hop_distance,
-                    staleness=Staleness.FRESH,
-                    consolidated_at=proc.derived_at.isoformat(),
-                    metadata={"linked": True},
-                )
-
-        elif memory_id.startswith("struct_"):
-            struct = await self.storage.get_structured(memory_id, user_id)
-            if struct:
-                return RecallResult(
-                    memory_type="structured",
-                    content=struct.summary or struct.to_embedding_text(),
-                    score=0.0,
-                    confidence=struct.confidence.value,
-                    memory_id=struct.id,
-                    source_episode_id=struct.source_episode_id,
-                    hop_distance=hop_distance,
-                    staleness=Staleness.FRESH,
-                    metadata={"linked": True},
-                )
-
-        return None
-
-    async def _enrich_with_sources(
-        self,
-        results: list[RecallResult],
-        user_id: str,
-    ) -> list[RecallResult]:
-        """Enrich recall results with source episode details."""
-        enriched: list[RecallResult] = []
-
-        for result in results:
-            source_episodes: list[SourceEpisodeSummary] = []
-
-            # Structured memories have a single source episode
-            if result.memory_type == "structured" and result.source_episode_id:
-                ep = await self.storage.get_episode(result.source_episode_id, user_id)
-                if ep:
-                    source_episodes.append(
-                        SourceEpisodeSummary(
-                            id=ep.id,
-                            content=ep.content,
-                            role=ep.role,
-                            timestamp=ep.timestamp.isoformat(),
-                        )
-                    )
-
-            # Semantic memories have multiple source episodes
-            elif result.memory_type == "semantic":
-                sem = await self.storage.get_semantic(result.memory_id, user_id)
-                if sem:
-                    for ep_id in sem.source_episode_ids:
-                        ep = await self.storage.get_episode(ep_id, user_id)
-                        if ep:
-                            source_episodes.append(
-                                SourceEpisodeSummary(
-                                    id=ep.id,
-                                    content=ep.content,
-                                    role=ep.role,
-                                    timestamp=ep.timestamp.isoformat(),
-                                )
-                            )
-
-            # Procedural memories have multiple source episodes
-            elif result.memory_type == "procedural":
-                proc = await self.storage.get_procedural(result.memory_id, user_id)
-                if proc:
-                    for ep_id in proc.source_episode_ids:
-                        ep = await self.storage.get_episode(ep_id, user_id)
-                        if ep:
-                            source_episodes.append(
-                                SourceEpisodeSummary(
-                                    id=ep.id,
-                                    content=ep.content,
-                                    role=ep.role,
-                                    timestamp=ep.timestamp.isoformat(),
-                                )
-                            )
-
-            # Create enriched result with sources
-            enriched.append(
-                RecallResult(
-                    memory_type=result.memory_type,
-                    content=result.content,
-                    score=result.score,
-                    confidence=result.confidence,
-                    memory_id=result.memory_id,
-                    source_episode_id=result.source_episode_id,
-                    source_episode_ids=result.source_episode_ids,
-                    source_episodes=source_episodes,
-                    related_ids=result.related_ids,
-                    hop_distance=result.hop_distance,
-                    staleness=result.staleness,
-                    consolidated_at=result.consolidated_at,
-                    metadata=result.metadata,
-                )
-            )
-
-        return enriched
-
     async def _apply_retrieval_strengthening(
         self,
         results: list[RecallResult],
@@ -1124,7 +839,9 @@ class RecallMixin:
         candidates: list[tuple[float, list[float], int]] = []
 
         for i, result in enumerate(results):
-            embedding = await self._get_result_embedding(result, user_id)
+            embedding = await get_result_embedding(
+                result, user_id, self.storage, self._working_memory
+            )
             if embedding:
                 candidates.append((result.score, embedding, i))
             else:
