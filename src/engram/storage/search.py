@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from pydantic import BaseModel, ConfigDict, Field
 from qdrant_client import models
 
+from engram.storage.retry import qdrant_retry
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -412,6 +414,7 @@ class SearchMixin:
 
         return filters
 
+    @qdrant_retry
     async def _search(
         self,
         collection: str,

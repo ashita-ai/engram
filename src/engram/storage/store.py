@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 from qdrant_client import models
 
+from engram.storage.retry import qdrant_retry
+
 if TYPE_CHECKING:
     from engram.models import (
         Episode,
@@ -83,6 +85,7 @@ class StoreMixin:
         """
         return await self._store_memory(memory, "procedural")
 
+    @qdrant_retry
     async def _store_memory(
         self,
         memory: Episode | StructuredMemory | SemanticMemory | ProceduralMemory,

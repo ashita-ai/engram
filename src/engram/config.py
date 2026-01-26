@@ -532,6 +532,30 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Parallel Processing Configuration
+    max_concurrent_llm_calls: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description=(
+            "Maximum concurrent LLM calls for parallel workflow processing. "
+            "Controls the semaphore limit to prevent rate limiting. "
+            "Increase for higher throughput, decrease to avoid API limits."
+        ),
+    )
+
+    # Embedding Cache Configuration
+    embedding_cache_enabled: bool = Field(
+        default=True,
+        description="Enable LRU cache for embeddings to prevent redundant computation",
+    )
+    embedding_cache_size: int = Field(
+        default=1000,
+        ge=0,
+        le=100000,
+        description="Maximum number of embeddings to cache (0 to disable cache)",
+    )
+
     model_config = {
         "env_prefix": "ENGRAM_",
         "env_file": ".env",

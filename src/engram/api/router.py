@@ -8,9 +8,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+from engram.config import settings
 from engram.models import AuditEntry, HistoryEntry
 from engram.service import EngramService
 
+from .auth import AuthDependency, AuthenticatedUser
 from .helpers import episode_to_response, get_memory_type_from_id
 from .schemas import (
     ALL_MEMORY_TYPES,
@@ -102,6 +104,30 @@ async def get_service() -> EngramService:
 
 
 ServiceDep = Annotated[EngramService, Depends(get_service)]
+
+
+def get_effective_user_id(
+    request_user_id: str,
+    auth_user: AuthenticatedUser | None,
+) -> str:
+    """Get the effective user ID for multi-tenancy isolation.
+
+    If authentication is enabled and user is authenticated, returns the
+    authenticated user's ID (ignoring any user_id from request body/params).
+    This prevents users from accessing other users' data.
+
+    If authentication is disabled, returns the user_id from request body/params.
+
+    Args:
+        request_user_id: User ID from request body or query parameters.
+        auth_user: Authenticated user from auth dependency (None if auth disabled).
+
+    Returns:
+        The effective user ID to use for the operation.
+    """
+    if auth_user is not None:
+        return auth_user.user_id
+    return request_user_id
 
 
 @router.get("/health", response_model=HealthResponse, tags=["system"])
@@ -3165,6 +3191,7 @@ async def get_webhook_logs(
 async def list_sessions(
     service: ServiceDep,
     user_id: Annotated[str, Query(min_length=1, description="User ID for isolation")],
+    auth_user: Annotated[AuthenticatedUser | None, Depends(AuthDependency(settings))],
     org_id: Annotated[str | None, Query(description="Optional org ID filter")] = None,
 ) -> SessionListResponse:
     """List all sessions for a user.
@@ -3172,14 +3199,18 @@ async def list_sessions(
     Args:
         service: Engram service instance.
         user_id: User ID for multi-tenancy isolation.
+        auth_user: Authenticated user (if auth enabled).
         org_id: Optional organization filter.
 
     Returns:
         List of session summaries with episode counts and date ranges.
     """
+    # Get effective user_id (from auth if enabled, else from request)
+    effective_user_id = get_effective_user_id(user_id, auth_user)
+
     try:
         sessions = await service.storage.list_sessions(
-            user_id=user_id,
+            user_id=effective_user_id,
             org_id=org_id,
         )
 
@@ -3215,6 +3246,7 @@ async def get_session(
     service: ServiceDep,
     session_id: str,
     user_id: Annotated[str, Query(min_length=1, description="User ID for isolation")],
+    auth_user: Annotated[AuthenticatedUser | None, Depends(AuthDependency(settings))],
     org_id: Annotated[str | None, Query(description="Optional org ID filter")] = None,
 ) -> SessionDetailResponse:
     """Get details for a specific session.
@@ -3223,6 +3255,7 @@ async def get_session(
         service: Engram service instance.
         session_id: Session identifier.
         user_id: User ID for multi-tenancy isolation.
+        auth_user: Authenticated user (if auth enabled).
         org_id: Optional organization filter.
 
     Returns:
@@ -3231,10 +3264,13 @@ async def get_session(
     Raises:
         HTTPException: 404 if session not found.
     """
+    # Get effective user_id (from auth if enabled, else from request)
+    effective_user_id = get_effective_user_id(user_id, auth_user)
+
     try:
         episodes = await service.storage.get_session_episodes(
             session_id=session_id,
-            user_id=user_id,
+            user_id=effective_user_id,
             org_id=org_id,
         )
 
@@ -3278,6 +3314,7 @@ async def delete_session(
     service: ServiceDep,
     session_id: str,
     user_id: Annotated[str, Query(min_length=1, description="User ID for isolation")],
+    auth_user: Annotated[AuthenticatedUser | None, Depends(AuthDependency(settings))],
     org_id: Annotated[str | None, Query(description="Optional org ID filter")] = None,
     cascade: Annotated[
         str,
@@ -3292,6 +3329,7 @@ async def delete_session(
         service: Engram service instance.
         session_id: Session identifier.
         user_id: User ID for multi-tenancy isolation.
+        auth_user: Authenticated user (if auth enabled).
         org_id: Optional organization filter.
         cascade: Cascade mode for derived memories:
             - "none": Delete only episodes, leave derived memories orphaned
@@ -3305,6 +3343,9 @@ async def delete_session(
         HTTPException: 404 if session not found.
         HTTPException: 400 if cascade mode is invalid.
     """
+    # Get effective user_id (from auth if enabled, else from request)
+    effective_user_id = get_effective_user_id(user_id, auth_user)
+
     # Validate cascade mode
     if cascade not in ("none", "soft", "hard"):
         raise HTTPException(
@@ -3315,7 +3356,7 @@ async def delete_session(
     try:
         result = await service.storage.delete_session(
             session_id=session_id,
-            user_id=user_id,
+            user_id=effective_user_id,
             org_id=org_id,
             cascade=cascade,
         )

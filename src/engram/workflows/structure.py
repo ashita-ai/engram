@@ -12,6 +12,7 @@ The structure workflow bridges raw Episodes and cross-episode Semantic:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -422,17 +423,34 @@ async def run_structure_batch(
 
     logger.info(f"Processing {len(episodes)} unstructured episodes")
 
-    results: list[StructureResult] = []
-    for episode in episodes:
-        result = await run_structure(
-            episode=episode,
-            storage=storage,
-            embedder=embedder,
-            model=model,
-            skip_if_structured=True,
-        )
-        if result:
-            results.append(result)
+    # Parallel structure processing with semaphore to control concurrency
+    from engram.config import settings
+
+    semaphore = asyncio.Semaphore(settings.max_concurrent_llm_calls)
+
+    async def _structure_with_semaphore(
+        episode: Episode,
+    ) -> StructureResult | None:
+        """Structure episode with semaphore to limit concurrent LLM calls."""
+        async with semaphore:
+            try:
+                return await run_structure(
+                    episode=episode,
+                    storage=storage,
+                    embedder=embedder,
+                    model=model,
+                    skip_if_structured=True,
+                )
+            except Exception as e:
+                logger.error(f"Failed to structure episode {episode.id}: {e}")
+                return None
+
+    # Process all episodes in parallel
+    tasks = [_structure_with_semaphore(ep) for ep in episodes]
+    all_results = await asyncio.gather(*tasks, return_exceptions=False)
+
+    # Filter out None results (skipped or failed)
+    results = [r for r in all_results if r is not None]
 
     logger.info(f"Structured {len(results)} episodes")
     return results
