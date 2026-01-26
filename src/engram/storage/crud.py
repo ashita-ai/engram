@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from qdrant_client import models
 
 from engram.config import settings
+from engram.storage.retry import qdrant_retry
 
 if TYPE_CHECKING:
     from engram.models import (
@@ -78,6 +79,7 @@ class CRUDMixin:
 
         return await self._get_by_id(memory_id, user_id, "procedural", ProceduralMemory)
 
+    @qdrant_retry
     async def _get_by_id(
         self,
         memory_id: str,
@@ -350,6 +352,7 @@ class CRUDMixin:
         """Delete a procedural memory."""
         return await self._delete_by_id(memory_id, user_id, "procedural")
 
+    @qdrant_retry
     async def _delete_by_id(
         self,
         memory_id: str,
@@ -1016,6 +1019,7 @@ class CRUDMixin:
 
         return memories
 
+    @qdrant_retry
     async def update_semantic_memory(
         self,
         memory: SemanticMemory,
@@ -1063,6 +1067,7 @@ class CRUDMixin:
 
         return True
 
+    @qdrant_retry
     async def update_procedural_memory(
         self,
         memory: ProceduralMemory,
@@ -1110,6 +1115,7 @@ class CRUDMixin:
 
         return True
 
+    @qdrant_retry
     async def update_structured_memory(
         self,
         memory: StructuredMemory,

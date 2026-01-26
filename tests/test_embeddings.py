@@ -11,6 +11,7 @@ from engram.embeddings import (
     OpenAIEmbedder,
     get_embedder,
 )
+from engram.embeddings.cached import CachedEmbedder
 
 
 class TestEmbedderBase:
@@ -176,23 +177,33 @@ class TestGetEmbedder:
     """Tests for get_embedder factory function."""
 
     def test_default_returns_openai(self):
-        """Default settings should return OpenAI embedder."""
+        """Default settings should return OpenAI embedder (wrapped in cache)."""
         # Explicitly set provider to openai to override any .env settings
         settings = Settings(openai_api_key="sk-test-dummy-key", embedding_provider="openai")
         embedder = get_embedder(settings)
-        assert isinstance(embedder, OpenAIEmbedder)
+        # With caching enabled (default), get_embedder returns CachedEmbedder
+        if isinstance(embedder, CachedEmbedder):
+            assert isinstance(embedder.wrapped_embedder, OpenAIEmbedder)
+        else:
+            assert isinstance(embedder, OpenAIEmbedder)
 
     def test_openai_provider(self):
         """Should create OpenAI embedder for openai provider."""
         settings = Settings(embedding_provider="openai", openai_api_key="sk-test-dummy-key")
         embedder = get_embedder(settings)
-        assert isinstance(embedder, OpenAIEmbedder)
+        if isinstance(embedder, CachedEmbedder):
+            assert isinstance(embedder.wrapped_embedder, OpenAIEmbedder)
+        else:
+            assert isinstance(embedder, OpenAIEmbedder)
 
     def test_fastembed_provider(self):
         """Should create FastEmbed embedder for fastembed provider."""
         settings = Settings(embedding_provider="fastembed")
         embedder = get_embedder(settings)
-        assert isinstance(embedder, FastEmbedEmbedder)
+        if isinstance(embedder, CachedEmbedder):
+            assert isinstance(embedder.wrapped_embedder, FastEmbedEmbedder)
+        else:
+            assert isinstance(embedder, FastEmbedEmbedder)
 
     def test_openai_with_custom_model(self):
         """Should pass model from settings to OpenAI embedder."""
@@ -202,9 +213,13 @@ class TestGetEmbedder:
             openai_api_key="sk-test-dummy-key",
         )
         embedder = get_embedder(settings)
-        assert isinstance(embedder, OpenAIEmbedder)
-        assert embedder.model == "text-embedding-3-large"
-        assert embedder.dimensions == 3072
+        # Unwrap if cached
+        base_embedder = (
+            embedder.wrapped_embedder if isinstance(embedder, CachedEmbedder) else embedder
+        )
+        assert isinstance(base_embedder, OpenAIEmbedder)
+        assert base_embedder.model == "text-embedding-3-large"
+        assert base_embedder.dimensions == 3072
 
     def test_fastembed_with_custom_model(self):
         """Should pass model from settings to FastEmbed embedder."""
@@ -213,9 +228,13 @@ class TestGetEmbedder:
             embedding_model="BAAI/bge-base-en-v1.5",
         )
         embedder = get_embedder(settings)
-        assert isinstance(embedder, FastEmbedEmbedder)
-        assert embedder._model_name == "BAAI/bge-base-en-v1.5"
-        assert embedder.dimensions == 768
+        # Unwrap if cached
+        base_embedder = (
+            embedder.wrapped_embedder if isinstance(embedder, CachedEmbedder) else embedder
+        )
+        assert isinstance(base_embedder, FastEmbedEmbedder)
+        assert base_embedder._model_name == "BAAI/bge-base-en-v1.5"
+        assert base_embedder.dimensions == 768
 
     def test_unknown_provider_raises(self):
         """Should raise ValueError for unknown provider."""

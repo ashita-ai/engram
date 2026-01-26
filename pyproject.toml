@@ -45,6 +45,7 @@ dependencies = [
     "httpx>=0.25",
     # Utilities
     "structlog>=24.0",
+    "tenacity>=8.0",
     # Durable execution (local dev)
     "dbos>=0.9",
     "pint>=0.25.2",

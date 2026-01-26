@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .base import Embedder
+from .cached import CachedEmbedder
 from .fastembed import FastEmbedEmbedder
 from .openai import OpenAIEmbedder
 
@@ -36,25 +37,29 @@ def get_embedder(settings: Settings | None = None) -> Embedder:
     """Create an embedder based on settings.
 
     Factory function that returns the appropriate embedder
-    based on the configured provider.
+    based on the configured provider. Automatically wraps
+    the embedder with a cache if enabled in settings.
 
     Args:
         settings: Optional settings. Uses default Settings() if None.
 
     Returns:
-        Configured Embedder instance.
+        Configured Embedder instance, optionally wrapped with cache.
 
     Raises:
         ValueError: If embedding provider is unknown.
 
     Example:
         ```python
-        # Use default (OpenAI)
+        # Use default (OpenAI) with caching enabled
         embedder = get_embedder()
 
         # Use FastEmbed for local/free embeddings
         from engram.config import Settings
         embedder = get_embedder(Settings(embedding_provider="fastembed"))
+
+        # Disable cache
+        embedder = get_embedder(Settings(embedding_cache_enabled=False))
         ```
     """
     if settings is None:
@@ -64,22 +69,35 @@ def get_embedder(settings: Settings | None = None) -> Embedder:
 
     provider = settings.embedding_provider
 
+    # Create base embedder
+    base_embedder: Embedder
     if provider == "openai":
-        return OpenAIEmbedder(
+        base_embedder = OpenAIEmbedder(
             model=settings.embedding_model,
             api_key=settings.openai_api_key,
         )
-    if provider == "fastembed":
-        return FastEmbedEmbedder(
+    elif provider == "fastembed":
+        base_embedder = FastEmbedEmbedder(
             model=settings.embedding_model,
         )
-    msg = f"Unknown embedding provider: {provider}"
-    raise ValueError(msg)
+    else:
+        msg = f"Unknown embedding provider: {provider}"
+        raise ValueError(msg)
+
+    # Wrap with cache if enabled
+    if settings.embedding_cache_enabled and settings.embedding_cache_size > 0:
+        return CachedEmbedder(
+            embedder=base_embedder,
+            cache_size=settings.embedding_cache_size,
+        )
+
+    return base_embedder
 
 
 __all__ = [
     "Embedder",
     "OpenAIEmbedder",
     "FastEmbedEmbedder",
+    "CachedEmbedder",
     "get_embedder",
 ]

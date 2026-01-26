@@ -11,6 +11,7 @@ hippocampus (episodic) → neocortex (semantic) transfer with compression.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -436,11 +437,28 @@ async def run_consolidation(
 
         logger.info(f"Created {len(chunks)} chunk(s) for summarization")
 
-        chunk_summaries: list[SummaryOutput] = []
-        for i, chunk in enumerate(chunks):
-            logger.debug(f"Summarizing chunk {i + 1}/{len(chunks)} ({len(chunk)} episodes)")
-            summary = await _summarize_chunk(chunk, existing_context)
-            chunk_summaries.append(summary)
+        # Parallel summarization with semaphore to control concurrency
+        from engram.config import settings
+
+        async def _summarize_with_logging(
+            sem: asyncio.Semaphore,
+            chunk: list[dict[str, str]],
+            ctx: str,
+            idx: int,
+            total: int,
+        ) -> SummaryOutput:
+            """Summarize chunk with semaphore to limit concurrent LLM calls."""
+            async with sem:
+                logger.debug(f"Summarizing chunk {idx + 1}/{total} ({len(chunk)} episodes)")
+                return await _summarize_chunk(chunk, ctx)
+
+        # Process all chunks in parallel
+        semaphore = asyncio.Semaphore(settings.max_concurrent_llm_calls)
+        tasks = [
+            _summarize_with_logging(semaphore, chunk, existing_context, i, len(chunks))
+            for i, chunk in enumerate(chunks)
+        ]
+        chunk_summaries = await asyncio.gather(*tasks)
 
         # 5. Reduce phase: combine chunk summaries into one
         if len(chunk_summaries) == 1:
