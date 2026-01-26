@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""End-to-end demonstration of Phase 6 features.
+"""Query enhancement and contradiction detection demo.
 
 This example demonstrates:
 1. Query Expansion - LLM-powered query enhancement for better recall
@@ -13,7 +13,7 @@ Requirements:
 - Install: uv sync --extra dev
 
 Usage:
-    uv run python examples/external/phase6_features.py
+    uv run python examples/external/query_contradiction.py
 """
 
 from __future__ import annotations
@@ -387,9 +387,9 @@ async def demo_memory_update(client: httpx.AsyncClient) -> None:
 
 
 async def main() -> None:
-    """Run all Phase 6 feature demos."""
+    """Run all query enhancement and contradiction detection demos."""
     print("=" * 60)
-    print("PHASE 6 FEATURES - END-TO-END DEMONSTRATION")
+    print("QUERY ENHANCEMENT & CONTRADICTION DETECTION DEMO")
     print("=" * 60)
 
     # Check prerequisites
