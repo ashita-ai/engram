@@ -195,9 +195,9 @@ Engram uses cognitive science as design inspiration, not strict implementation.
 
 ### What Engram Doesn't Model
 
-| Research Concept | What the Paper Says | What Engram Does Instead |
-|-----------------|---------------------|--------------------------|
-| **Surprise-based encoding** (Nagy et al. 2025) | Episodic memory acts as "life raft" for surprising experiences that don't compress well | Store ALL episodes equally; no surprise detection or variable encoding rate |
+| Research Concept | What the Paper Says | What Engram Implements |
+|-----------------|---------------------|------------------------|
+| **Surprise-based encoding** (Nagy et al. 2025) | Episodic memory acts as "life raft" for surprising experiences that don't compress well | `_calculate_surprise()` boosts importance of novel content (configurable via `surprise_scoring_enabled`, `surprise_weight`) |
 | **SWS×REM interaction** (Yuksel et al. 2025) | Memory benefit comes from product of SWS and REM, not independent contributions | Simple time-based decay; no sleep-stage modeling |
 | **REM as forgetting facilitator** (Yuksel et al. 2025) | REM cueing may actively facilitate forgetting of non-cued memories | Time-based decay; no sleep-phase forgetting modeling |
 | **Compression-as-learning** (Nagy et al. 2025) | Semantic learning IS learning to compress; measures encoding efficiency | Extract facts but don't model compression ratios |
@@ -237,7 +237,7 @@ Engram uses cognitive science as design inspiration, not strict implementation.
 ### Recent Research (2024-2025)
 - [HaluMem: Hallucinations in LLM Memory Systems](https://arxiv.org/html/2511.03506)
 - [Constructive Memory](https://onlinelibrary.wiley.com/doi/10.1111/cogs.70113) — Episodic and semantic memory are constructive
-- [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) (Nagy et al. 2025) — Memory as compression under constraints. Semantic memory encodes regularities; episodic memory preserves surprising experiences. *Engram is inspired by the episodic/semantic distinction but does not implement surprise detection or variable-rate encoding.*
+- [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) (Nagy et al. 2025) — Memory as compression under constraints. Semantic memory encodes regularities; episodic memory preserves surprising experiences. *Engram implements surprise-based importance scoring via `_calculate_surprise()` to prioritize novel content.*
 - [Sleep and Memory Consolidation](https://www.nature.com/articles/s42003-025-07868-5) (Yuksel et al. 2025) — Memory benefit from SWS×REM product interaction; REM cueing alone impairs memory. *Cited for context; Engram does not model sleep stages.*
 - [Dual Pathways to LTM](https://www.news-medical.net/news/20241206/Researchers-discover-new-pathway-to-forming-long-term-memories-in-the-brain.aspx) — LTM can form independently of STM
 - [Molecular Memory Timers](https://www.sciencedaily.com/releases/2025/11/251130050712.htm) — Importance gating in memory persistence

@@ -9,6 +9,8 @@ Technical comparison of AI memory systems. Based on published papers and documen
 | **Engram** | Yes | Yes | Yes | Partial | Yes | Yes |
 | **Mem0** | No | No | Partial | No | Yes (Mem0ᵍ) | No |
 | **Zep/Graphiti** | Yes | No | No | Yes | Partial | No |
+| **LangChain** | No | No | No | No | Partial | No |
+| **LlamaIndex** | No | No | No | No | Partial | No |
 | **Letta/MemGPT** | Partial | No | No | No | No | No |
 
 **Notes**:
@@ -74,6 +76,55 @@ Episode Subgraph (raw) ──┬──→ Semantic Entity Subgraph (extracted)
 - **LLM extraction on write** — Same error propagation risk as Mem0
 
 **Source**: [Zep Paper](https://arxiv.org/abs/2501.13956), [Documentation](https://docs.getzep.com)
+
+---
+
+## LangChain Memory
+
+**Architecture**: Multiple memory module types as framework components.
+
+```
+Memory Types: ConversationBufferMemory, ConversationSummaryBufferMemory,
+             ConversationEntityMemory, VectorStoreRetrieverMemory
+```
+
+**What it does well**:
+- Multiple memory types for different use cases
+- Integrates with full LangChain ecosystem
+- Enterprise components (Redis, PostgreSQL, MongoDB via LangGraph)
+- Context-aware systems across sessions
+
+**Limitations**:
+- **No ground truth preservation** — Memory is for context, not accuracy
+- **No confidence tracking** — No distinction between certain and uncertain
+- **No principled forgetting** — Manual cleanup required
+- **No consolidation** — Memory types don't form a hierarchy
+
+**Source**: [Documentation](https://docs.langchain.com/)
+
+---
+
+## LlamaIndex
+
+**Architecture**: RAG-native document indexing with memory modules.
+
+```
+Documents → Indexing → Query Engine / Chat Engine → Response + Context
+```
+
+**What it does well**:
+- RAG-optimized retrieval pipelines
+- Hybrid search (vector + keyword)
+- Multi-agent memory support
+- Extensive integrations with vector databases
+
+**Limitations**:
+- **No ground truth preservation** — Focus on retrieval, not memory accuracy
+- **No confidence tracking** — Standard RAG approach
+- **Stateless agents** — External integration needed for persistence
+- **No consolidation hierarchy** — Flat memory structure
+
+**Source**: [Documentation](https://docs.llamaindex.ai/)
 
 ---
 

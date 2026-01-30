@@ -2,7 +2,7 @@
 
 Engram is a memory system for LLM applications built on Pydantic AI with durable execution.
 
-> **Status**: Beta. Core APIs, REST endpoints, and workflows fully implemented with 800+ tests.
+> **Status**: Beta. Core APIs, REST endpoints, and workflows fully implemented with 976 tests.
 
 ## Stack
 
@@ -54,7 +54,9 @@ Every derived memory carries a confidence score appropriate to its type:
 
 #### LLM-Assessed Confidence (Structured/Semantic)
 
-The LLM returns confidence **alongside** the extraction/synthesis in a single call:
+Confidence has two components:
+
+1. **LLM-assessed base score**: The LLM returns confidence **alongside** the extraction/synthesis:
 
 ```python
 class LLMExtractionOutput(BaseModel):
@@ -65,19 +67,30 @@ class LLMExtractionOutput(BaseModel):
     preferences: list[Preference]
     negations: list[Negation]
 
-    # Confidence assessment (same call)
+    # LLM confidence assessment (same call)
     confidence: float = Field(ge=0.0, le=1.0)
     confidence_reasoning: str
 ```
 
-This is efficient (no extra API call) and contextually aware — the LLM assesses confidence while it has full context of what it just extracted.
+2. **Composite final score**: The LLM confidence becomes the `extraction_base`, which is combined with other signals:
 
-**Scoring guide for LLM:**
+```python
+final_confidence = (
+    extraction_base * 0.50 +     # LLM's self-assessed score (or 0.9 for regex)
+    corroboration * 0.25 +       # Number of supporting sources
+    recency * 0.15 +             # How recently confirmed
+    verification * 0.10          # Format validation
+) - contradiction_penalty
+```
+
+**LLM scoring guide:**
 - 0.9-1.0: Explicitly stated, no hedging, clear and unambiguous
 - 0.7-0.9: Clearly implied or stated with minor hedging
 - 0.5-0.7: Reasonably inferred but not directly stated
 - 0.3-0.5: Speculative, significant hedging, or ambiguous
 - 0.0-0.3: Contradicted, heavily hedged, or likely wrong
+
+**Key distinction**: The LLM provides a base score; the composite formula adds corroboration, recency, and verification signals for the final confidence.
 
 #### Bayesian Confidence (Procedural)
 
