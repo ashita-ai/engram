@@ -346,13 +346,12 @@ class TestAPIIntegration:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
-        from engram.api.router import router, set_service
+        from engram.api.router import router
 
         app = FastAPI()
         app.include_router(router, prefix="/api/v1")
-        set_service(mock_service)
-        yield TestClient(app)
-        set_service(None)  # type: ignore[arg-type]
+        app.state.service = mock_service
+        return TestClient(app)
 
     def test_full_encode_recall_via_api(self, client, mock_service):
         """Test encode and recall via REST API."""
