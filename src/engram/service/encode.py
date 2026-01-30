@@ -128,13 +128,6 @@ class EncodeMixin:
         quick_extracts = QuickExtracts(emails=emails, phones=phones, urls=urls)
         episode.quick_extracts = quick_extracts
 
-        # Store episode
-        await self.storage.store_episode(episode)
-
-        # Add to working memory for current session (with size limit enforcement)
-        self._working_memory.append(episode)
-        self._enforce_working_memory_limit()
-
         # Create StructuredMemory (always, fast mode by default)
         structured = StructuredMemory.from_episode_fast(
             source_episode_id=episode.id,
@@ -146,41 +139,55 @@ class EncodeMixin:
             embedding=embedding,  # Reuse episode embedding for fast mode
         )
 
-        # Store structured memory
-        await self.storage.store_structured(structured)
+        # Use transaction context for atomic storage operations
+        # If any operation fails, previous operations are rolled back
+        async with self.storage.transaction() as txn:
+            # Store episode
+            await txn.store_episode(episode)
 
-        # Link episode to structured
-        episode.structured = True
-        episode.structured_into = structured.id
-        await self.storage.update_episode(episode)
+            # Store structured memory
+            await txn.store_structured(structured)
 
-        # Calculate importance based on extracts + surprise
-        if importance is None:
-            # Use structured extracts and surprise for importance calculation
-            calculated_importance = await self._calculate_importance_with_surprise(
-                content=content,
-                role=role,
-                structured=structured,
-                embedding=embedding,
+            # Link episode to structured
+            episode.structured = True
+            episode.structured_into = structured.id
+            await txn.update_episode(episode)
+
+            # Calculate importance based on extracts + surprise
+            if importance is None:
+                # Use structured extracts and surprise for importance calculation
+                calculated_importance = await self._calculate_importance_with_surprise(
+                    content=content,
+                    role=role,
+                    structured=structured,
+                    embedding=embedding,
+                    user_id=user_id,
+                    org_id=org_id,
+                )
+                episode.importance = calculated_importance
+                await txn.update_episode(episode)
+            else:
+                calculated_importance = importance
+
+            # Log audit entry
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            audit_entry = AuditEntry.for_encode(
                 user_id=user_id,
+                episode_id=episode.id,
+                facts_count=len(emails) + len(phones) + len(urls),
                 org_id=org_id,
+                session_id=session_id,
+                duration_ms=duration_ms,
             )
-            episode.importance = calculated_importance
-            await self.storage.update_episode(episode)
-        else:
-            calculated_importance = importance
+            await txn.log_audit(audit_entry)
 
-        # Log audit entry
-        duration_ms = int((time.monotonic() - start_time) * 1000)
-        audit_entry = AuditEntry.for_encode(
-            user_id=user_id,
-            episode_id=episode.id,
-            facts_count=len(emails) + len(phones) + len(urls),
-            org_id=org_id,
-            session_id=session_id,
-            duration_ms=duration_ms,
-        )
-        await self.storage.log_audit(audit_entry)
+            # Commit the transaction (all operations succeeded)
+            txn.commit()
+
+        # Add to working memory for current session (with size limit enforcement)
+        # Note: This is done after the transaction commits successfully
+        self._working_memory.append(episode)
+        self._enforce_working_memory_limit()
 
         # Handle LLM enrichment
         if enrich is True:

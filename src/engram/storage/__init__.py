@@ -16,10 +16,12 @@ Example:
 from .base import COLLECTION_NAMES, DEFAULT_EMBEDDING_DIM
 from .client import EngramStorage
 from .search import ScoredResult
+from .transaction import TransactionContext
 
 __all__ = [
     "EngramStorage",
     "ScoredResult",
+    "TransactionContext",
     "COLLECTION_NAMES",
     "DEFAULT_EMBEDDING_DIM",
 ]

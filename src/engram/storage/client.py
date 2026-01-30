@@ -26,6 +26,7 @@ from .crud import CRUDMixin
 from .history import HistoryMixin
 from .search import SearchMixin
 from .store import StoreMixin
+from .transaction import TransactionMixin
 from .webhook import WebhookMixin
 
 logger = logging.getLogger(__name__)
@@ -58,7 +59,14 @@ class MemoryStats(BaseModel):
 
 
 class EngramStorage(
-    StoreMixin, SearchMixin, CRUDMixin, AuditMixin, HistoryMixin, WebhookMixin, StorageBase
+    StoreMixin,
+    SearchMixin,
+    CRUDMixin,
+    AuditMixin,
+    HistoryMixin,
+    WebhookMixin,
+    TransactionMixin,
+    StorageBase,
 ):
     """Async Qdrant storage client for Engram memories.
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from conftest import add_transaction_support
 
 from engram.config import Settings
 from engram.models import (
@@ -452,6 +453,11 @@ class TestMultiTenancy:
 
         settings = Settings(openai_api_key="sk-test-dummy-key")
         workflow_backend = AsyncMock()
+
+        # Add transaction support for encode() calls
+        storage.update_episode = AsyncMock()
+        storage.get_episode = AsyncMock(return_value=None)
+        add_transaction_support(storage)
 
         # Use model_construct to bypass Pydantic validation for mocks
         return EngramService.model_construct(

@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock
 
 import pytest
+from conftest import add_transaction_support
 
 from engram.config import Settings
 from engram.models import (
@@ -71,6 +72,7 @@ class TestEngramServiceEncode:
         storage.update_episode = AsyncMock()
         storage.store_structured = AsyncMock(return_value="struct_123")
         storage.log_audit = AsyncMock()
+        add_transaction_support(storage)
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
@@ -687,6 +689,7 @@ class TestWorkingMemory:
         storage.search_semantic.return_value = []
         storage.search_procedural.return_value = []
         storage.list_structured_memories.return_value = []
+        add_transaction_support(storage)
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
@@ -1096,6 +1099,7 @@ class TestWorkingMemoryLimit:
         storage.store_structured = AsyncMock(return_value="struct_123")
         storage.log_audit = AsyncMock()
         storage.search_episodes.return_value = []
+        add_transaction_support(storage)
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
