@@ -24,6 +24,7 @@ from .audit import AuditMixin
 from .base import COLLECTION_NAMES, DEFAULT_EMBEDDING_DIM, StorageBase
 from .crud import CRUDMixin
 from .history import HistoryMixin
+from .linking import LinkingMixin
 from .search import SearchMixin
 from .store import StoreMixin
 from .transaction import TransactionMixin
@@ -66,6 +67,7 @@ class EngramStorage(
     HistoryMixin,
     WebhookMixin,
     TransactionMixin,
+    LinkingMixin,
     StorageBase,
 ):
     """Async Qdrant storage client for Engram memories.
@@ -80,6 +82,8 @@ class EngramStorage(
     - AuditMixin: log_audit, get_audit_log
     - HistoryMixin: log_history, get_memory_history, get_user_history
     - WebhookMixin: store_webhook, list_webhooks, log_delivery, etc.
+    - TransactionMixin: transaction() context manager for atomic operations
+    - LinkingMixin: link_memories, unlink_memories (bidirectional linking)
 
     Attributes:
         client: Async Qdrant client instance.
