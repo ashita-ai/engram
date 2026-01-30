@@ -96,7 +96,8 @@ class ProceduralMemory(MemoryBase):
 
         Based on Testing Effect research: memories repeatedly involved
         in retrieval/consolidation become stronger and more stable.
-        See: Roediger & Karpicke (2006), PMC5912918.
+        Tested subjects forgot 13% after 1 week vs 52% for study-only.
+        See: Roediger & Karpicke (2006), PMID 26151629.
         """
         self.consolidation_strength = min(1.0, self.consolidation_strength + delta)
         self.consolidation_passes += 1

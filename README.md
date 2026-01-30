@@ -12,7 +12,7 @@ A memory system for AI applications that preserves ground truth, tracks confiden
 
 AI memory systems have an accuracy crisis:
 
-> "All systems achieve answer accuracies below 56%, with hallucination rate and omission rate remaining high."
+> "All systems achieve answer accuracies below 70%, with hallucination rate and omission rate remaining high."
 >
 > — [HaluMem: Hallucinations in LLM Memory Systems](https://arxiv.org/abs/2511.03506)
 
@@ -98,7 +98,7 @@ Result: Redis (MongoDB filtered by negation)
 
 ### 6. Consolidation Strength (Testing Effect)
 
-Memories strengthen through retrieval ([Roediger & Karpicke, 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/): 56% retention vs 14% for non-retrieved):
+Memories strengthen through retrieval ([Roediger & Karpicke, 2006](https://pubmed.ncbi.nlm.nih.gov/26151629/): tested group forgot only 13% vs 52% for study-only):
 
 ```python
 # Memories used more often become more stable
@@ -257,9 +257,9 @@ Engram is **inspired by** cognitive science research:
 
 | Paper | Finding | Engram Implementation |
 |-------|---------|----------------------|
-| [Roediger & Karpicke (2006)](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) | Retrieval strengthens memory (56% vs 14%) | `consolidation_strength`, Testing Effect |
+| [Roediger & Karpicke (2006)](https://pubmed.ncbi.nlm.nih.gov/26151629/) | Retrieval slows forgetting (13% vs 52% after 1 week) | `consolidation_strength`, Testing Effect |
 | [A-MEM (2025)](https://arxiv.org/abs/2502.12110) | 2x multi-hop improvement via linking | `related_ids`, bidirectional links |
-| [HaluMem (2025)](https://arxiv.org/abs/2511.03506) | <56% accuracy without source preservation | Immutable episodes, `verify()` |
+| [HaluMem (2025)](https://arxiv.org/abs/2511.03506) | <70% accuracy without source preservation | Immutable episodes, `verify()` |
 | [Cognitive Workspace (2025)](https://arxiv.org/abs/2508.13171) | 58.6% memory reuse vs 0% for naive RAG | Hierarchical memory tiers |
 
 **Note:** Engram uses these concepts as engineering abstractions, not strict cognitive implementations.

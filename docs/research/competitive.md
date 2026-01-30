@@ -75,7 +75,7 @@ Episode Subgraph (raw) ──┬──→ Semantic Entity Subgraph (extracted)
 - **Complex schema** — Three interconnected subgraphs
 - **LLM extraction on write** — Same error propagation risk as Mem0
 
-**Source**: [Zep Paper](https://arxiv.org/abs/2501.13956), [Documentation](https://docs.getzep.com)
+**Source**: [Zep Paper](https://arxiv.org/abs/2501.13956), [Documentation](https://help.getzep.com)
 
 ---
 
@@ -124,7 +124,7 @@ Documents → Indexing → Query Engine / Chat Engine → Response + Context
 - **Stateless agents** — External integration needed for persistence
 - **No consolidation hierarchy** — Flat memory structure
 
-**Source**: [Documentation](https://docs.llamaindex.ai/)
+**Source**: [Documentation](https://developers.llamaindex.ai/)
 
 ---
 
@@ -270,7 +270,7 @@ Novel approaches from recent literature:
 
 **What**: Memories that are repeatedly involved in retrieval/consolidation become stronger and more stable.
 
-**Source**: [Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)
+**Source**: [Roediger & Karpicke 2006](https://pubmed.ncbi.nlm.nih.gov/26151629/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)
 
 **Key findings**:
 - "Repeated remembering strengthens memories much more so than repeated learning"
@@ -308,7 +308,7 @@ Features documented elsewhere but not yet implemented:
 
 ## References
 
-- [HaluMem: Hallucinations in LLM Memory](https://arxiv.org/html/2511.03506) — Benchmark showing <56% accuracy
+- [HaluMem: Evaluating Hallucinations in Memory Systems](https://arxiv.org/abs/2511.03506) — Benchmark showing <70% accuracy
 - [Mem0 Paper](https://arxiv.org/abs/2504.19413)
 - [Zep Paper](https://arxiv.org/abs/2501.13956)
 - [MemGPT Paper](https://arxiv.org/abs/2310.08560)
@@ -316,5 +316,5 @@ Features documented elsewhere but not yet implemented:
 - [Cognitive Workspace](https://arxiv.org/abs/2508.13171)
 - [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) — Nagy et al. 2025 (episodic/semantic distinction)
 - [Sleep and Memory](https://www.nature.com/articles/s42003-025-07868-5) — Yuksel et al. 2025 (SWS×REM interaction)
-- [Testing Effect](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) — Roediger & Karpicke, 2006
+- [Testing Effect](https://pubmed.ncbi.nlm.nih.gov/26151629/) — Roediger & Karpicke, 2006
 - [Retrieval-Induced Forgetting](https://pubmed.ncbi.nlm.nih.gov/7931095/) — Anderson, Bjork & Bjork, 1994

@@ -17,8 +17,8 @@ Most AI memory systems use LLM-based extraction on every message. This creates c
 
 The HaluMem benchmark (2024) evaluated memory-augmented LLM systems on factual accuracy:
 
-> "All systems achieve answer accuracies below 56%, with both hallucination rate and omission rate remaining high... Systems suffer omission rates above 50%, primarily stemming from insufficient coverage in memory extraction."
-> — [HaluMem: Evaluating Hallucinations in Memory Systems](https://arxiv.org/html/2511.03506)
+> "All systems achieve answer accuracies below 70%, with both hallucination rate and omission rate remaining high... Systems suffer omission rates above 50%, primarily stemming from insufficient coverage in memory extraction."
+> — [HaluMem: Evaluating Hallucinations in Memory Systems](https://arxiv.org/abs/2511.03506)
 
 Error types in LLM extraction:
 - **Omission** — Missing important facts
@@ -77,8 +77,8 @@ Memory research shows that information is lost during consolidation and retrieva
 
 This is a problem for AI systems. Recent benchmarks show alarming error rates:
 
-> "All systems achieve answer accuracies below 56%, with both hallucination rate and omission rate remaining high... Systems suffer omission rates above 50%, primarily stemming from insufficient coverage in memory extraction."
-> — [HaluMem: Hallucinations in LLM Memory, 2024](https://arxiv.org/html/2511.03506)
+> "All systems achieve answer accuracies below 70%, with both hallucination rate and omission rate remaining high... Systems suffer omission rates above 50%, primarily stemming from insufficient coverage in memory extraction."
+> — [HaluMem: Evaluating Hallucinations in Memory Systems](https://arxiv.org/abs/2511.03506)
 
 **Engineering implication**: If derived memories can be wrong, the original is needed to recover. Engram preserves ground truth so extraction errors are correctable.
 
@@ -235,10 +235,10 @@ Engram uses cognitive science as design inspiration, not strict implementation.
 - Squire & Zola (1996). Structure and function of declarative and nondeclarative memory systems.
 
 ### Recent Research (2024-2025)
-- [HaluMem: Hallucinations in LLM Memory Systems](https://arxiv.org/html/2511.03506)
+- [HaluMem: Evaluating Hallucinations in Memory Systems](https://arxiv.org/abs/2511.03506)
 - [Constructive Memory](https://onlinelibrary.wiley.com/doi/10.1111/cogs.70113) — Episodic and semantic memory are constructive
 - [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) (Nagy et al. 2025) — Memory as compression under constraints. Semantic memory encodes regularities; episodic memory preserves surprising experiences. *Engram implements surprise-based importance scoring via `_calculate_surprise()` to prioritize novel content.*
 - [Sleep and Memory Consolidation](https://www.nature.com/articles/s42003-025-07868-5) (Yuksel et al. 2025) — Memory benefit from SWS×REM product interaction; REM cueing alone impairs memory. *Cited for context; Engram does not model sleep stages.*
 - [Dual Pathways to LTM](https://www.news-medical.net/news/20241206/Researchers-discover-new-pathway-to-forming-long-term-memories-in-the-brain.aspx) — LTM can form independently of STM
 - [Molecular Memory Timers](https://www.sciencedaily.com/releases/2025/11/251130050712.htm) — Importance gating in memory persistence
-- [Testing Effect / Retrieval Practice](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) — Roediger & Karpicke 2006: "Repeated remembering strengthens memories much more so than repeated learning." Considered [one of the most robust phenomena in memory research](https://www.sciencedirect.com/topics/psychology/testing-effect). Engram's `consolidation_strength` field is based on this finding.
+- [Testing Effect / Retrieval Practice](https://pubmed.ncbi.nlm.nih.gov/26151629/) — Roediger & Karpicke 2006: Tested group forgot only 13% after 1 week vs 52% for study-only group. Considered [one of the most robust phenomena in memory research](https://www.sciencedirect.com/topics/psychology/testing-effect). Engram's `consolidation_strength` field is based on this finding.

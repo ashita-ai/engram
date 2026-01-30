@@ -170,9 +170,9 @@ Inspired by A-MEM research showing 2x improvement on multi-hop reasoning benchma
 
 ### 5. Consolidation Strength (Testing Effect)
 
-Memories that are repeatedly involved in consolidation become stronger and more stable. This is based on the **Testing Effect** research ([Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)):
+Memories that are repeatedly involved in consolidation become stronger and more stable. This is based on the **Testing Effect** research ([Roediger & Karpicke 2006](https://pubmed.ncbi.nlm.nih.gov/26151629/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)):
 
-> "Repeated remembering strengthens memories much more so than repeated learning."
+> Tested subjects forgot only 13% after 1 week, compared to 52% for study-only subjects.
 
 The `consolidation_strength` field on SemanticMemory tracks how well-established a memory is:
 - 0.0: Newly created, not yet reinforced
@@ -698,5 +698,5 @@ This architecture is informed by recent research (2024-2025):
 |---------|----------|-------------|
 | Dynamic linking | [A-MEM](https://arxiv.org/abs/2502.12110) | 2x improvement on multi-hop reasoning |
 | Buffer promotion | [Cognitive Workspace](https://arxiv.org/abs/2508.13171) | 58.6% memory reuse vs 0% for naive RAG |
-| Consolidation strength | [Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) | Repeated retrieval strengthens memories (Testing Effect) |
-| Ground truth | [HaluMem](https://arxiv.org/html/2511.03506) | <56% accuracy without source preservation |
+| Consolidation strength | [Roediger & Karpicke 2006](https://pubmed.ncbi.nlm.nih.gov/26151629/) | Tested subjects forgot 13% vs 52% for study-only (Testing Effect) |
+| Ground truth | [HaluMem](https://arxiv.org/abs/2511.03506) | <70% accuracy without source preservation |

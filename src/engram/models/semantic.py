@@ -207,7 +207,8 @@ class SemanticMemory(MemoryBase):
 
         Based on Testing Effect research: memories repeatedly involved
         in retrieval/consolidation become stronger and more stable.
-        See: Roediger & Karpicke (2006), PMC5912918.
+        Tested subjects forgot 13% after 1 week vs 52% for study-only.
+        See: Roediger & Karpicke (2006), PMID 26151629.
 
         Both consolidation_strength and consolidation_passes are incremented
         together to keep them in sync. Strength increases by delta (0.1),
