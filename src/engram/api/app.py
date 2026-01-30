@@ -22,7 +22,7 @@ from engram.logging import configure_logging, get_logger
 from engram.service import EngramService
 from engram.workflows import init_workflows, shutdown_workflows
 
-from .router import router, set_service
+from .router import router
 
 logger = get_logger(__name__)
 
@@ -31,8 +31,11 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application lifespan.
 
-    Initializes the EngramService and DBOS workflows on startup,
-    and cleans up on shutdown.
+    Initializes the EngramService and stores it on app.state for
+    dependency injection. This approach:
+    - Supports multiple app instances (e.g., in tests)
+    - Enables clean dependency injection via request.app.state
+    - Avoids module-level global state
     """
     settings = Settings()
 
@@ -42,9 +45,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     service = EngramService.create(settings)
 
-    # Initialize storage and set service
+    # Initialize storage and store on app.state
     await service.initialize()
-    set_service(service)
+    app.state.service = service
 
     # Initialize durable workflows (DBOS or Temporal based on config)
     try:
@@ -59,7 +62,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Cleanup
     shutdown_workflows()  # Sync call
     await service.close()
-    set_service(None)  # type: ignore[arg-type]
+    app.state.service = None
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

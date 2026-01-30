@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from engram.api.router import router, set_service
+from engram.api.router import router
 from engram.api.schemas import (
     EncodeRequest,
     HealthResponse,
@@ -14,6 +14,19 @@ from engram.api.schemas import (
 )
 from engram.models import Episode, StructuredMemory
 from engram.service import EncodeResult, EngramService, RecallResult
+
+
+def create_test_app(service: EngramService | None = None) -> FastAPI:
+    """Create a test FastAPI app with optional service on app.state.
+
+    This follows the recommended FastAPI pattern of storing service
+    instances on app.state for dependency injection.
+    """
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1")
+    if service is not None:
+        app.state.service = service
+    return app
 
 
 @pytest.fixture
@@ -35,11 +48,7 @@ def mock_service():
 @pytest.fixture
 def test_app(mock_service):
     """Create a test FastAPI app with mocked service."""
-    app = FastAPI()
-    app.include_router(router, prefix="/api/v1")
-    set_service(mock_service)
-    yield app
-    set_service(None)  # type: ignore[arg-type]
+    return create_test_app(mock_service)
 
 
 @pytest.fixture
@@ -63,9 +72,7 @@ class TestHealthEndpoint:
 
     def test_health_when_service_not_initialized(self):
         """Should return unhealthy when service not ready."""
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
-        set_service(None)  # type: ignore[arg-type]
+        app = create_test_app()  # No service set
         test_client = TestClient(app)
 
         response = test_client.get("/api/v1/health")
@@ -182,9 +189,7 @@ class TestEncodeEndpoint:
 
     def test_encode_service_not_initialized(self):
         """Should return 503 when service not initialized."""
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
-        set_service(None)  # type: ignore[arg-type]
+        app = create_test_app()  # No service set
         test_client = TestClient(app)
 
         response = test_client.post(
@@ -600,9 +605,7 @@ class TestRecallEndpoint:
 
     def test_recall_service_not_initialized(self):
         """Should return 503 when service not initialized."""
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
-        set_service(None)  # type: ignore[arg-type]
+        app = create_test_app()  # No service set
         test_client = TestClient(app)
 
         response = test_client.post(
@@ -808,9 +811,7 @@ class TestDeleteEndpoint:
 
     def test_delete_service_not_initialized(self):
         """Should return 503 when service not initialized."""
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
-        set_service(None)  # type: ignore[arg-type]
+        app = create_test_app()  # No service set
         test_client = TestClient(app)
 
         response = test_client.delete(
@@ -892,9 +893,7 @@ class TestBulkDeleteEndpoint:
 
     def test_bulk_delete_service_not_initialized(self):
         """Should return 503 when service not initialized."""
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
-        set_service(None)  # type: ignore[arg-type]
+        app = create_test_app()  # No service set
         test_client = TestClient(app)
 
         response = test_client.delete("/api/v1/users/user_123/memories")
@@ -908,10 +907,7 @@ class TestUpdateMemoryEndpoint:
     @pytest.fixture
     def client(self, mock_service):
         """Create test client with mock service."""
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
-        set_service(mock_service)
-        return TestClient(app)
+        return TestClient(create_test_app(mock_service))
 
     @pytest.fixture
     def mock_service(self):
@@ -1404,9 +1400,7 @@ class TestWorkflowEndpoints:
 
     def test_workflow_service_not_initialized(self):
         """Should return 503 when service not initialized."""
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
-        set_service(None)  # type: ignore[arg-type]
+        app = create_test_app()  # No service set
         test_client = TestClient(app)
 
         response = test_client.post(
@@ -1423,10 +1417,7 @@ class TestLinkEndpoints:
     @pytest.fixture
     def client(self, mock_service):
         """Create test client with mock service."""
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1")
-        set_service(mock_service)
-        return TestClient(app)
+        return TestClient(create_test_app(mock_service))
 
     @pytest.fixture
     def mock_service(self):

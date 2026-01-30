@@ -6,7 +6,7 @@ import logging
 import time
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from engram.config import settings
 from engram.models import AuditEntry, HistoryEntry
@@ -83,27 +83,31 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Service instance (set by app lifespan)
-_service: EngramService | None = None
 
+async def get_service(request: Request) -> EngramService:
+    """Dependency to get the EngramService instance from app.state.
 
-def set_service(service: EngramService) -> None:
-    """Set the global service instance."""
-    global _service
-    _service = service
-
-
-async def get_service() -> EngramService:
-    """Dependency to get the EngramService instance."""
-    if _service is None:
+    This uses FastAPI's recommended pattern of storing application-scoped
+    state on app.state, accessed via the request object. This approach:
+    - Supports multiple app instances (e.g., in tests)
+    - Enables clean dependency injection
+    - Avoids module-level global state
+    """
+    service: EngramService | None = getattr(request.app.state, "service", None)
+    if service is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Service not initialized",
         )
-    return _service
+    return service
 
 
 ServiceDep = Annotated[EngramService, Depends(get_service)]
+
+
+def get_service_from_app_state(request: Request) -> EngramService | None:
+    """Get service from app.state without raising (for health checks)."""
+    return getattr(request.app.state, "service", None)
 
 
 def get_effective_user_id(
@@ -131,13 +135,14 @@ def get_effective_user_id(
 
 
 @router.get("/health", response_model=HealthResponse, tags=["system"])
-async def health_check() -> HealthResponse:
+async def health_check(request: Request) -> HealthResponse:
     """Check service health.
 
     Returns the current health status of the Engram service,
     including storage connectivity.
     """
-    storage_connected = _service is not None
+    service = get_service_from_app_state(request)
+    storage_connected = service is not None
 
     if storage_connected:
         return HealthResponse(
