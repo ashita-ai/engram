@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from engram.models.base import OperationStatus
 from engram.service.contradiction import (
     ConflictAnalysis,
     ConflictDetection,
@@ -73,6 +74,7 @@ class TestConflictAnalysis:
         assert analysis.is_conflict is True
         assert analysis.conflict_type == "direct"
         assert analysis.confidence == 0.85
+        assert analysis.status == OperationStatus.SUCCESS  # Default status
 
     def test_create_no_conflict(self):
         """Should create non-conflict analysis."""
@@ -84,6 +86,21 @@ class TestConflictAnalysis:
         )
         assert analysis.is_conflict is False
         assert analysis.conflict_type == "none"
+        assert analysis.status == OperationStatus.SUCCESS
+
+    def test_create_failed_analysis(self):
+        """Should create failed analysis with status and error message."""
+        analysis = ConflictAnalysis(
+            status=OperationStatus.FAILED,
+            is_conflict=False,
+            conflict_type="none",
+            confidence=0.0,
+            explanation="Analysis failed due to LLM error",
+            error_message="Connection timeout",
+        )
+        assert analysis.status == OperationStatus.FAILED
+        assert analysis.is_conflict is False
+        assert analysis.error_message == "Connection timeout"
 
 
 class TestGetConflictAgent:
@@ -135,8 +152,8 @@ class TestAnalyzePair:
             assert result.confidence == 0.9
 
     @pytest.mark.asyncio
-    async def test_handles_error_gracefully(self):
-        """Should return no conflict on LLM error."""
+    async def test_handles_error_with_failed_status(self):
+        """Should return FAILED status on LLM error, not masquerade as success."""
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(side_effect=Exception("LLM error"))
 
@@ -145,7 +162,11 @@ class TestAnalyzePair:
             return_value=mock_agent,
         ):
             result = await analyze_pair("Content A", "Content B")
-            assert result.is_conflict is False
+            # Key change: status is FAILED, not SUCCESS
+            assert result.status == OperationStatus.FAILED
+            assert result.is_conflict is False  # Fallback value
+            assert result.error_message is not None
+            assert "LLM error" in result.error_message  # May be wrapped in retry message
             assert "failed" in result.explanation.lower()
 
 
@@ -258,3 +279,47 @@ class TestDetectContradictions:
         )
 
         assert len(result) == 0
+
+    @pytest.mark.asyncio
+    async def test_skips_failed_analysis(self):
+        """Should skip pairs where LLM analysis failed, not treat as 'no conflict'."""
+        mock_new_mem = MagicMock()
+        mock_new_mem.id = "sem_new"
+        mock_new_mem.content = "User prefers PostgreSQL"
+        mock_new_mem.embedding = [0.9, 0.1, 0.0]
+
+        mock_existing_mem = MagicMock()
+        mock_existing_mem.id = "sem_existing"
+        mock_existing_mem.content = "User doesn't like SQL databases"
+        mock_existing_mem.embedding = [0.85, 0.15, 0.0]
+
+        mock_embedder = MagicMock()
+
+        # Return a FAILED analysis - this should NOT be treated as "no conflict found"
+        failed_analysis = ConflictAnalysis(
+            status=OperationStatus.FAILED,
+            is_conflict=False,
+            confidence=0.0,
+            explanation="Analysis failed due to LLM error",
+            error_message="Rate limit exceeded",
+        )
+
+        with patch(
+            "engram.service.contradiction.analyze_pair",
+            return_value=failed_analysis,
+        ):
+            with patch(
+                "engram.service.helpers.cosine_similarity",
+                return_value=0.8,  # Above threshold - would normally trigger analysis
+            ):
+                result = await detect_contradictions(
+                    new_memories=[mock_new_mem],
+                    existing_memories=[mock_existing_mem],
+                    embedder=mock_embedder,
+                    user_id="user_123",
+                    similarity_threshold=0.5,
+                )
+
+                # No conflicts returned because analysis failed
+                # (not because no conflict was found)
+                assert len(result) == 0

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from engram.models.base import OperationStatus
 from engram.service.query_expansion import (
     ExpandedQuery,
     expand_query,
@@ -21,6 +22,7 @@ class TestExpandedQuery:
         assert expanded.original == "hello"
         assert expanded.expanded_terms == []
         assert expanded.reasoning == ""
+        assert expanded.status == OperationStatus.SUCCESS  # Default status
 
     def test_create_with_all_fields(self):
         """Should create with all fields."""
@@ -33,6 +35,21 @@ class TestExpandedQuery:
         assert len(expanded.expanded_terms) == 3
         assert "contact" in expanded.expanded_terms
         assert expanded.reasoning == "Related contact methods"
+        assert expanded.status == OperationStatus.SUCCESS
+
+    def test_create_failed_expansion(self):
+        """Should create failed expansion with status and error message."""
+        expanded = ExpandedQuery(
+            status=OperationStatus.FAILED,
+            original="test query",
+            expanded_terms=[],
+            reasoning="Expansion failed due to LLM error",
+            error_message="API rate limit",
+        )
+        assert expanded.status == OperationStatus.FAILED
+        assert expanded.original == "test query"
+        assert expanded.expanded_terms == []
+        assert expanded.error_message == "API rate limit"
 
     def test_max_terms_limit(self):
         """Should enforce max 5 expanded terms via validation."""
@@ -89,8 +106,8 @@ class TestExpandQuery:
             assert "address" in result.expanded_terms
 
     @pytest.mark.asyncio
-    async def test_handles_error_gracefully(self):
-        """Should return original query on LLM error."""
+    async def test_handles_error_with_failed_status(self):
+        """Should return FAILED status on LLM error, not masquerade as success."""
         mock_agent = AsyncMock()
         mock_agent.run = AsyncMock(side_effect=Exception("LLM error"))
 
@@ -99,8 +116,12 @@ class TestExpandQuery:
             return_value=mock_agent,
         ):
             result = await expand_query("email")
+            # Key change: status is FAILED, not SUCCESS
+            assert result.status == OperationStatus.FAILED
             assert result.original == "email"
-            assert result.expanded_terms == []
+            assert result.expanded_terms == []  # Fallback value
+            assert result.error_message is not None
+            assert "LLM error" in result.error_message  # May be wrapped in retry message
             assert "failed" in result.reasoning.lower()
 
 
@@ -139,6 +160,35 @@ class TestGetCombinedEmbedding:
             )
 
             assert result == [0.1, 0.2, 0.3]
+
+    @pytest.mark.asyncio
+    async def test_returns_original_when_expansion_fails(self):
+        """Should return original embedding when expansion fails with FAILED status."""
+        mock_embedder = MagicMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
+
+        # Return a FAILED expansion - should fall back to original embedding
+        failed_expansion = ExpandedQuery(
+            status=OperationStatus.FAILED,
+            original="email",
+            expanded_terms=[],
+            reasoning="Expansion failed due to LLM error",
+            error_message="Rate limit exceeded",
+        )
+
+        with patch(
+            "engram.service.query_expansion.expand_query",
+            return_value=failed_expansion,
+        ):
+            result = await get_combined_embedding(
+                query="email",
+                embedder=mock_embedder,
+                expand=True,
+            )
+
+            # Should fall back to original embedding
+            assert result == [0.1, 0.2, 0.3]
+            mock_embedder.embed.assert_called_once_with("email")
 
     @pytest.mark.asyncio
     async def test_combines_embeddings_with_weights(self):

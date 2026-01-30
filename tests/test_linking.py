@@ -13,9 +13,11 @@ from engram.linking import (
     DiscoveredLink,
     LinkDiscoveryResult,
     MemoryEvolution,
+    discover_and_apply_links,
     discover_links,
     evolve_memory,
 )
+from engram.models.base import OperationStatus
 
 
 class TestLinkTypes:
@@ -167,6 +169,18 @@ class TestLinkDiscoveryResult:
         assert result.links == []
         assert result.evolutions == []
         assert result.reasoning == "No meaningful links found"
+        assert result.status == OperationStatus.SUCCESS  # Default status
+
+    def test_failed_result(self):
+        """Should create failed result with status and error message."""
+        result = LinkDiscoveryResult(
+            status=OperationStatus.FAILED,
+            reasoning="Link discovery failed due to LLM error",
+            error_message="API timeout",
+        )
+        assert result.status == OperationStatus.FAILED
+        assert result.links == []
+        assert result.error_message == "API timeout"
 
     def test_result_with_links(self):
         """Should create a result with discovered links."""
@@ -299,8 +313,8 @@ class TestDiscoverLinks:
         assert result.links[0].target_id == "high_conf"
 
     @pytest.mark.asyncio
-    async def test_discover_links_handles_llm_error(self):
-        """Should return error result when LLM fails."""
+    async def test_discover_links_handles_llm_error_with_failed_status(self):
+        """Should return FAILED status when LLM fails, not masquerade as success."""
         mock_agent_instance = AsyncMock()
         mock_agent_instance.run = AsyncMock(side_effect=Exception("LLM unavailable"))
 
@@ -311,8 +325,51 @@ class TestDiscoverLinks:
                 candidate_memories=[{"id": "c1", "content": "Candidate"}],
             )
 
-        assert result.links == []
+        # Key change: status is FAILED, not SUCCESS
+        assert result.status == OperationStatus.FAILED
+        assert result.links == []  # Fallback value
+        assert result.error_message is not None
+        assert "LLM unavailable" in result.error_message  # May be wrapped in retry message
         assert "failed" in result.reasoning.lower()
+
+
+class TestDiscoverAndApplyLinks:
+    """Tests for discover_and_apply_links function."""
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_discovery_fails(self):
+        """Should return 0 links when discovery fails, not silently succeed."""
+        mock_memory = MagicMock()
+        mock_memory.id = "new_mem"
+        mock_memory.content = "Test content"
+
+        mock_candidate = MagicMock()
+        mock_candidate.id = "candidate_1"
+        mock_candidate.content = "Candidate content"
+        mock_candidate.keywords = []
+        mock_candidate.tags = []
+
+        mock_storage = MagicMock()
+
+        # Return a FAILED discovery result
+        failed_result = LinkDiscoveryResult(
+            status=OperationStatus.FAILED,
+            reasoning="Link discovery failed due to LLM error",
+            error_message="Rate limit exceeded",
+        )
+
+        with patch(
+            "engram.linking.discovery.discover_links",
+            return_value=failed_result,
+        ):
+            links_created = await discover_and_apply_links(
+                new_memory=mock_memory,
+                candidate_memories=[mock_candidate],
+                storage=mock_storage,
+            )
+
+            # No links should be created when discovery fails
+            assert links_created == 0
 
 
 class TestEvolveMemory:

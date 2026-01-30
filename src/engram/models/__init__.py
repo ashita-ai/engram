@@ -19,7 +19,14 @@ Supporting Types:
 """
 
 from .audit import AuditEntry
-from .base import ConfidenceScore, ExtractionMethod, MemoryBase, Staleness, generate_id
+from .base import (
+    ConfidenceScore,
+    ExtractionMethod,
+    MemoryBase,
+    OperationStatus,
+    Staleness,
+    generate_id,
+)
 from .episode import Episode, QuickExtracts
 from .history import ChangeType, HistoryEntry, TriggerType
 from .procedural import ProceduralMemory
@@ -40,6 +47,7 @@ __all__ = [
     "ConfidenceScore",
     "ExtractionMethod",
     "MemoryBase",
+    "OperationStatus",
     "Staleness",
     "generate_id",
     # Memory types
