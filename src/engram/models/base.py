@@ -22,6 +22,23 @@ class ExtractionMethod(str, Enum):
     INFERRED = "inferred"  # LLM-derived, uncertain (confidence: LLM-assessed)
 
 
+class OperationStatus(str, Enum):
+    """Status of an LLM or async operation.
+
+    Used to distinguish successful results from failures that return
+    degraded/default data. Callers MUST check status before trusting results.
+
+    Values:
+        SUCCESS: Operation completed successfully, results are trustworthy.
+        FAILED: Operation failed, results contain default/fallback values.
+        PARTIAL: Operation partially succeeded, some results may be degraded.
+    """
+
+    SUCCESS = "success"
+    FAILED = "failed"
+    PARTIAL = "partial"
+
+
 class Staleness(str, Enum):
     """Freshness state of a memory.
 

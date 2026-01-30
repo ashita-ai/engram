@@ -16,6 +16,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from engram.models.base import OperationStatus
+
 logger = logging.getLogger(__name__)
 
 # Relationship types for memory links
@@ -99,14 +101,23 @@ class LinkDiscoveryResult(BaseModel):
 
     Contains discovered links and optional evolution suggestions.
 
+    IMPORTANT: Always check `status` before trusting results. When `status`
+    is FAILED, empty `links` is a fallback, not a finding that no links exist.
+
     Attributes:
+        status: Operation status - check this before trusting results.
         links: List of discovered relationships.
         evolutions: Suggested updates to existing memories.
         reasoning: Overall analysis reasoning.
+        error_message: Error details when status is FAILED.
     """
 
     model_config = ConfigDict(extra="forbid")
 
+    status: OperationStatus = Field(
+        default=OperationStatus.SUCCESS,
+        description="Operation status - check this before trusting results",
+    )
     links: list[DiscoveredLink] = Field(
         default_factory=list,
         description="Discovered relationships",
@@ -118,6 +129,10 @@ class LinkDiscoveryResult(BaseModel):
     reasoning: str = Field(
         default="",
         description="Overall analysis reasoning",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Error details when status is FAILED",
     )
 
 
@@ -228,10 +243,11 @@ Also suggest any metadata evolutions for existing memories if appropriate."""
 
     except Exception as e:
         logger.exception("Link discovery failed: %s", e)
-        error_result: LinkDiscoveryResult = LinkDiscoveryResult(
-            reasoning=f"Link discovery failed: {e}"
+        return LinkDiscoveryResult(
+            status=OperationStatus.FAILED,
+            reasoning="Link discovery failed due to LLM error",
+            error_message=str(e),
         )
-        return error_result
 
 
 async def evolve_memory(
@@ -311,6 +327,15 @@ async def discover_and_apply_links(
         candidate_memories=candidates_data,
         min_confidence=min_confidence,
     )
+
+    # Check for failed discovery and log appropriately
+    if result.status == OperationStatus.FAILED:
+        logger.warning(
+            "Link discovery failed for memory %s: %s. No links will be created.",
+            getattr(new_memory, "id", "unknown"),
+            result.error_message,
+        )
+        return 0
 
     links_created = 0
 

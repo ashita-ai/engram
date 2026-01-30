@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 
+from engram.models.base import OperationStatus
+
 if TYPE_CHECKING:
     from engram.embeddings import Embedder
 
@@ -20,12 +22,22 @@ logger = logging.getLogger(__name__)
 class ExpandedQuery(BaseModel):
     """Result of query expansion.
 
+    IMPORTANT: Always check `status` before trusting results. When `status`
+    is FAILED, empty `expanded_terms` is a fallback, not a finding that
+    no expansion is possible.
+
     Attributes:
+        status: Operation status - check this before trusting results.
         original: The original query.
         expanded_terms: List of related terms.
         reasoning: Brief explanation of why these terms are related.
+        error_message: Error details when status is FAILED.
     """
 
+    status: OperationStatus = Field(
+        default=OperationStatus.SUCCESS,
+        description="Operation status - check this before trusting results",
+    )
     original: str = Field(description="The original query")
     expanded_terms: list[str] = Field(
         default_factory=list,
@@ -35,6 +47,10 @@ class ExpandedQuery(BaseModel):
     reasoning: str = Field(
         default="",
         description="Brief reasoning for the expansion",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Error details when status is FAILED",
     )
 
 
@@ -101,8 +117,14 @@ async def expand_query(
         return expanded
     except Exception as e:
         logger.warning(f"Query expansion failed for '{query}': {e}")
-        # Return original query without expansion on error
-        return ExpandedQuery(original=query, expanded_terms=[], reasoning=f"Expansion failed: {e}")
+        # Return original query with FAILED status - caller should check status
+        return ExpandedQuery(
+            status=OperationStatus.FAILED,
+            original=query,
+            expanded_terms=[],
+            reasoning="Expansion failed due to LLM error",
+            error_message=str(e),
+        )
 
 
 async def get_combined_embedding(
@@ -133,8 +155,16 @@ async def get_combined_embedding(
     # Expand query
     expanded = await expand_query(query, expansion_model)
 
+    # Check for failed expansion and log appropriately
+    if expanded.status == OperationStatus.FAILED:
+        logger.warning(
+            f"Query expansion failed for '{query}': {expanded.error_message}. "
+            "Falling back to original query embedding."
+        )
+        return await embedder.embed(query)
+
     if not expanded.expanded_terms:
-        # No expansion, just return original embedding
+        # Successful but no expansion needed, just return original embedding
         return await embedder.embed(query)
 
     # Embed all terms

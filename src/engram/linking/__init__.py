@@ -24,6 +24,7 @@ from .discovery import (
     LinkDiscoveryResult,
     LinkType,
     MemoryEvolution,
+    discover_and_apply_links,
     discover_links,
     evolve_memory,
 )
@@ -34,6 +35,7 @@ __all__ = [
     "LinkDiscoveryResult",
     "LinkType",
     "MemoryEvolution",
+    "discover_and_apply_links",
     "discover_links",
     "evolve_memory",
 ]

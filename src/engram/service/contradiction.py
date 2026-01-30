@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_ai import Agent
 
+from engram.models.base import OperationStatus
+
 if TYPE_CHECKING:
     from engram.embeddings import Embedder
     from engram.models import SemanticMemory, StructuredMemory
@@ -61,10 +63,18 @@ class ConflictDetection(BaseModel):
 
 
 class ConflictAnalysis(BaseModel):
-    """LLM output for conflict analysis between two memories."""
+    """LLM output for conflict analysis between two memories.
+
+    IMPORTANT: Always check `status` before trusting results. When `status`
+    is FAILED, the `is_conflict=False` result is a fallback, not a finding.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    status: OperationStatus = Field(
+        default=OperationStatus.SUCCESS,
+        description="Operation status - check this before trusting results",
+    )
     is_conflict: bool = Field(description="Whether these memories conflict")
     conflict_type: str = Field(
         default="none",
@@ -77,6 +87,10 @@ class ConflictAnalysis(BaseModel):
     suggested_resolution: str = Field(
         default="",
         description="Suggested resolution: newer_wins, flag_for_review, lower_confidence, create_negation",
+    )
+    error_message: str | None = Field(
+        default=None,
+        description="Error details when status is FAILED",
     )
 
 
@@ -168,10 +182,12 @@ Determine if they contradict each other and explain why."""
     except Exception as e:
         logger.warning(f"Conflict analysis failed: {e}")
         return ConflictAnalysis(
+            status=OperationStatus.FAILED,
             is_conflict=False,
             conflict_type="none",
             confidence=0.0,
-            explanation=f"Analysis failed: {e}",
+            explanation="Analysis failed due to LLM error",
+            error_message=str(e),
         )
 
 
@@ -239,6 +255,14 @@ async def detect_contradictions(
                     existing_mem.content,
                     model=model,
                 )
+
+                # Skip failed analyses - don't treat LLM errors as "no conflict"
+                if analysis.status == OperationStatus.FAILED:
+                    logger.warning(
+                        f"Skipping conflict check for {new_mem.id} vs {existing_mem.id}: "
+                        f"LLM analysis failed - {analysis.error_message}"
+                    )
+                    continue
 
                 if analysis.is_conflict and analysis.confidence >= 0.5:
                     conflict = ConflictDetection(
@@ -314,6 +338,14 @@ async def detect_contradictions_in_structured(
                     existing_mem.summary,
                     model=model,
                 )
+
+                # Skip failed analyses - don't treat LLM errors as "no conflict"
+                if analysis.status == OperationStatus.FAILED:
+                    logger.warning(
+                        f"Skipping conflict check for {new_mem.id} vs {existing_mem.id}: "
+                        f"LLM analysis failed - {analysis.error_message}"
+                    )
+                    continue
 
                 if analysis.is_conflict and analysis.confidence >= 0.5:
                     conflict = ConflictDetection(
