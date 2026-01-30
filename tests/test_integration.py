@@ -10,6 +10,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from conftest import add_transaction_support
 
 from engram.config import Settings
 from engram.models import Episode, StructuredMemory
@@ -94,6 +95,7 @@ class TestEncodeRecallWorkflow:
         storage.search_structured = AsyncMock(side_effect=search_structured)
         storage.initialize = AsyncMock()
         storage.close = AsyncMock()
+        add_transaction_support(storage)
 
         return storage
 
@@ -249,6 +251,7 @@ class TestExtractionIntegration:
         storage.store_structured = AsyncMock(return_value="struct_123")
         storage.initialize = AsyncMock()
         storage.close = AsyncMock()
+        add_transaction_support(storage)
 
         embedder = AsyncMock()
         embedder.embed = AsyncMock(return_value=[0.1, 0.2, 0.3])
@@ -714,9 +717,12 @@ class TestBiTemporalRecall:
         storage.search_episodes = AsyncMock(side_effect=search_episodes)
         storage.search_structured = AsyncMock(side_effect=search_structured)
         storage.log_audit = AsyncMock()
+        storage.update_episode = AsyncMock()
+        storage.get_episode = AsyncMock(return_value=None)
         storage.initialize = AsyncMock()
         storage.close = AsyncMock()
 
+        add_transaction_support(storage)
         return storage
 
     @pytest.mark.asyncio
@@ -854,10 +860,12 @@ class TestVerifyWorkflow:
         storage.store_structured = AsyncMock(side_effect=store_structured)
         storage.get_episode = AsyncMock(side_effect=get_episode)
         storage.get_structured = AsyncMock(side_effect=get_structured)
+        storage.update_episode = AsyncMock()
         storage.log_audit = AsyncMock()
         storage.initialize = AsyncMock()
         storage.close = AsyncMock()
 
+        add_transaction_support(storage)
         return storage
 
     @pytest.mark.asyncio
@@ -995,7 +1003,11 @@ class TestFreshnessHints:
         storage.search_structured = AsyncMock(side_effect=search_structured)
         storage.search_semantic = AsyncMock(side_effect=search_semantic)
         storage.search_procedural = AsyncMock(side_effect=search_procedural)
+        storage.update_episode = AsyncMock()
+        storage.get_episode = AsyncMock(return_value=None)
         storage.log_audit = AsyncMock()
+
+        add_transaction_support(storage)
         return storage
 
     @pytest.mark.asyncio
