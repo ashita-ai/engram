@@ -9,6 +9,8 @@ Technical comparison of AI memory systems. Based on published papers and documen
 | **Engram** | Yes | Yes | Yes | Partial | Yes | Yes |
 | **Mem0** | No | No | Partial | No | Yes (Mem0ᵍ) | No |
 | **Zep/Graphiti** | Yes | No | No | Yes | Partial | No |
+| **LangChain** | No | No | No | No | Partial | No |
+| **LlamaIndex** | No | No | No | No | Partial | No |
 | **Letta/MemGPT** | Partial | No | No | No | No | No |
 
 **Notes**:
@@ -73,7 +75,56 @@ Episode Subgraph (raw) ──┬──→ Semantic Entity Subgraph (extracted)
 - **Complex schema** — Three interconnected subgraphs
 - **LLM extraction on write** — Same error propagation risk as Mem0
 
-**Source**: [Zep Paper](https://arxiv.org/abs/2501.13956), [Documentation](https://docs.getzep.com)
+**Source**: [Zep Paper](https://arxiv.org/abs/2501.13956), [Documentation](https://help.getzep.com)
+
+---
+
+## LangChain Memory
+
+**Architecture**: Multiple memory module types as framework components.
+
+```
+Memory Types: ConversationBufferMemory, ConversationSummaryBufferMemory,
+             ConversationEntityMemory, VectorStoreRetrieverMemory
+```
+
+**What it does well**:
+- Multiple memory types for different use cases
+- Integrates with full LangChain ecosystem
+- Enterprise components (Redis, PostgreSQL, MongoDB via LangGraph)
+- Context-aware systems across sessions
+
+**Limitations**:
+- **No ground truth preservation** — Memory is for context, not accuracy
+- **No confidence tracking** — No distinction between certain and uncertain
+- **No principled forgetting** — Manual cleanup required
+- **No consolidation** — Memory types don't form a hierarchy
+
+**Source**: [Documentation](https://docs.langchain.com/)
+
+---
+
+## LlamaIndex
+
+**Architecture**: RAG-native document indexing with memory modules.
+
+```
+Documents → Indexing → Query Engine / Chat Engine → Response + Context
+```
+
+**What it does well**:
+- RAG-optimized retrieval pipelines
+- Hybrid search (vector + keyword)
+- Multi-agent memory support
+- Extensive integrations with vector databases
+
+**Limitations**:
+- **No ground truth preservation** — Focus on retrieval, not memory accuracy
+- **No confidence tracking** — Standard RAG approach
+- **Stateless agents** — External integration needed for persistence
+- **No consolidation hierarchy** — Flat memory structure
+
+**Source**: [Documentation](https://developers.llamaindex.ai/)
 
 ---
 
@@ -219,7 +270,7 @@ Novel approaches from recent literature:
 
 **What**: Memories that are repeatedly involved in retrieval/consolidation become stronger and more stable.
 
-**Source**: [Roediger & Karpicke 2006](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)
+**Source**: [Roediger & Karpicke 2006](https://pubmed.ncbi.nlm.nih.gov/26151629/), [Karpicke & Roediger 2008](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081)
 
 **Key findings**:
 - "Repeated remembering strengthens memories much more so than repeated learning"
@@ -257,7 +308,7 @@ Features documented elsewhere but not yet implemented:
 
 ## References
 
-- [HaluMem: Hallucinations in LLM Memory](https://arxiv.org/html/2511.03506) — Benchmark showing <56% accuracy
+- [HaluMem: Evaluating Hallucinations in Memory Systems](https://arxiv.org/abs/2511.03506) — Benchmark showing <70% accuracy
 - [Mem0 Paper](https://arxiv.org/abs/2504.19413)
 - [Zep Paper](https://arxiv.org/abs/2501.13956)
 - [MemGPT Paper](https://arxiv.org/abs/2310.08560)
@@ -265,5 +316,5 @@ Features documented elsewhere but not yet implemented:
 - [Cognitive Workspace](https://arxiv.org/abs/2508.13171)
 - [Adaptive Compression Framework](https://www.nature.com/articles/s44159-025-00458-6) — Nagy et al. 2025 (episodic/semantic distinction)
 - [Sleep and Memory](https://www.nature.com/articles/s42003-025-07868-5) — Yuksel et al. 2025 (SWS×REM interaction)
-- [Testing Effect](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) — Roediger & Karpicke, 2006
+- [Testing Effect](https://pubmed.ncbi.nlm.nih.gov/26151629/) — Roediger & Karpicke, 2006
 - [Retrieval-Induced Forgetting](https://pubmed.ncbi.nlm.nih.gov/7931095/) — Anderson, Bjork & Bjork, 1994

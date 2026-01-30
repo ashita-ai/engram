@@ -313,10 +313,10 @@ Engram is **inspired by** cognitive science research, not a strict implementatio
 
 | Paper | Year | Key Finding | Engram Implementation |
 |-------|------|-------------|----------------------|
-| [Roediger & Karpicke](https://pmc.ncbi.nlm.nih.gov/articles/PMC5912918/) | 2006 | Retrieval strengthens memory (56% vs 14% retention) | `consolidation_strength`, `consolidation_passes` |
+| [Roediger & Karpicke](https://pubmed.ncbi.nlm.nih.gov/26151629/) | 2006 | Testing slows forgetting (13% vs 52% after 1 week) | `consolidation_strength`, `consolidation_passes` |
 | [A-MEM](https://arxiv.org/abs/2502.12110) | 2025 | 2x multi-hop reasoning via Zettelkasten linking | `related_ids`, `follow_links` |
 | [Cognitive Workspace](https://arxiv.org/abs/2508.13171) | 2025 | 58.6% memory reuse vs 0% for naive RAG | Hierarchical buffers, working memory |
-| [HaluMem](https://arxiv.org/abs/2511.03506) | 2025 | <56% accuracy without ground truth preservation | Immutable episodes, `verify()` |
+| [HaluMem](https://arxiv.org/abs/2511.03506) | 2025 | <70% accuracy without ground truth preservation | Immutable episodes, `verify()` |
 | [Karpicke & Roediger](https://www.sciencedirect.com/science/article/abs/pii/S1364661310002081) | 2008 | Retrieval = rapid consolidation | Retrieval-triggered strengthening |
 
 ### Testing Effect (Consolidation Strength)
@@ -327,9 +327,9 @@ Engram is **inspired by** cognitive science research, not a strict implementatio
 > Roediger, H.L. & Karpicke, J.D. (2006). "The Power of Testing Memory: Basic Research and Implications for Educational Practice." *Perspectives on Psychological Science*, 1(3), 181-210.
 
 **Key experimental results**:
-- After 1 week: Tested group retained **56%**, study-only group retained **14%**
+- After 1 week: Tested group forgot only **13%**, study-only group forgot **52%**
 - Testing produces "rapid consolidation" of memory traces
-- "Repeated remembering strengthens memories much more so than repeated learning"
+- Testing reduces forgetting substantially more than repeated study
 
 **How we implement it**: During consolidation, `strengthen()` is called when existing memories:
 1. Get linked to new memories via semantic similarity
@@ -360,7 +360,7 @@ Each call increases `consolidation_strength` by 0.1 and increments `consolidatio
 > "HaluMem: Evaluating Hallucinations in Memory Systems of Agents" (2025). https://arxiv.org/abs/2511.03506
 
 **Key results**:
-- "All systems achieve answer accuracies below **56%**"
+- "All systems achieve answer accuracies below **70%**"
 - "Hallucination rate and omission rate remaining high"
 - "Systems suffer omission rates above 50%"
 
@@ -385,7 +385,7 @@ Each call increases `consolidation_strength` by 0.1 and increments `consolidatio
 **What it is**: Novel information receives higher importance scores than redundant content.
 
 **Primary Research**:
-> Nagy et al. (2025). "Adaptive Compression for Memory-Augmented Language Models." https://arxiv.org/abs/2502.14842
+> Nagy et al. (2025). "Adaptive compression as a unifying framework for episodic and semantic memory." *Nature Reviews Psychology*. https://www.nature.com/articles/s44159-025-00458-6
 
 **Key insight**: Information-theoretic surprise (low similarity to existing memories) indicates novel, valuable content worth retaining.
 

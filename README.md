@@ -10,29 +10,107 @@ A memory system for AI applications that preserves ground truth, tracks confiden
 
 ## The Problem
 
-AI memory systems have an accuracy crisis. Recent benchmarks show:
+AI memory systems have an accuracy crisis:
 
-> "All systems achieve answer accuracies below 56%, with hallucination rate and omission rate remaining high."
+> "All systems achieve answer accuracies below 70%, with hallucination rate and omission rate remaining high."
 >
-> — [HaluMem: Hallucinations in LLM Memory Systems](https://arxiv.org/html/2511.03506)
+> — [HaluMem: Hallucinations in LLM Memory Systems](https://arxiv.org/abs/2511.03506)
 
-The fundamental issue: once source data is lost, errors cannot be corrected.
+**Why?** Existing systems (Mem0, basic RAG, LangChain memory) lose source data after LLM extraction. When extraction errors occur, there's no recovery path. The original truth is gone.
 
-## The Solution
+## How Engram Is Different
 
-Engram preserves ground truth and tracks confidence:
+| Traditional Memory | Engram |
+|-------------------|--------|
+| Embed immediately, discard source | **Store verbatim first**, derive later |
+| Single similarity score | **Composite confidence** (extraction + corroboration + recency + verification) |
+| No error recovery | **Re-derive from source** when errors occur |
+| Flat retrieval (top-K) | **Multi-hop reasoning** via bidirectional links |
+| No contradiction handling | **Negation tracking** filters outdated facts |
+| No auditability | **Full provenance** — trace any memory to source |
 
-1. **Store first, derive later** — Raw conversations stored verbatim. LLM extraction happens in background where errors can be caught.
-2. **Track confidence** — Every memory carries a composite score: extraction method + corroboration + recency + verification.
-3. **Verify on retrieval** — Applications filter by confidence. High-stakes queries use only trusted memories.
-4. **Enable recovery** — Derived memories trace to sources. Errors can be corrected by re-deriving.
+## Key Differentiators
+
+### 1. Ground Truth Preservation
+
+Episodes (raw interactions) are **immutable**. All derived memories maintain `source_episode_ids` for traceability. If extraction errors occur, re-derive from source — the truth is never lost.
+
+```python
+# Every derived memory traces back to ground truth
+verified = await engram.verify(memory_id, user_id="user_123")
+print(verified.source_episodes)  # Original verbatim content
+print(verified.explanation)      # How confidence was calculated
+```
+
+### 2. Auditable Confidence Scoring
+
+Confidence is **not** just cosine similarity. It's a composite score you can explain:
+
+```
+Confidence: 0.73
+├── Extraction method: 0.9 (regex pattern match)
+├── Corroboration: 0.6 (3 supporting sources)
+├── Recency: 0.8 (confirmed 2 months ago)
+└── Verification: 1.0 (format validated)
+```
+
+Filter by confidence for high-stakes queries: `min_confidence=0.8`
+
+### 3. Deferred Consolidation
+
+Fast writes, smart background processing:
+
+```
+Encode (immediate, <100ms):
+  User input → Episode (verbatim) + StructuredMemory (regex extraction)
+
+Consolidate (background):
+  N Episodes → LLM synthesis → SemanticMemory (with links to similar memories)
+```
+
+**Benefits:** Low latency, batched LLM costs, error recovery possible.
+
+### 4. A-MEM Style Multi-Hop Reasoning
+
+Memories link to related memories bidirectionally ([A-MEM research](https://arxiv.org/abs/2502.12110) shows 2x improvement on multi-hop benchmarks):
+
+```python
+# Follow links for deeper context
+results = await engram.recall(
+    query="What database?",
+    user_id="user_123",
+    follow_links=True,  # Traverse related memories
+    max_hops=2,
+)
+```
+
+### 5. Negation-Aware Retrieval
+
+Tracks what **isn't** true to prevent returning outdated information:
+
+```
+Episode 1: "I use MongoDB"     → preference: MongoDB
+Episode 2: "Switched to Redis" → preference: Redis, negation: "no longer uses MongoDB"
+
+Query: "What database?"
+Result: Redis (MongoDB filtered by negation)
+```
+
+### 6. Consolidation Strength (Testing Effect)
+
+Memories strengthen through retrieval ([Roediger & Karpicke, 2006](https://pubmed.ncbi.nlm.nih.gov/26151629/): tested group forgot only 13% vs 52% for study-only):
+
+```python
+# Memories used more often become more stable
+memory.consolidation_strength  # 0.0-1.0, increases with use
+memory.consolidation_passes    # How many times refined
+```
 
 ## Quick Start
 
 ### Installation
 
 ```bash
-# Clone and install
 git clone https://github.com/ashita-ai/engram.git
 cd engram
 uv sync --extra dev
@@ -49,12 +127,12 @@ from engram.service import EngramService
 async with EngramService.create() as engram:
     # Store interaction (immediate, preserves ground truth)
     result = await engram.encode(
-        content="My email is john@example.com",
+        content="My email is john@example.com and I prefer PostgreSQL",
         role="user",
         user_id="user_123",
     )
     print(f"Episode: {result.episode.id}")
-    print(f"Emails extracted: {result.structured.emails}")  # ["john@example.com"]
+    print(f"Emails: {result.structured.emails}")  # ["john@example.com"]
 
     # Retrieve with confidence filtering
     memories = await engram.recall(
@@ -66,6 +144,9 @@ async with EngramService.create() as engram:
     # Verify any memory back to source
     verified = await engram.verify(memories[0].memory_id, user_id="user_123")
     print(verified.explanation)
+
+    # Run consolidation (N episodes → semantic memory)
+    await engram.consolidate(user_id="user_123")
 ```
 
 ### REST API
@@ -82,142 +163,128 @@ curl -X POST http://localhost:8000/api/v1/encode \
 # Recall memories
 curl -X POST http://localhost:8000/api/v1/recall \
   -H "Content-Type: application/json" \
-  -d '{"query": "email", "user_id": "user_123"}'
-
-# Batch encode (bulk import)
-curl -X POST http://localhost:8000/api/v1/encode/batch \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "user_123",
-    "items": [
-      {"content": "Message 1", "role": "user"},
-      {"content": "Response 1", "role": "assistant"}
-    ]
-  }'
+  -d '{"query": "email", "user_id": "user_123", "min_confidence": 0.7}'
 ```
 
-## Memory Types
+## Memory Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     ENCODE (Fast Path, <100ms)                       │
+│  Input → Episode (verbatim, immutable)                              │
+│       → StructuredMemory (regex: emails, phones, URLs)              │
+└─────────────────────────────────────────────────────────────────────┘
+                                ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│                  CONSOLIDATE (Background, Deferred)                  │
+│  N Episodes → LLM synthesis → SemanticMemory                        │
+│            → Link to similar memories (bidirectional)               │
+│            → Strengthen linked memories (Testing Effect)            │
+└─────────────────────────────────────────────────────────────────────┘
+                                ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│                   RECALL (Multi-Signal Reranking)                    │
+│  Query → Vector search (all types)                                  │
+│       → Negation filtering (remove contradicted)                    │
+│       → Confidence reranking (5 signals)                            │
+│       → Multi-hop traversal (follow links)                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Memory Types
 
 | Type | Confidence | Purpose |
 |------|------------|---------|
-| **Working** | N/A | Current session context (in-memory, volatile) |
-| **Episodic** | Highest | Ground truth, verbatim storage, immutable |
-| **Structured** | High | Per-episode extraction (emails, phones, URLs, negations) |
-| **Semantic** | Variable | Cross-episode knowledge synthesis (LLM-derived) |
-| **Procedural** | Variable | Behavioral patterns and preferences |
+| **Episode** | 1.0 (verbatim) | Ground truth, immutable raw interactions |
+| **Structured** | 0.9 (regex) / 0.8 (LLM) | Per-episode extraction (emails, phones, negations) |
+| **Semantic** | Variable (0.6 base) | Cross-episode synthesis, LLM-consolidated |
+| **Procedural** | Variable (0.6 base) | Behavioral patterns, long-term preferences |
 
-### Memory Flow
+## Comparison with Alternatives
 
-```
-Episode (raw, immutable)
-    │
-    ├──→ Structured (per-episode: emails, phones, negations)
-    │
-    └──→ Semantic (LLM consolidation: N episodes → 1 summary)
-              │
-              └──→ Procedural (behavioral synthesis)
-```
+| Feature | Engram | Mem0 | Zep/Graphiti | LangChain |
+|---------|--------|------|--------------|-----------|
+| Ground truth preservation | ✅ Immutable episodes | ❌ Lost after extraction | ✅ Episode subgraph | ❌ |
+| Confidence tracking | ✅ Composite + auditable | ❌ | ❌ | ❌ |
+| Error recovery | ✅ Re-derive from source | ❌ Permanent errors | ⚠️ Partial | ❌ |
+| Multi-hop reasoning | ✅ Bidirectional links | ✅ Graph | ✅ Graph | ⚠️ |
+| Negation handling | ✅ Explicit filtering | ❌ | ❌ | ❌ |
+| Consolidation strength | ✅ Testing Effect | ❌ | ❌ | ❌ |
 
-## REST API Reference
+**When to use Engram:** High-stakes applications requiring accuracy, auditability, and ground truth preservation (healthcare, legal, finance, enterprise assistants).
+
+**When to use alternatives:** Rapid prototyping (LangChain), managed service needs (Mem0), temporal graph queries (Zep).
+
+## API Reference
 
 ### Core Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/encode` | Store a memory and extract facts |
-| `POST` | `/encode/batch` | Bulk import multiple memories |
-| `POST` | `/recall` | Semantic search across all memory types |
-| `GET` | `/memories/{id}` | Get a specific memory by ID |
-| `GET` | `/memories` | List memories with filters |
-| `DELETE` | `/memories/{id}` | Delete a memory (with cascade options) |
-| `PATCH` | `/memories/{id}` | Update memory content/metadata |
-| `GET` | `/memories/{id}/sources` | Trace memory to source episodes |
-| `GET` | `/memories/{id}/verify` | Verify memory with explanation |
+| `POST` | `/encode` | Store memory, extract structured data |
+| `POST` | `/encode/batch` | Bulk import (up to 100 items) |
+| `POST` | `/recall` | Semantic search with confidence filtering |
+| `GET` | `/memories/{id}/verify` | Trace memory to source with explanation |
 | `GET` | `/memories/{id}/provenance` | Full derivation chain |
 
 ### Workflow Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/workflows/consolidate` | Episodes → Semantic memories |
+| `POST` | `/workflows/consolidate` | N episodes → semantic memory |
+| `POST` | `/workflows/structure` | LLM enrichment for episode |
+| `POST` | `/workflows/promote` | Semantic → procedural synthesis |
 | `POST` | `/workflows/decay` | Apply confidence decay |
-| `POST` | `/workflows/promote` | Semantic → Procedural synthesis |
-| `POST` | `/workflows/structure` | LLM extraction for single episode |
-| `POST` | `/workflows/structure/batch` | LLM extraction for multiple episodes |
 
-### Additional Features
+See [docs/api.md](docs/api.md) for complete reference.
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/memories/{id}/links` | Create memory links |
-| `GET` | `/memories/{id}/links` | List memory links |
-| `DELETE` | `/memories/{id}/links/{target}` | Remove a link |
-| `POST` | `/conflicts/detect` | Detect contradictions |
-| `GET` | `/conflicts` | List detected conflicts |
-| `POST` | `/webhooks` | Register event webhooks |
-| `GET` | `/memories/{id}/history` | Memory change history |
-| `DELETE` | `/users/{user_id}/memories` | GDPR erasure |
+## Confidence Formula
 
-### Session Endpoints
+```python
+confidence = (
+    extraction_method * 0.50 +  # VERBATIM=1.0, EXTRACTED=0.9, INFERRED=0.6
+    corroboration * 0.25 +      # log scale: 1 source=0.5, 10 sources=1.0
+    recency * 0.15 +            # exponential decay, 365-day half-life
+    verification * 0.10         # 1.0 if format validated
+) - contradiction_penalty       # -10% per contradiction, floor 0.1
+```
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/sessions` | List sessions for a user |
-| `GET` | `/sessions/{session_id}` | Get session details with episodes |
-| `DELETE` | `/sessions/{session_id}` | Delete session (with cascade options) |
+Every score includes `.explain()` for auditability.
 
-## Confidence Scoring
+## Research Foundations
 
-Confidence is a composite score:
+Engram is **inspired by** cognitive science research:
 
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| Extraction method | 50% | verbatim=1.0, regex=0.9, LLM=0.6 |
-| Corroboration | 25% | Number of supporting sources |
-| Recency | 15% | How recently confirmed |
-| Verification | 10% | Format validation passed |
+| Paper | Finding | Engram Implementation |
+|-------|---------|----------------------|
+| [Roediger & Karpicke (2006)](https://pubmed.ncbi.nlm.nih.gov/26151629/) | Retrieval slows forgetting (13% vs 52% after 1 week) | `consolidation_strength`, Testing Effect |
+| [A-MEM (2025)](https://arxiv.org/abs/2502.12110) | 2x multi-hop improvement via linking | `related_ids`, bidirectional links |
+| [HaluMem (2025)](https://arxiv.org/abs/2511.03506) | <70% accuracy without source preservation | Immutable episodes, `verify()` |
+| [Cognitive Workspace (2025)](https://arxiv.org/abs/2508.13171) | 58.6% memory reuse vs 0% for naive RAG | Hierarchical memory tiers |
 
-Every score is auditable: *"0.73 because: extracted (0.9 base), 3 sources, confirmed 2 months ago."*
+**Note:** Engram uses these concepts as engineering abstractions, not strict cognitive implementations.
 
 ## Configuration
 
-Environment variables (prefix: `ENGRAM_`):
-
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ENV` | `development` | Environment: `development`, `production`, or `test` |
-| `QDRANT_URL` | `http://localhost:6333` | Qdrant connection |
-| `EMBEDDING_PROVIDER` | `fastembed` | Embedding backend |
-| `AUTH_ENABLED` | auto | Enable Bearer token auth (auto: true in production) |
-| `AUTH_SECRET_KEY` | - | Secret key for auth (required in production) |
-| `RATE_LIMIT_ENABLED` | `false` | Enable rate limiting |
-| `BATCH_ENCODE_MAX_ITEMS` | `100` | Max batch size |
+| `ENGRAM_QDRANT_URL` | `http://localhost:6333` | Qdrant connection |
+| `ENGRAM_EMBEDDING_PROVIDER` | `fastembed` | Embedding backend |
+| `ENGRAM_AUTH_ENABLED` | auto | Bearer token auth |
+| `ENGRAM_CONSOLIDATION_THRESHOLD` | `10` | Episodes before auto-consolidation |
 
-**Security Notes:**
-- In production (`ENGRAM_ENV=production`), auth is enabled by default
-- Using the default secret key in production will raise an error
-- Generate a secret key: `python -c "import secrets; print(secrets.token_hex(32))"`
-
-See [docs/development.md](docs/development.md) for full configuration reference.
+See [docs/development.md](docs/development.md) for full configuration.
 
 ## Development
 
 ```bash
-# Run tests
-uv run pytest tests/ -v --no-cov
-
-# Code quality
-uv run ruff check src/engram/
-uv run mypy src/engram/
-
-# Pre-commit hooks
-uv run pre-commit install
-uv run pre-commit run --all-files
+uv run pytest tests/ -v --no-cov  # Run tests (976 tests)
+uv run ruff check src/engram/     # Lint
+uv run mypy src/engram/           # Type check
+uv run pre-commit run --all-files # All checks
 ```
 
 ## Claude Code Integration
-
-Engram provides an MCP server for direct integration with Claude Code:
 
 ```json
 {
@@ -230,20 +297,19 @@ Engram provides an MCP server for direct integration with Claude Code:
 }
 ```
 
-This exposes four tools: `engram_encode`, `engram_recall`, `engram_verify`, and `engram_stats`.
-
-See [docs/mcp.md](docs/mcp.md) for full setup instructions.
+Tools: `engram_encode`, `engram_recall`, `engram_verify`, `engram_stats`. See [docs/mcp.md](docs/mcp.md).
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) — Memory types, data flow, storage design
-- [Development Guide](docs/development.md) — Setup, configuration, workflow
-- [API Reference](docs/api.md) — Detailed endpoint documentation
-- [MCP Integration](docs/mcp.md) — Claude Code and MCP client setup
+- [Architecture](docs/architecture.md) — Memory types, confidence scoring, consolidation
+- [API Reference](docs/api.md) — Complete endpoint documentation
+- [Development](docs/development.md) — Setup, configuration, contributing
+- [Research](docs/research/overview.md) — Scientific foundations and limitations
+- [Competitive Analysis](docs/research/competitive.md) — Comparison with alternatives
 
 ## Status
 
-Beta. Core functionality complete with comprehensive test coverage (800+ tests).
+**Beta.** Core functionality complete. 976 tests. Production-ready for evaluation.
 
 ## License
 
