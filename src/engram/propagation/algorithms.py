@@ -38,6 +38,8 @@ DEFAULT_MAX_ITERATIONS = 10
 DEFAULT_CONVERGENCE_THRESHOLD = 0.001
 DEFAULT_MAX_BOOST_PER_CYCLE = 0.15
 DEFAULT_DISTRUST_PENALTY = 0.1
+DEFAULT_MAX_SUPPORTING_EPISODES = 100  # Cap to prevent unbounded growth
+DEFAULT_MAX_CONFIDENCE = 0.99  # Cap confidence below 1.0 for derived memories
 
 
 @dataclass
@@ -51,6 +53,8 @@ class PropagationConfig:
         max_boost_per_cycle: Maximum confidence boost per memory per cycle.
         distrust_penalty: Penalty applied from low-confidence memories.
         min_confidence_for_propagation: Memories below this don't propagate.
+        max_supporting_episodes: Cap on supporting_episodes to prevent unbounded growth.
+        max_confidence: Maximum confidence value for derived memories (below 1.0).
     """
 
     damping_factor: float = DEFAULT_DAMPING_FACTOR
@@ -59,6 +63,8 @@ class PropagationConfig:
     max_boost_per_cycle: float = DEFAULT_MAX_BOOST_PER_CYCLE
     distrust_penalty: float = DEFAULT_DISTRUST_PENALTY
     min_confidence_for_propagation: float = 0.5
+    max_supporting_episodes: int = DEFAULT_MAX_SUPPORTING_EPISODES
+    max_confidence: float = DEFAULT_MAX_CONFIDENCE
 
 
 class PropagationResult(BaseModel):
@@ -141,6 +147,9 @@ async def propagate_confidence(
     Iteratively propagates confidence between linked memories
     until convergence or max iterations.
 
+    Includes cycle detection to prevent runaway confidence inflation
+    when memories form circular link patterns (A→B→C→A).
+
     Args:
         memories: List of memories to propagate between.
         config: Propagation configuration.
@@ -156,6 +165,14 @@ async def propagate_confidence(
 
     # Build memory lookup
     memory_map = {m.id: m for m in memories}
+
+    # Detect cycles to prevent unbounded propagation
+    # A memory in a cycle should have limited boost per full propagation run
+    cycles = _detect_cycles(memories, memory_map)
+    memories_in_cycles = {mid for cycle in cycles for mid in cycle}
+
+    # Track total boost per memory across all iterations to enforce bounds
+    total_boost_per_memory: dict[str, float] = {m.id: 0.0 for m in memories}
 
     result = PropagationResult()
     memories_changed: set[str] = set()
@@ -198,19 +215,58 @@ async def propagate_confidence(
                     )
                     incoming_distrust += distrust_contribution
 
-            # Apply boost (capped)
+            # Apply boost with proper bounds
             old_confidence = memory.confidence.value
 
             if incoming_trust > 0:
-                # Apply boost by increasing supporting episodes and recomputing
-                memory.confidence.supporting_episodes += 1
-                old_value = memory.confidence.value
-                memory.confidence.recompute()
-                actual_boost = memory.confidence.value - old_value
-                result.total_boost_applied += max(0, actual_boost)
+                # Check if this memory has already received max boost
+                remaining_boost_budget = (
+                    config.max_boost_per_cycle * config.max_iterations
+                    - total_boost_per_memory[memory.id]
+                )
+
+                if remaining_boost_budget <= 0:
+                    # Memory has reached its boost cap for this propagation run
+                    logger.debug(
+                        "Memory %s has reached boost cap, skipping positive propagation",
+                        memory.id,
+                    )
+                else:
+                    # Apply boost by increasing supporting episodes (with cap)
+                    if memory.confidence.supporting_episodes < config.max_supporting_episodes:
+                        memory.confidence.supporting_episodes += 1
+
+                    old_value = memory.confidence.value
+                    memory.confidence.recompute()
+
+                    # Cap the actual boost applied
+                    raw_boost = memory.confidence.value - old_value
+                    capped_boost = min(
+                        raw_boost, config.max_boost_per_cycle, remaining_boost_budget
+                    )
+
+                    # Apply the capped boost
+                    memory.confidence.value = min(
+                        old_value + capped_boost,
+                        config.max_confidence,  # Never exceed max_confidence for derived memories
+                    )
+
+                    # Apply additional damping for memories in cycles
+                    if memory.id in memories_in_cycles:
+                        # Reduce boost by 50% for cyclic memories to prevent feedback loops
+                        cycle_damping = 0.5
+                        dampened_boost = capped_boost * cycle_damping
+                        memory.confidence.value = min(
+                            old_value + dampened_boost,
+                            config.max_confidence,
+                        )
+                        capped_boost = dampened_boost
+
+                    total_boost_per_memory[memory.id] += max(0, capped_boost)
+                    result.total_boost_applied += max(0, capped_boost)
 
             if incoming_distrust > 0:
-                # Apply distrust as confidence reduction
+                # Apply distrust as confidence reduction (capped)
                 penalty = min(incoming_distrust, config.max_boost_per_cycle)
                 new_conf = max(0.1, memory.confidence.value - penalty)
                 memory.confidence.value = new_conf
@@ -233,13 +289,62 @@ async def propagate_confidence(
     result.memories_updated = len(memories_changed)
 
     logger.info(
-        "Confidence propagation: %d iterations, %d memories updated, converged=%s",
+        "Confidence propagation: %d iterations, %d memories updated, converged=%s, "
+        "cycles_detected=%d",
         result.iterations,
         result.memories_updated,
         result.converged,
+        len(cycles),
     )
 
     return result
+
+
+def _detect_cycles(
+    memories: list[SemanticMemory],
+    memory_map: dict[str, SemanticMemory],
+) -> list[list[str]]:
+    """Detect cycles in memory link graph using DFS.
+
+    Args:
+        memories: List of all memories.
+        memory_map: Lookup by memory ID.
+
+    Returns:
+        List of cycles, where each cycle is a list of memory IDs.
+    """
+    visited: set[str] = set()
+    rec_stack: set[str] = set()
+    cycles: list[list[str]] = []
+
+    def dfs(memory_id: str, path: list[str]) -> None:
+        if memory_id in rec_stack:
+            # Found a cycle - extract it from path
+            cycle_start = path.index(memory_id)
+            cycle = path[cycle_start:]
+            if len(cycle) >= 2:  # Only count cycles of 2+ nodes
+                cycles.append(cycle)
+            return
+
+        if memory_id in visited:
+            return
+
+        visited.add(memory_id)
+        rec_stack.add(memory_id)
+
+        memory = memory_map.get(memory_id)
+        if memory:
+            for linked_id in memory.related_ids:
+                if linked_id in memory_map:
+                    dfs(linked_id, path + [memory_id])
+
+        rec_stack.remove(memory_id)
+
+    for memory in memories:
+        if memory.id not in visited:
+            dfs(memory.id, [])
+
+    return cycles
 
 
 async def propagate_distrust(

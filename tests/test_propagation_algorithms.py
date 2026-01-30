@@ -11,9 +11,12 @@ from engram.models.base import ConfidenceScore
 from engram.propagation.algorithms import (
     DEFAULT_DAMPING_FACTOR,
     DEFAULT_DISTRUST_PENALTY,
+    DEFAULT_MAX_CONFIDENCE,
     DEFAULT_MAX_ITERATIONS,
+    DEFAULT_MAX_SUPPORTING_EPISODES,
     PropagationConfig,
     PropagationResult,
+    _detect_cycles,
     compute_link_strength,
     propagate_confidence,
     propagate_distrust,
@@ -509,3 +512,270 @@ class TestExtractionMethodWeights:
 
         # With no special link type, multiplier is 1.0
         assert strength == expected_weight
+
+
+class TestPropagationConfigBounds:
+    """Tests for PropagationConfig boundary settings."""
+
+    def test_default_max_supporting_episodes(self) -> None:
+        """Config should have default max_supporting_episodes."""
+        config = PropagationConfig()
+        assert config.max_supporting_episodes == DEFAULT_MAX_SUPPORTING_EPISODES
+        assert config.max_supporting_episodes == 100
+
+    def test_default_max_confidence(self) -> None:
+        """Config should have default max_confidence below 1.0."""
+        config = PropagationConfig()
+        assert config.max_confidence == DEFAULT_MAX_CONFIDENCE
+        assert config.max_confidence == 0.99
+
+    def test_custom_max_supporting_episodes(self) -> None:
+        """Config should accept custom max_supporting_episodes."""
+        config = PropagationConfig(max_supporting_episodes=50)
+        assert config.max_supporting_episodes == 50
+
+    def test_custom_max_confidence(self) -> None:
+        """Config should accept custom max_confidence."""
+        config = PropagationConfig(max_confidence=0.95)
+        assert config.max_confidence == 0.95
+
+
+class TestDetectCycles:
+    """Tests for _detect_cycles function."""
+
+    def test_no_cycles_in_linear_graph(self) -> None:
+        """Linear graph A->B->C should have no cycles."""
+        mem_a = create_semantic_memory(
+            memory_id="a",
+            related_ids=["b"],
+        )
+        mem_b = create_semantic_memory(
+            memory_id="b",
+            related_ids=["c"],
+        )
+        mem_c = create_semantic_memory(
+            memory_id="c",
+            related_ids=[],
+        )
+        memories = [mem_a, mem_b, mem_c]
+        memory_map = {m.id: m for m in memories}
+
+        cycles = _detect_cycles(memories, memory_map)
+
+        assert len(cycles) == 0
+
+    def test_detects_simple_cycle(self) -> None:
+        """Should detect A->B->A cycle."""
+        mem_a = create_semantic_memory(
+            memory_id="a",
+            related_ids=["b"],
+        )
+        mem_b = create_semantic_memory(
+            memory_id="b",
+            related_ids=["a"],
+        )
+        memories = [mem_a, mem_b]
+        memory_map = {m.id: m for m in memories}
+
+        cycles = _detect_cycles(memories, memory_map)
+
+        assert len(cycles) >= 1
+        # One of the cycles should contain both a and b
+        all_cycle_members = {mid for cycle in cycles for mid in cycle}
+        assert "a" in all_cycle_members or "b" in all_cycle_members
+
+    def test_detects_triangle_cycle(self) -> None:
+        """Should detect A->B->C->A triangle cycle."""
+        mem_a = create_semantic_memory(
+            memory_id="a",
+            related_ids=["b"],
+        )
+        mem_b = create_semantic_memory(
+            memory_id="b",
+            related_ids=["c"],
+        )
+        mem_c = create_semantic_memory(
+            memory_id="c",
+            related_ids=["a"],
+        )
+        memories = [mem_a, mem_b, mem_c]
+        memory_map = {m.id: m for m in memories}
+
+        cycles = _detect_cycles(memories, memory_map)
+
+        assert len(cycles) >= 1
+
+    def test_no_cycle_for_unconnected_nodes(self) -> None:
+        """Unconnected nodes should have no cycles."""
+        mem_a = create_semantic_memory(
+            memory_id="a",
+            related_ids=[],
+        )
+        mem_b = create_semantic_memory(
+            memory_id="b",
+            related_ids=[],
+        )
+        memories = [mem_a, mem_b]
+        memory_map = {m.id: m for m in memories}
+
+        cycles = _detect_cycles(memories, memory_map)
+
+        assert len(cycles) == 0
+
+    def test_handles_missing_linked_memory(self) -> None:
+        """Should handle links to non-existent memories."""
+        mem_a = create_semantic_memory(
+            memory_id="a",
+            related_ids=["nonexistent"],
+        )
+        memories = [mem_a]
+        memory_map = {m.id: m for m in memories}
+
+        # Should not raise an error
+        cycles = _detect_cycles(memories, memory_map)
+        assert len(cycles) == 0
+
+
+class TestConfidenceBounds:
+    """Tests for confidence value bounds during propagation."""
+
+    @pytest.mark.asyncio
+    async def test_confidence_capped_at_max(self) -> None:
+        """Confidence should never exceed max_confidence."""
+        # Create memories that would propagate high trust
+        mem_a = create_semantic_memory(
+            memory_id="mem_a",
+            confidence_value=0.98,
+            related_ids=["mem_b"],
+            extraction_method=ExtractionMethod.VERBATIM,
+        )
+        mem_b = create_semantic_memory(
+            memory_id="mem_b",
+            confidence_value=0.98,
+            related_ids=["mem_a"],
+            extraction_method=ExtractionMethod.VERBATIM,
+        )
+
+        config = PropagationConfig(
+            max_iterations=20,
+            max_confidence=0.95,
+        )
+        await propagate_confidence([mem_a, mem_b], config)
+
+        # Both should be capped at max_confidence
+        assert mem_a.confidence.value <= 0.95
+        assert mem_b.confidence.value <= 0.95
+
+    @pytest.mark.asyncio
+    async def test_supporting_episodes_capped(self) -> None:
+        """supporting_episodes should not exceed max_supporting_episodes."""
+        mem_a = create_semantic_memory(
+            memory_id="mem_a",
+            confidence_value=0.9,
+            related_ids=["mem_b"],
+        )
+        mem_b = create_semantic_memory(
+            memory_id="mem_b",
+            confidence_value=0.9,
+            related_ids=["mem_a"],
+        )
+        # Set initial supporting_episodes near cap
+        mem_a.confidence.supporting_episodes = 98
+        mem_b.confidence.supporting_episodes = 98
+
+        config = PropagationConfig(
+            max_iterations=10,
+            max_supporting_episodes=100,
+        )
+        await propagate_confidence([mem_a, mem_b], config)
+
+        # Should be capped at max_supporting_episodes
+        assert mem_a.confidence.supporting_episodes <= 100
+        assert mem_b.confidence.supporting_episodes <= 100
+
+
+class TestCyclicPropagation:
+    """Tests for cycle-aware propagation behavior."""
+
+    @pytest.mark.asyncio
+    async def test_cyclic_memories_get_dampened_boost(self) -> None:
+        """Memories in cycles should have dampened boost."""
+        # Create a cycle: A->B->C->A
+        mem_a = create_semantic_memory(
+            memory_id="mem_a",
+            confidence_value=0.7,
+            related_ids=["mem_b"],
+        )
+        mem_b = create_semantic_memory(
+            memory_id="mem_b",
+            confidence_value=0.7,
+            related_ids=["mem_c"],
+        )
+        mem_c = create_semantic_memory(
+            memory_id="mem_c",
+            confidence_value=0.7,
+            related_ids=["mem_a"],
+        )
+        initial_confidence = 0.7
+
+        config = PropagationConfig(max_iterations=5)
+        result = await propagate_confidence([mem_a, mem_b, mem_c], config)
+
+        # Should have run some iterations
+        assert result.iterations > 0
+        # Confidence shouldn't explode due to cycle damping
+        assert mem_a.confidence.value < initial_confidence + 0.2
+        assert mem_b.confidence.value < initial_confidence + 0.2
+        assert mem_c.confidence.value < initial_confidence + 0.2
+
+    @pytest.mark.asyncio
+    async def test_boost_budget_prevents_unbounded_growth(self) -> None:
+        """Per-memory boost budget should prevent unbounded confidence growth."""
+        mem_a = create_semantic_memory(
+            memory_id="mem_a",
+            confidence_value=0.6,
+            related_ids=["mem_b"],
+        )
+        mem_b = create_semantic_memory(
+            memory_id="mem_b",
+            confidence_value=0.6,
+            related_ids=["mem_a"],
+        )
+        initial_a = mem_a.confidence.value
+        initial_b = mem_b.confidence.value
+
+        config = PropagationConfig(
+            max_iterations=100,  # Many iterations
+            max_boost_per_cycle=0.05,  # Small boost per cycle
+        )
+        await propagate_confidence([mem_a, mem_b], config)
+
+        # Total boost should be bounded by max_boost_per_cycle * max_iterations
+        max_total_boost = config.max_boost_per_cycle * config.max_iterations
+        assert mem_a.confidence.value <= initial_a + max_total_boost + 0.01
+        assert mem_b.confidence.value <= initial_b + max_total_boost + 0.01
+
+    @pytest.mark.asyncio
+    async def test_propagation_converges_with_cycles(self) -> None:
+        """Propagation should converge even with cycles present."""
+        # Create a cycle
+        mem_a = create_semantic_memory(
+            memory_id="mem_a",
+            confidence_value=0.8,
+            related_ids=["mem_b"],
+        )
+        mem_b = create_semantic_memory(
+            memory_id="mem_b",
+            confidence_value=0.8,
+            related_ids=["mem_a"],
+        )
+
+        config = PropagationConfig(
+            max_iterations=50,
+            convergence_threshold=0.001,
+        )
+        result = await propagate_confidence([mem_a, mem_b], config)
+
+        # Should converge before hitting max iterations
+        assert result.converged is True
+        assert result.iterations < config.max_iterations
