@@ -22,12 +22,19 @@ class EncodeResult(BaseModel):
     Attributes:
         episode: The stored episode (immutable ground truth).
         structured: The structured memory (per-episode intelligence).
+        duration_ms: Total time to encode the memory in milliseconds.
+        timing: Detailed timing breakdown by operation phase.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     episode: Episode
     structured: StructuredMemory
+    duration_ms: int = Field(default=0, ge=0, description="Total encoding time in milliseconds")
+    timing: dict[str, int] = Field(
+        default_factory=dict,
+        description="Timing breakdown: embedding_ms, storage_ms, enrichment_ms, etc.",
+    )
 
 
 class SourceEpisodeSummary(BaseModel):

@@ -40,6 +40,8 @@ from mcp.server.fastmcp import FastMCP
 from engram.config import Settings
 from engram.service import EngramService
 
+from .context import get_default_user, get_project_context
+
 # Configure logging to stderr (stdout is reserved for MCP protocol)
 logging.basicConfig(
     level=logging.WARNING,
@@ -74,7 +76,7 @@ def create_server() -> FastMCP:
     @mcp.tool()
     async def engram_encode(
         content: str,
-        user_id: str,
+        user_id: str | None = None,
         role: str = "user",
         session_id: str | None = None,
         enrich: bool = False,
@@ -102,9 +104,13 @@ def create_server() -> FastMCP:
         - engram_search by session_id to review a conversation
         - Session-aware reranking in engram_recall
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
         Args:
             content: The text to store (conversation turn, note, fact).
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
             role: "user", "assistant", or "system".
             session_id: Group memories by conversation/session.
             enrich: True for LLM extraction (slower, richer); False for regex only.
@@ -112,11 +118,23 @@ def create_server() -> FastMCP:
         Returns:
             JSON with episode_id, structured_id, and extracted data.
         """
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        # Auto-detect org_id from project context
+        org_id = get_project_context()
+
         service = await get_service()
         result = await service.encode(
             content=content,
             role=role,
-            user_id=user_id,
+            user_id=resolved_user_id,
+            org_id=org_id,
             session_id=session_id,
             enrich=enrich,
         )
@@ -129,6 +147,8 @@ def create_server() -> FastMCP:
             "phones": result.structured.phones,
             "urls": result.structured.urls,
             "enriched": result.structured.enriched,
+            "duration_ms": result.duration_ms,
+            "timing": result.timing,
         }
 
         # Include LLM-extracted data if enriched
@@ -144,7 +164,7 @@ def create_server() -> FastMCP:
     @mcp.tool()
     async def engram_recall(
         query: str,
-        user_id: str,
+        user_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
         memory_types: str | None = None,
@@ -180,9 +200,13 @@ def create_server() -> FastMCP:
         - Use engram_recall_at for: "What did I know about X last week?", time travel
         - Use engram_get for: Fetching a specific memory by ID
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
         Args:
             query: Natural language query to search for.
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
             limit: Maximum results (default 10). Use 3-5 for focused answers, 20+ for exploration.
             min_confidence: Filter by confidence (0.0-1.0). Use 0.7+ for high-certainty answers.
             memory_types: Comma-separated types: episodic, structured, semantic, procedural, working.
@@ -201,6 +225,17 @@ def create_server() -> FastMCP:
         Returns:
             JSON array of memories with: memory_type, memory_id, content, score, confidence.
         """
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        # Auto-detect org_id from project context
+        org_id = get_project_context()
+
         service = await get_service()
 
         # Parse memory_types if provided
@@ -210,7 +245,8 @@ def create_server() -> FastMCP:
 
         results = await service.recall(
             query=query,
-            user_id=user_id,
+            user_id=resolved_user_id,
+            org_id=org_id,
             limit=limit,
             min_confidence=min_confidence,
             memory_types=types_list,
@@ -261,7 +297,7 @@ def create_server() -> FastMCP:
     @mcp.tool()
     async def engram_verify(
         memory_id: str,
-        user_id: str,
+        user_id: str | None = None,
     ) -> str:
         """Verify a memory's provenance back to source episodes.
 
@@ -269,17 +305,29 @@ def create_server() -> FastMCP:
         to its source episode(s) and provides an explanation of how it was
         derived, including confidence breakdown.
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
         Args:
             memory_id: ID of the memory to verify (must start with struct_, sem_, or proc_).
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
 
         Returns:
             JSON string with verification result including source episodes and explanation.
         """
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
         service = await get_service()
 
         try:
-            result = await service.verify(memory_id=memory_id, user_id=user_id)
+            result = await service.verify(memory_id=memory_id, user_id=resolved_user_id)
 
             response: dict[str, Any] = {
                 "memory_id": result.memory_id,
@@ -299,27 +347,43 @@ def create_server() -> FastMCP:
 
     @mcp.tool()
     async def engram_stats(
-        user_id: str,
+        user_id: str | None = None,
     ) -> str:
         """Get memory statistics for a user.
 
         Returns counts and summaries of the user's memories across all types,
         useful for understanding the state of the memory system.
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
         Args:
-            user_id: User identifier to get statistics for.
+            user_id: User identifier. Auto-detected if not provided.
 
         Returns:
             JSON string with memory counts by type and confidence statistics.
         """
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        # Auto-detect org_id from project context
+        org_id = get_project_context()
+
         service = await get_service()
 
         # Get comprehensive stats from storage
-        stats = await service.storage.get_memory_stats(user_id)
+        stats = await service.storage.get_memory_stats(resolved_user_id, org_id=org_id)
 
         # Build response with key information
         response: dict[str, Any] = {
-            "user_id": user_id,
+            "user_id": resolved_user_id,
+            "org_id": org_id,
             "episodic_count": stats.episodes,
             "structured_count": stats.structured,
             "semantic_count": stats.semantic,
@@ -343,7 +407,7 @@ def create_server() -> FastMCP:
     @mcp.tool()
     async def engram_delete(
         memory_id: str,
-        user_id: str,
+        user_id: str | None = None,
         cascade: bool = False,
     ) -> str:
         """Delete a memory by ID.
@@ -351,14 +415,25 @@ def create_server() -> FastMCP:
         Removes a memory from storage. For episodes, can optionally cascade
         to delete derived structured memories.
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+
         Args:
             memory_id: ID of the memory to delete (ep_, struct_, sem_, or proc_ prefix).
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
             cascade: If True and deleting an episode, also delete its derived structured memory.
 
         Returns:
             JSON string with deletion result.
         """
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
         service = await get_service()
         cascade_deleted: list[str] = []
 
@@ -368,19 +443,21 @@ def create_server() -> FastMCP:
             if memory_id.startswith("ep_"):
                 # Get structured memory for cascade before deleting episode
                 if cascade:
-                    struct = await service.storage.get_structured_for_episode(memory_id, user_id)
+                    struct = await service.storage.get_structured_for_episode(
+                        memory_id, resolved_user_id
+                    )
                     if struct:
-                        await service.storage.delete_structured(struct.id, user_id)
+                        await service.storage.delete_structured(struct.id, resolved_user_id)
                         cascade_deleted.append(struct.id)
                 # delete_episode returns dict with "deleted" key
-                result = await service.storage.delete_episode(memory_id, user_id)
+                result = await service.storage.delete_episode(memory_id, resolved_user_id)
                 deleted = bool(result.get("deleted", False))
             elif memory_id.startswith("struct_"):
-                deleted = await service.storage.delete_structured(memory_id, user_id)
+                deleted = await service.storage.delete_structured(memory_id, resolved_user_id)
             elif memory_id.startswith("sem_"):
-                deleted = await service.storage.delete_semantic(memory_id, user_id)
+                deleted = await service.storage.delete_semantic(memory_id, resolved_user_id)
             elif memory_id.startswith("proc_"):
-                deleted = await service.storage.delete_procedural(memory_id, user_id)
+                deleted = await service.storage.delete_procedural(memory_id, resolved_user_id)
             else:
                 return json.dumps(
                     {
@@ -405,24 +482,35 @@ def create_server() -> FastMCP:
     @mcp.tool()
     async def engram_get(
         memory_id: str,
-        user_id: str,
+        user_id: str | None = None,
     ) -> str:
         """Get a specific memory by ID.
 
         Retrieves full details of a memory including all metadata.
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+
         Args:
             memory_id: ID of the memory (ep_, struct_, sem_, or proc_ prefix).
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
 
         Returns:
             JSON string with memory details or error if not found.
         """
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
         service = await get_service()
 
         try:
             if memory_id.startswith("ep_"):
-                episode = await service.storage.get_episode(memory_id, user_id)
+                episode = await service.storage.get_episode(memory_id, resolved_user_id)
                 if episode is None:
                     return json.dumps(
                         {"error": "Episode not found", "memory_id": memory_id}, indent=2
@@ -442,7 +530,7 @@ def create_server() -> FastMCP:
                 )
 
             elif memory_id.startswith("struct_"):
-                structured = await service.storage.get_structured(memory_id, user_id)
+                structured = await service.storage.get_structured(memory_id, resolved_user_id)
                 if structured is None:
                     return json.dumps(
                         {"error": "StructuredMemory not found", "memory_id": memory_id}, indent=2
@@ -469,7 +557,7 @@ def create_server() -> FastMCP:
                 )
 
             elif memory_id.startswith("sem_"):
-                semantic = await service.storage.get_semantic(memory_id, user_id)
+                semantic = await service.storage.get_semantic(memory_id, resolved_user_id)
                 if semantic is None:
                     return json.dumps(
                         {"error": "SemanticMemory not found", "memory_id": memory_id}, indent=2
@@ -495,7 +583,7 @@ def create_server() -> FastMCP:
                 )
 
             elif memory_id.startswith("proc_"):
-                procedural = await service.storage.get_procedural(memory_id, user_id)
+                procedural = await service.storage.get_procedural(memory_id, resolved_user_id)
                 if procedural is None:
                     return json.dumps(
                         {"error": "ProceduralMemory not found", "memory_id": memory_id}, indent=2
@@ -530,7 +618,7 @@ def create_server() -> FastMCP:
 
     @mcp.tool()
     async def engram_consolidate(
-        user_id: str,
+        user_id: str | None = None,
     ) -> str:
         """Consolidate episodes into semantic memories.
 
@@ -541,16 +629,31 @@ def create_server() -> FastMCP:
         Based on Complementary Learning Systems theory: episodic (hippocampus)
         to semantic (neocortex) transfer with compression.
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
         Args:
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
 
         Returns:
             JSON string with consolidation statistics.
         """
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        # Auto-detect org_id from project context
+        org_id = get_project_context()
+
         service = await get_service()
 
         try:
-            result = await service.consolidate(user_id=user_id)
+            result = await service.consolidate(user_id=resolved_user_id, org_id=org_id)
 
             return json.dumps(
                 {
@@ -570,7 +673,7 @@ def create_server() -> FastMCP:
 
     @mcp.tool()
     async def engram_promote(
-        user_id: str,
+        user_id: str | None = None,
     ) -> str:
         """Promote semantic memories to procedural memory.
 
@@ -579,16 +682,31 @@ def create_server() -> FastMCP:
 
         Design: ONE procedural memory per user (replaces existing).
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
         Args:
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
 
         Returns:
             JSON string with promotion statistics.
         """
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        # Auto-detect org_id from project context
+        org_id = get_project_context()
+
         service = await get_service()
 
         try:
-            result = await service.create_procedural(user_id=user_id)
+            result = await service.create_procedural(user_id=resolved_user_id, org_id=org_id)
 
             return json.dumps(
                 {
@@ -606,7 +724,7 @@ def create_server() -> FastMCP:
 
     @mcp.tool()
     async def engram_search(
-        user_id: str,
+        user_id: str | None = None,
         memory_types: str | None = None,
         created_after: str | None = None,
         created_before: str | None = None,
@@ -637,8 +755,12 @@ def create_server() -> FastMCP:
         - Session review: session_id="session_xyz" to see all memories from a conversation
         - Paginated browse: limit=20, offset=0, then offset=20 for next page
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
         Args:
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
             memory_types: Comma-separated: episodic, structured, semantic, procedural.
                          Omit to list all types.
             created_after: ISO datetime (e.g., "2024-01-15T00:00:00Z").
@@ -654,6 +776,17 @@ def create_server() -> FastMCP:
             JSON with total count and memories array.
         """
         from datetime import datetime
+
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        # Auto-detect org_id from project context
+        org_id = get_project_context()
 
         service = await get_service()
 
@@ -672,7 +805,8 @@ def create_server() -> FastMCP:
                 before_dt = datetime.fromisoformat(created_before.replace("Z", "+00:00"))
 
             results, total = await service.storage.search_memories(
-                user_id=user_id,
+                user_id=resolved_user_id,
+                org_id=org_id,
                 memory_types=types_list,
                 created_after=after_dt,
                 created_before=before_dt,
@@ -701,7 +835,7 @@ def create_server() -> FastMCP:
     async def engram_recall_at(
         query: str,
         as_of: str,
-        user_id: str,
+        user_id: str | None = None,
         limit: int = 10,
         min_confidence: float | None = None,
         memory_types: str | None = None,
@@ -712,10 +846,14 @@ def create_server() -> FastMCP:
         specified timestamp. Useful for understanding what the system
         "knew" at a given moment.
 
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
         Args:
             query: Natural language query to search for.
             as_of: ISO datetime - only memories derived before this time.
-            user_id: User identifier for multi-tenancy isolation.
+            user_id: User identifier. Auto-detected if not provided.
             limit: Maximum results (default 10).
             min_confidence: Minimum confidence threshold.
             memory_types: Comma-separated types (currently supports episodic,structured).
@@ -724,6 +862,17 @@ def create_server() -> FastMCP:
             JSON string with matching memories from that point in time.
         """
         from datetime import datetime
+
+        # Auto-detect user_id if not provided
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        # Auto-detect org_id from project context
+        org_id = get_project_context()
 
         service = await get_service()
 
@@ -739,7 +888,8 @@ def create_server() -> FastMCP:
             results = await service.recall_at(
                 query=query,
                 as_of=as_of_dt,
-                user_id=user_id,
+                user_id=resolved_user_id,
+                org_id=org_id,
                 limit=limit,
                 min_confidence=min_confidence,
                 memory_types=types_list,
