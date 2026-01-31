@@ -99,9 +99,12 @@ class EncodeMixin:
             ```
         """
         start_time = time.monotonic()
+        timing: dict[str, int] = {}
 
         # Generate embedding
+        embed_start = time.monotonic()
         embedding = await self.embedder.embed(content)
+        timing["embedding_ms"] = int((time.monotonic() - embed_start) * 1000)
 
         # Use provided importance or default to 0.5
         initial_importance = importance if importance is not None else 0.5
@@ -141,6 +144,7 @@ class EncodeMixin:
 
         # Use transaction context for atomic storage operations
         # If any operation fails, previous operations are rolled back
+        storage_start = time.monotonic()
         async with self.storage.transaction() as txn:
             # Store episode
             await txn.store_episode(episode)
@@ -184,6 +188,8 @@ class EncodeMixin:
             # Commit the transaction (all operations succeeded)
             txn.commit()
 
+        timing["storage_ms"] = int((time.monotonic() - storage_start) * 1000)
+
         # Add to working memory for current session (with size limit enforcement)
         # Note: This is done after the transaction commits successfully
         self._working_memory.append(episode)
@@ -192,7 +198,9 @@ class EncodeMixin:
         # Handle LLM enrichment
         if enrich is True:
             # Synchronous enrichment - blocks until complete, returns enriched version
+            enrich_start = time.monotonic()
             structured = await self._enrich_structured_sync(episode, structured)
+            timing["enrichment_ms"] = int((time.monotonic() - enrich_start) * 1000)
         elif enrich == "background":
             # Durable background enrichment - uses DBOS/Temporal/Prefect
             # If process crashes, enrichment will be retried automatically
@@ -208,7 +216,16 @@ class EncodeMixin:
         if calculated_importance >= self.settings.high_importance_threshold:
             await self._trigger_consolidation(user_id=user_id, org_id=org_id)
 
-        return EncodeResult(episode=episode, structured=structured)
+        # Calculate total duration
+        total_duration_ms = int((time.monotonic() - start_time) * 1000)
+        timing["total_ms"] = total_duration_ms
+
+        return EncodeResult(
+            episode=episode,
+            structured=structured,
+            duration_ms=total_duration_ms,
+            timing=timing,
+        )
 
     async def _calculate_importance_with_surprise(
         self,
