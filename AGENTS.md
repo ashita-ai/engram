@@ -402,3 +402,9 @@ Each call increases `consolidation_strength` by 0.1 and increments `consolidatio
 ## Communication
 
 Be concise and direct. No flattery or excessive praise. Focus on what needs to be done.
+
+---
+
+## MCP Tool Usage
+
+For Claude instances using Engram as an MCP server, see the skill file at `.claude/skills/engram-memory.md` for comprehensive usage guidance.
