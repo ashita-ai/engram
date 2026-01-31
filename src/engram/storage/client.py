@@ -169,12 +169,13 @@ class EngramStorage(
         semantic_count = await count_collection("semantic")
         procedural_count = await count_collection("procedural")
 
-        # Count pending consolidation (unconsolidated episodes)
+        # Count pending consolidation (unsummarized episodes)
+        # Episodes are marked summarized=True after being consolidated into SemanticMemory
         unconsolidated_filter = models.Filter(
             must=[
                 *filter_conditions,
                 models.FieldCondition(
-                    key="consolidated",
+                    key="summarized",
                     match=models.MatchValue(value=False),
                 ),
             ]
