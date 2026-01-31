@@ -2,7 +2,7 @@
 
 Engram is a memory system for LLM applications built on Pydantic AI with durable execution.
 
-> **Status**: Beta. Core APIs, REST endpoints, and workflows fully implemented with 976 tests.
+> **Status**: Beta. Core APIs, REST endpoints, and workflows fully implemented with 990+ tests.
 
 ## Stack
 
@@ -296,9 +296,32 @@ Callers can still override with an explicit `importance` parameter when they hav
 |------|------------|-------|------------|---------|
 | **Episodic** | Immutable | Fast | Highest | Raw interactions, ground truth |
 | **Structured** | Immutable | Slow | High (0.8-0.9) | Per-episode LLM extraction |
-| **Semantic** | Mutable | Slow | Variable | Cross-episode LLM synthesis |
-| **Procedural** | Mutable | Very slow | Variable | Behavioral patterns, preferences |
+| **Semantic** | Metadata-mutable | Slow | Variable | Cross-episode LLM synthesis |
+| **Procedural** | Metadata-mutable | Very slow | Variable | Behavioral patterns, preferences |
 | **Working** | Volatile | N/A | N/A | Current context (in-memory) |
+
+### Semantic Memory Mutability: What Changes vs. What Doesn't
+
+Semantic memories have **immutable content** but **mutable metadata**. When new episodes arrive and consolidation runs:
+
+**Never changes after creation:**
+- `content` — The synthesized fact itself
+- `source_episode_ids` — Original provenance chain
+- `derived_at` — When the memory was created
+
+**Evolves over time:**
+- `related_ids` — Bidirectional links to similar memories
+- `consolidation_strength` — Increases +0.1 when linked to new memories (Testing Effect)
+- `consolidation_passes` — Count of strengthening events
+- `keywords`, `tags`, `context` — Can be enriched during later consolidation
+- `retrieval_count`, `last_accessed` — Activation tracking
+- `confidence` — Decays over time without reinforcement
+
+**Why this design:**
+1. **Facts don't change** — "User prefers PostgreSQL" remains true regardless of new data
+2. **Connections evolve** — New episode "User is building a data warehouse" links to the PostgreSQL preference
+3. **Strength reflects usage** — Frequently-linked memories become more stable (Testing Effect)
+4. **Audit trail preserved** — `evolution_history` tracks all metadata changes
 
 ## Data Models
 
