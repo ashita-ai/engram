@@ -286,16 +286,48 @@ uv run pre-commit run --all-files # All checks
 
 ## Claude Code Integration
 
-### Docker (Recommended)
+### Docker with DBOS (Recommended)
+
+DBOS provides durable workflow execution with automatic recovery. This is the recommended setup for production use.
 
 ```bash
-# Start Qdrant + Engram
 git clone https://github.com/ashita-ai/engram.git
 cd engram
-docker compose up -d
+docker compose -f docker-compose.full.yml up -d  # Starts Qdrant + PostgreSQL
 ```
 
-Add to Claude Code settings:
+Add to `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "ENGRAM_QDRANT_URL=http://host.docker.internal:6333",
+        "-e", "ENGRAM_EMBEDDING_PROVIDER=openai",
+        "-e", "ENGRAM_OPENAI_API_KEY",
+        "-e", "ENGRAM_DURABLE_BACKEND=dbos",
+        "-e", "ENGRAM_DATABASE_URL=postgresql://engram:engram@host.docker.internal:5432/engram_dbos",
+        "engram-mcp"
+      ]
+    }
+  }
+}
+```
+
+Build the image: `docker build -t engram-mcp .`
+
+Set your OpenAI API key: `export ENGRAM_OPENAI_API_KEY=sk-...`
+
+### Docker Minimal (No Durability)
+
+For quick testing without workflow durability:
+
+```bash
+docker compose up -d  # Starts Qdrant only
+```
 
 ```json
 {
@@ -314,10 +346,8 @@ Add to Claude Code settings:
 ### Local (Alternative)
 
 ```bash
-# Start Qdrant
-docker run -d -p 6333:6333 qdrant/qdrant
-
-# Install and run
+docker run -d -p 6333:6333 qdrant/qdrant  # Vector DB
+docker run -d -p 5432:5432 -e POSTGRES_USER=engram -e POSTGRES_PASSWORD=engram -e POSTGRES_DB=engram_dbos postgres:15-alpine  # For DBOS
 uv sync --extra mcp
 ```
 
@@ -326,7 +356,11 @@ uv sync --extra mcp
   "mcpServers": {
     "engram": {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/engram", "python", "-m", "engram.mcp"]
+      "args": ["run", "--directory", "/path/to/engram", "python", "-m", "engram.mcp"],
+      "env": {
+        "ENGRAM_DURABLE_BACKEND": "dbos",
+        "ENGRAM_DATABASE_URL": "postgresql://engram:engram@localhost:5432/engram_dbos"
+      }
     }
   }
 }

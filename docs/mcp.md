@@ -21,19 +21,57 @@ The MCP server exposes 10 tools:
 
 ## Setup
 
-### Docker (Recommended)
+### Docker with DBOS (Recommended)
 
-The easiest way to run Engram with Claude Code:
+DBOS provides durable workflow execution with automatic recovery. Consolidation and other workflows survive restarts and failures.
 
 ```bash
 git clone https://github.com/ashita-ai/engram.git
 cd engram
-docker compose up -d
+
+# Start infrastructure (Qdrant + PostgreSQL)
+docker compose -f docker-compose.full.yml up -d
+
+# Build the MCP image
+docker build -t engram-mcp .
+
+# Set your OpenAI API key
+export ENGRAM_OPENAI_API_KEY=sk-...
 ```
 
-This starts both Qdrant (vector database) and the Engram MCP server. Data is persisted in a Docker volume.
+Add to Claude Code settings (`~/.claude.json`):
 
-Add to Claude Code settings (`~/.claude/settings.json`):
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "ENGRAM_QDRANT_URL=http://host.docker.internal:6333",
+        "-e", "ENGRAM_EMBEDDING_PROVIDER=openai",
+        "-e", "ENGRAM_OPENAI_API_KEY",
+        "-e", "ENGRAM_DURABLE_BACKEND=dbos",
+        "-e", "ENGRAM_DATABASE_URL=postgresql://engram:engram@host.docker.internal:5432/engram_dbos",
+        "engram-mcp"
+      ]
+    }
+  }
+}
+```
+
+**Why DBOS?**
+- Workflows (consolidation, decay) are durable and survive restarts
+- Automatic recovery of interrupted operations
+- Full observability via DBOS Conductor
+
+### Docker Minimal (No Durability)
+
+For quick testing without workflow durability:
+
+```bash
+docker compose up -d  # Starts Qdrant + engram-mcp container
+```
 
 ```json
 {
@@ -51,10 +89,18 @@ Add to Claude Code settings (`~/.claude/settings.json`):
 
 ### Local Installation (Alternative)
 
-1. Start Qdrant:
+1. Start infrastructure:
 
    ```bash
+   # Qdrant (required)
    docker run -d -p 6333:6333 -v qdrant_data:/qdrant/storage qdrant/qdrant
+
+   # PostgreSQL for DBOS (recommended)
+   docker run -d -p 5432:5432 \
+     -e POSTGRES_USER=engram \
+     -e POSTGRES_PASSWORD=engram \
+     -e POSTGRES_DB=engram_dbos \
+     postgres:15-alpine
    ```
 
 2. Install Engram with the MCP extra:
@@ -64,14 +110,19 @@ Add to Claude Code settings (`~/.claude/settings.json`):
    uv sync --extra mcp
    ```
 
-3. Add to Claude Code settings (`~/.claude/settings.json`):
+3. Add to Claude Code settings (`~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
     "engram": {
       "command": "uv",
-      "args": ["run", "--directory", "/path/to/engram", "python", "-m", "engram.mcp"]
+      "args": ["run", "--directory", "/path/to/engram", "python", "-m", "engram.mcp"],
+      "env": {
+        "ENGRAM_DURABLE_BACKEND": "dbos",
+        "ENGRAM_DATABASE_URL": "postgresql://engram:engram@localhost:5432/engram_dbos",
+        "ENGRAM_OPENAI_API_KEY": "your-key"
+      }
     }
   }
 }

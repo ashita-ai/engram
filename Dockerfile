@@ -54,5 +54,5 @@ USER engram
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import engram; print('healthy')" || exit 1
 
-# Default command (override in docker-compose or k8s)
-CMD ["python", "-m", "engram"]
+# Default command: Run MCP server (for Claude Code integration)
+CMD ["python", "-u", "-m", "engram.mcp"]
