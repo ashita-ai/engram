@@ -69,6 +69,8 @@ def create_server() -> FastMCP:
         async with _service_lock:
             if _service is None:
                 settings = Settings()
+                # Sync ENGRAM_OPENAI_API_KEY -> OPENAI_API_KEY for Pydantic AI
+                settings.sync_openai_api_key()
                 _service = EngramService.create(settings)
                 await _service.initialize()
             return _service

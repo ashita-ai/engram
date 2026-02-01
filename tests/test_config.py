@@ -396,3 +396,47 @@ class TestWorkingMemorySettings:
         with patch.dict(os.environ, {"ENGRAM_WORKING_MEMORY_MAX_SIZE": "2000"}):
             settings = Settings()
             assert settings.working_memory_max_size == 2000
+
+
+class TestSyncOpenAIApiKey:
+    """Tests for ENGRAM_OPENAI_API_KEY -> OPENAI_API_KEY sync."""
+
+    def test_sync_sets_openai_api_key_when_not_present(self):
+        """sync_openai_api_key should set OPENAI_API_KEY from settings."""
+        # Ensure OPENAI_API_KEY is not set
+        env = {"ENGRAM_OPENAI_API_KEY": "test-key-123"}
+        with patch.dict(os.environ, env, clear=False):
+            # Remove OPENAI_API_KEY if present
+            os.environ.pop("OPENAI_API_KEY", None)
+
+            settings = Settings(openai_api_key="test-key-123", _env_file=None)
+            assert os.environ.get("OPENAI_API_KEY") is None
+
+            settings.sync_openai_api_key()
+
+            assert os.environ.get("OPENAI_API_KEY") == "test-key-123"
+
+            # Clean up
+            os.environ.pop("OPENAI_API_KEY", None)
+
+    def test_sync_does_not_overwrite_existing_openai_api_key(self):
+        """sync_openai_api_key should not overwrite existing OPENAI_API_KEY."""
+        env = {"OPENAI_API_KEY": "existing-key"}
+        with patch.dict(os.environ, env, clear=False):
+            settings = Settings(openai_api_key="engram-key", _env_file=None)
+
+            settings.sync_openai_api_key()
+
+            # Should keep existing key, not overwrite
+            assert os.environ.get("OPENAI_API_KEY") == "existing-key"
+
+    def test_sync_does_nothing_when_no_openai_api_key(self):
+        """sync_openai_api_key should do nothing if settings.openai_api_key is None."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OPENAI_API_KEY", None)
+
+            settings = Settings(openai_api_key=None, _env_file=None)
+
+            settings.sync_openai_api_key()
+
+            assert os.environ.get("OPENAI_API_KEY") is None

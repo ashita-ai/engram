@@ -253,6 +253,9 @@ def init_workflows(settings: Settings | None = None) -> DurableAgentFactory:
     if settings is None:
         settings = Settings()
 
+    # Sync ENGRAM_OPENAI_API_KEY -> OPENAI_API_KEY for Pydantic AI agents
+    settings.sync_openai_api_key()
+
     _factory = DurableAgentFactory(settings)
     _factory.initialize()
     return _factory

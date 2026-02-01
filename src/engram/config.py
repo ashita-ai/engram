@@ -1,6 +1,7 @@
 """Configuration management for Engram."""
 
 import logging
+import os
 import secrets
 import warnings
 from typing import Literal
@@ -562,6 +563,23 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "env_nested_delimiter": "__",
     }
+
+    def sync_openai_api_key(self) -> None:
+        """Sync ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY for Pydantic AI.
+
+        Pydantic AI's OpenAI provider looks for OPENAI_API_KEY in the environment.
+        This method syncs ENGRAM_OPENAI_API_KEY -> OPENAI_API_KEY so users only
+        need to set one environment variable.
+
+        Only sets OPENAI_API_KEY if:
+        1. self.openai_api_key is set (from ENGRAM_OPENAI_API_KEY)
+        2. OPENAI_API_KEY is not already set in the environment
+
+        Call this early in application startup before creating Pydantic AI agents.
+        """
+        if self.openai_api_key and not os.environ.get("OPENAI_API_KEY"):
+            os.environ["OPENAI_API_KEY"] = self.openai_api_key
+            logger.debug("Synced ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY")
 
 
 # Global settings instance

@@ -39,6 +39,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     settings = Settings()
 
+    # Sync ENGRAM_OPENAI_API_KEY -> OPENAI_API_KEY for Pydantic AI agents
+    settings.sync_openai_api_key()
+
     # Configure structured logging
     configure_logging(level=settings.log_level, format=settings.log_format)
     logger.info("Starting Engram API", log_level=settings.log_level, log_format=settings.log_format)
