@@ -80,23 +80,34 @@ def get_project_context() -> str:
     return os.path.basename(os.getcwd())
 
 
-@lru_cache(maxsize=1)
 def get_default_user() -> str | None:
     """Get default user identifier.
 
     Detection order:
-    1. ENGRAM_USER env var
-    2. Git user.name config
+    1. ENGRAM_USER env var (always checked fresh, not cached)
+    2. Git user.name config (cached)
     3. System username (USER or USERNAME env var)
 
     Returns:
         User identifier string, or None if not detectable.
     """
-    # 1. Explicit env var
+    # 1. Explicit env var - ALWAYS check fresh (no cache)
+    # This allows ENGRAM_USER to be set at any point during process lifetime
     if env_user := os.environ.get("ENGRAM_USER"):
         return env_user
 
-    # 2. Git user.name
+    # 2. Git user.name (use cached helper since this won't change)
+    git_user = _get_git_user_cached()
+    if git_user:
+        return git_user
+
+    # 3. System username
+    return os.environ.get("USER") or os.environ.get("USERNAME")
+
+
+@lru_cache(maxsize=1)
+def _get_git_user_cached() -> str | None:
+    """Get git user.name (cached since it won't change)."""
     try:
         git_user = subprocess.check_output(
             ["git", "config", "--get", "user.name"],
@@ -108,12 +119,10 @@ def get_default_user() -> str | None:
             return git_user.lower().replace(" ", "-")
     except (subprocess.CalledProcessError, FileNotFoundError):
         pass
-
-    # 3. System username
-    return os.environ.get("USER") or os.environ.get("USERNAME")
+    return None
 
 
 def clear_context_cache() -> None:
     """Clear cached context values. Useful for testing."""
     get_project_context.cache_clear()
-    get_default_user.cache_clear()
+    _get_git_user_cached.cache_clear()

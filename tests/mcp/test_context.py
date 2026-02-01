@@ -165,35 +165,58 @@ class TestGetDefaultUser:
                 result = get_default_user()
                 assert result is None
 
-    def test_caching(self):
-        """Result is cached after first call."""
-        with patch.dict(os.environ, {"ENGRAM_USER": "cached-user"}):
+    def test_env_var_not_cached(self):
+        """ENGRAM_USER env var is always checked fresh (not cached).
+
+        This is intentional - the env var may be set at any point during
+        process lifetime (e.g., via docker exec -e), so we must always
+        check it fresh. Only git user.name is cached since it won't change.
+        """
+        with patch.dict(os.environ, {"ENGRAM_USER": "first-user"}):
             clear_context_cache()
             result1 = get_default_user()
-            os.environ["ENGRAM_USER"] = "different-user"
+            assert result1 == "first-user"
+
+            # Change env var - should return new value (NOT cached)
+            os.environ["ENGRAM_USER"] = "second-user"
             result2 = get_default_user()
-            assert result1 == result2 == "cached-user"
+            assert result2 == "second-user"
+
+    def test_git_user_is_cached(self):
+        """Git user.name IS cached since it won't change during process lifetime."""
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("ENGRAM_USER", None)
+            clear_context_cache()
+            with patch("engram.mcp.context.subprocess.check_output") as mock:
+                mock.return_value = "First User\n"
+                result1 = get_default_user()
+                assert result1 == "first-user"
+
+                # Change mock - should still return cached value
+                mock.return_value = "Second User\n"
+                result2 = get_default_user()
+                assert result2 == "first-user"  # Still cached
 
 
 class TestClearContextCache:
     """Tests for clear_context_cache()."""
 
-    def test_clears_both_caches(self):
-        """Clears both project and user caches."""
+    def test_clears_project_cache(self):
+        """Clears project context cache (user env var is never cached)."""
         with patch.dict(os.environ, {"ENGRAM_PROJECT_ID": "project1", "ENGRAM_USER": "user1"}):
             clear_context_cache()
             p1 = get_project_context()
-            u1 = get_default_user()
+            _ = get_default_user()  # Call to ensure function works
 
             # Change env vars
             os.environ["ENGRAM_PROJECT_ID"] = "project2"
             os.environ["ENGRAM_USER"] = "user2"
 
-            # Still cached
+            # Project is still cached, but user env var is always fresh
             assert get_project_context() == p1
-            assert get_default_user() == u1
+            assert get_default_user() == "user2"  # NOT cached
 
-            # Clear and re-fetch
+            # Clear and re-fetch project
             clear_context_cache()
             assert get_project_context() == "project2"
             assert get_default_user() == "user2"

@@ -2,7 +2,7 @@
 
 **What is Engram**: Memory you can trust. A memory system for AI applications that preserves ground truth, tracks confidence, and prevents hallucinations.
 
-**Status**: Beta. 800+ tests. Core APIs, REST endpoints, and workflows fully implemented.
+**Status**: Beta. 990+ tests. Core APIs, REST endpoints, and workflows fully implemented.
 
 **Your Role**: Python backend engineer building a memory layer for AI agents. You write production-grade code with comprehensive tests.
 
