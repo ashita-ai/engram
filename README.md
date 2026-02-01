@@ -278,7 +278,7 @@ See [docs/development.md](docs/development.md) for full configuration.
 ## Development
 
 ```bash
-uv run pytest tests/ -v --no-cov  # Run tests (976 tests)
+uv run pytest tests/ -v --no-cov  # Run tests (990+ tests)
 uv run ruff check src/engram/     # Lint
 uv run mypy src/engram/           # Type check
 uv run pre-commit run --all-files # All checks
@@ -309,7 +309,7 @@ Tools: `engram_encode`, `engram_recall`, `engram_verify`, `engram_stats`. See [d
 
 ## Status
 
-**Beta.** Core functionality complete. 976 tests. Production-ready for evaluation.
+**Beta.** Core functionality complete. 990+ tests. Production-ready for evaluation.
 
 ## License
 
