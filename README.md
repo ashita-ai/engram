@@ -286,18 +286,55 @@ uv run pre-commit run --all-files # All checks
 
 ## Claude Code Integration
 
+### Docker (Recommended)
+
+```bash
+# Start Qdrant + Engram
+git clone https://github.com/ashita-ai/engram.git
+cd engram
+docker compose up -d
+```
+
+Add to Claude Code settings:
+
 ```json
 {
   "mcpServers": {
     "engram": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/engram", "--extra", "mcp", "python", "-m", "engram.mcp"]
+      "command": "docker",
+      "args": ["exec", "-i", "engram-mcp", "python", "-m", "engram.mcp"],
+      "env": {
+        "ENGRAM_OPENAI_API_KEY": "your-openai-key"
+      }
     }
   }
 }
 ```
 
-10 tools including `engram_encode`, `engram_recall`, `engram_search`, `engram_verify`, `engram_consolidate`, and more. See [docs/mcp.md](docs/mcp.md).
+### Local (Alternative)
+
+```bash
+# Start Qdrant
+docker run -d -p 6333:6333 qdrant/qdrant
+
+# Install and run
+uv sync --extra mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "uv",
+      "args": ["run", "--directory", "/path/to/engram", "python", "-m", "engram.mcp"]
+    }
+  }
+}
+```
+
+### Tools
+
+10 MCP tools: `engram_encode`, `engram_recall`, `engram_verify`, `engram_stats`, `engram_delete`, `engram_get`, `engram_consolidate`, `engram_promote`, `engram_search`, `engram_recall_at`. See [docs/mcp.md](docs/mcp.md).
 
 ## Documentation
 
