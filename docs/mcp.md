@@ -319,3 +319,50 @@ ENGRAM_LOG_LEVEL=DEBUG uv run python -m engram.mcp
 1. Ensure you're using consistent `user_id` values across encode and recall operations
 2. For Docker: data is stored in the `qdrant_data` volume (persists across restarts)
 3. For local Qdrant: use `-v qdrant_data:/qdrant/storage` to persist data
+
+## Migrating Existing Data
+
+If you have an existing Qdrant instance with engram data and want to switch to the new Docker Compose setup:
+
+### Option 1: Copy volume data (recommended)
+
+```bash
+# 1. Find your existing volume
+docker volume ls | grep qdrant
+
+# 2. Stop old container
+docker stop <old-qdrant-container>
+
+# 3. Copy data to new volume
+docker run --rm \
+  -v <old-volume-name>:/from \
+  -v engram_qdrant_data:/to \
+  alpine cp -a /from/. /to/
+
+# 4. Start new compose
+cd /path/to/engram
+docker compose up -d
+```
+
+### Option 2: Use existing volume directly
+
+Edit `docker-compose.yml` to reference your existing volume:
+
+```yaml
+volumes:
+  qdrant_data:
+    external: true
+    name: your_existing_volume_name
+```
+
+### Option 3: Export/Import via Qdrant API
+
+```bash
+# Export from old instance
+curl http://localhost:6333/collections/engram_episodic/points/scroll \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 10000, "with_payload": true, "with_vectors": true}' > episodic.json
+
+# Import to new instance (after docker compose up -d)
+# Use Qdrant's upsert API to restore
+```
