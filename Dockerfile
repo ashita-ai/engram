@@ -18,13 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install uv for fast dependency resolution
 RUN pip install uv
 
-# Copy dependency files
+# Copy all source files needed for installation
 COPY pyproject.toml .
 COPY README.md .
+COPY src/ src/
 
 # Create virtual environment and install dependencies
 RUN uv venv /app/.venv
-RUN . /app/.venv/bin/activate && uv pip install -e .
+RUN . /app/.venv/bin/activate && uv pip install .
 
 # -----------------------------------------------------------------------------
 # Stage 2: Runtime
