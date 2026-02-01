@@ -1,16 +1,29 @@
 # =============================================================================
-# Engram Docker Compose
+# Engram Docker Compose (Minimal)
 # =============================================================================
+# For MCP server usage with Claude Code.
+#
 # Usage:
-#   docker compose up -d                    # Start Qdrant + PostgreSQL (for DBOS)
-#   docker compose --profile prefect up -d  # Start Qdrant + PostgreSQL + Prefect
-#   docker compose --profile app up -d      # Start everything including Engram API
+#   docker compose up -d        # Start Qdrant + Engram MCP server
+#
+# Claude Code config (~/.claude/claude_desktop_config.json):
+#   {
+#     "mcpServers": {
+#       "engram": {
+#         "command": "docker",
+#         "args": ["exec", "-i", "engram-mcp", "python", "-m", "engram.mcp"],
+#         "env": {
+#           "ENGRAM_OPENAI_API_KEY": "your-key-here"
+#         }
+#       }
+#     }
+#   }
+#
+# For full setup with DBOS durability and Prefect workflows:
+#   docker compose -f docker-compose.full.yml up -d
 # =============================================================================
 
 services:
-  # ==========================================================================
-  # Qdrant - Vector Database (always started)
-  # ==========================================================================
   qdrant:
     image: qdrant/qdrant:latest
     ports:
@@ -20,78 +33,19 @@ services:
       - qdrant_data:/qdrant/storage
     environment:
       QDRANT__SERVICE__GRPC_PORT: 6334
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ==========================================================================
-  # PostgreSQL - For DBOS durable execution (always started)
-  # ==========================================================================
-  postgres:
-    image: postgres:15-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: engram
-      POSTGRES_PASSWORD: engram
-      POSTGRES_DB: engram_dbos
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U engram -d engram_dbos"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
-  # ==========================================================================
-  # Prefect - Workflow Orchestration (optional, use --profile prefect)
-  # ==========================================================================
-  prefect-server:
-    image: prefecthq/prefect:3-latest
-    command: prefect server start --host 0.0.0.0
-    ports:
-      - "4200:4200"
-    environment:
-      PREFECT_SERVER_API_HOST: 0.0.0.0
-      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://engram:engram@postgres:5432/engram_prefect
-    depends_on:
-      postgres:
-        condition: service_healthy
-    profiles:
-      - prefect
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-
-  # ==========================================================================
-  # Engram API (optional, use --profile app)
-  # ==========================================================================
-  engram:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "6366:6366"
+  engram-mcp:
+    build: .
+    container_name: engram-mcp
     environment:
       ENGRAM_QDRANT_URL: http://qdrant:6333
-      ENGRAM_DURABLE_BACKEND: ${ENGRAM_DURABLE_BACKEND:-dbos}
-      ENGRAM_DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_dbos
-      ENGRAM_PREFECT_API_URL: http://prefect-server:4200/api
       ENGRAM_OPENAI_API_KEY: ${ENGRAM_OPENAI_API_KEY:-}
       ENGRAM_ANTHROPIC_API_KEY: ${ENGRAM_ANTHROPIC_API_KEY:-}
     depends_on:
-      qdrant:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-    profiles:
-      - app
+      - qdrant
+    stdin_open: true
+    tty: true
+    command: ["sleep", "infinity"]  # Keep container running for docker exec
 
 volumes:
   qdrant_data:
-  postgres_data:
+    name: engram_qdrant_data  # Reuse existing volume if present

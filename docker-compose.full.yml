@@ -1,0 +1,97 @@
+# =============================================================================
+# Engram Docker Compose
+# =============================================================================
+# Usage:
+#   docker compose up -d                    # Start Qdrant + PostgreSQL (for DBOS)
+#   docker compose --profile prefect up -d  # Start Qdrant + PostgreSQL + Prefect
+#   docker compose --profile app up -d      # Start everything including Engram API
+# =============================================================================
+
+services:
+  # ==========================================================================
+  # Qdrant - Vector Database (always started)
+  # ==========================================================================
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # PostgreSQL - For DBOS durable execution (always started)
+  # ==========================================================================
+  postgres:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: engram
+      POSTGRES_PASSWORD: engram
+      POSTGRES_DB: engram_dbos
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U engram -d engram_dbos"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================================================
+  # Prefect - Workflow Orchestration (optional, use --profile prefect)
+  # ==========================================================================
+  prefect-server:
+    image: prefecthq/prefect:3-latest
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    environment:
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://engram:engram@postgres:5432/engram_prefect
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - prefect
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4200/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ==========================================================================
+  # Engram API (optional, use --profile app)
+  # ==========================================================================
+  engram:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "6366:6366"
+    environment:
+      ENGRAM_QDRANT_URL: http://qdrant:6333
+      ENGRAM_DURABLE_BACKEND: ${ENGRAM_DURABLE_BACKEND:-dbos}
+      ENGRAM_DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_dbos
+      ENGRAM_PREFECT_API_URL: http://prefect-server:4200/api
+      ENGRAM_OPENAI_API_KEY: ${ENGRAM_OPENAI_API_KEY:-}
+      ENGRAM_ANTHROPIC_API_KEY: ${ENGRAM_ANTHROPIC_API_KEY:-}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    profiles:
+      - app
+
+volumes:
+  qdrant_data:
+  postgres_data:
