@@ -297,7 +297,7 @@ uv run pre-commit run --all-files # All checks
 }
 ```
 
-Tools: `engram_encode`, `engram_recall`, `engram_verify`, `engram_stats`. See [docs/mcp.md](docs/mcp.md).
+10 tools including `engram_encode`, `engram_recall`, `engram_search`, `engram_verify`, `engram_consolidate`, and more. See [docs/mcp.md](docs/mcp.md).
 
 ## Documentation
 
