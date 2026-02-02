@@ -286,17 +286,34 @@ uv run pre-commit run --all-files # All checks
 
 ## Claude Code Integration
 
+### Required: OpenAI API Key
+
+Engram uses OpenAI for embeddings and LLM operations. **You must set `ENGRAM_OPENAI_API_KEY`.**
+
+Engram automatically syncs this to `OPENAI_API_KEY` at startup — you only need to set one variable.
+
+**Docker gotcha:** When using Docker, pass the key value explicitly. Docker's `-e VAR_NAME` syntax (without `=value`) does NOT inherit from Claude Code's MCP env block.
+
+```bash
+# WRONG - Docker can't inherit env vars this way
+"-e", "ENGRAM_OPENAI_API_KEY"
+
+# CORRECT - Pass the value explicitly
+"-e", "ENGRAM_OPENAI_API_KEY=sk-proj-..."
+```
+
 ### Docker with DBOS (Recommended)
 
-DBOS provides durable workflow execution with automatic recovery. This is the recommended setup for production use.
+DBOS provides durable workflow execution with automatic recovery.
 
 ```bash
 git clone https://github.com/ashita-ai/engram.git
 cd engram
 docker compose -f docker-compose.full.yml up -d  # Starts Qdrant + PostgreSQL
+docker build -t engram-mcp .
 ```
 
-Add to `~/.claude.json`:
+Add to `~/.claude/settings.json` (or `~/.claude.json`):
 
 ```json
 {
@@ -307,7 +324,7 @@ Add to `~/.claude.json`:
         "run", "-i", "--rm",
         "-e", "ENGRAM_QDRANT_URL=http://host.docker.internal:6333",
         "-e", "ENGRAM_EMBEDDING_PROVIDER=openai",
-        "-e", "ENGRAM_OPENAI_API_KEY",
+        "-e", "ENGRAM_OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE",
         "-e", "ENGRAM_DURABLE_BACKEND=dbos",
         "-e", "ENGRAM_DATABASE_URL=postgresql://engram:engram@host.docker.internal:5432/engram_dbos",
         "engram-mcp"
@@ -317,9 +334,7 @@ Add to `~/.claude.json`:
 }
 ```
 
-Build the image: `docker build -t engram-mcp .`
-
-Set your OpenAI API key: `export ENGRAM_OPENAI_API_KEY=sk-...`
+**Replace `sk-proj-YOUR_KEY_HERE` with your actual OpenAI API key.**
 
 ### Docker Minimal (No Durability)
 
@@ -327,6 +342,7 @@ For quick testing without workflow durability:
 
 ```bash
 docker compose up -d  # Starts Qdrant only
+docker build -t engram-mcp .
 ```
 
 ```json
@@ -334,10 +350,13 @@ docker compose up -d  # Starts Qdrant only
   "mcpServers": {
     "engram": {
       "command": "docker",
-      "args": ["exec", "-i", "engram-mcp", "python", "-m", "engram.mcp"],
-      "env": {
-        "ENGRAM_OPENAI_API_KEY": "your-openai-key"
-      }
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "ENGRAM_QDRANT_URL=http://host.docker.internal:6333",
+        "-e", "ENGRAM_EMBEDDING_PROVIDER=openai",
+        "-e", "ENGRAM_OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE",
+        "engram-mcp"
+      ]
     }
   }
 }
@@ -358,6 +377,7 @@ uv sync --extra mcp
       "command": "uv",
       "args": ["run", "--directory", "/path/to/engram", "python", "-m", "engram.mcp"],
       "env": {
+        "ENGRAM_OPENAI_API_KEY": "sk-proj-YOUR_KEY_HERE",
         "ENGRAM_DURABLE_BACKEND": "dbos",
         "ENGRAM_DATABASE_URL": "postgresql://engram:engram@localhost:5432/engram_dbos"
       }
@@ -365,6 +385,8 @@ uv sync --extra mcp
   }
 }
 ```
+
+For local (non-Docker) setup, the `env` block works correctly to set environment variables.
 
 ### Tools
 

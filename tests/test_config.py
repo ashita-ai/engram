@@ -401,19 +401,18 @@ class TestWorkingMemorySettings:
 class TestSyncOpenAIApiKey:
     """Tests for ENGRAM_OPENAI_API_KEY -> OPENAI_API_KEY sync."""
 
-    def test_sync_sets_openai_api_key_when_not_present(self):
-        """sync_openai_api_key should set OPENAI_API_KEY from settings."""
-        # Ensure OPENAI_API_KEY is not set
+    def test_auto_sync_sets_openai_api_key_at_init(self):
+        """OPENAI_API_KEY should be auto-synced at Settings initialization."""
+        # Ensure OPENAI_API_KEY is not set before we start
         env = {"ENGRAM_OPENAI_API_KEY": "test-key-123"}
         with patch.dict(os.environ, env, clear=False):
             # Remove OPENAI_API_KEY if present
             os.environ.pop("OPENAI_API_KEY", None)
 
-            settings = Settings(openai_api_key="test-key-123", _env_file=None)
-            assert os.environ.get("OPENAI_API_KEY") is None
+            # Creating Settings should auto-sync the key
+            Settings(openai_api_key="test-key-123", _env_file=None)
 
-            settings.sync_openai_api_key()
-
+            # Key should now be set automatically (no need to call sync_openai_api_key)
             assert os.environ.get("OPENAI_API_KEY") == "test-key-123"
 
             # Clean up

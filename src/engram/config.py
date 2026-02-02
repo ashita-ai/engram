@@ -363,6 +363,7 @@ class Settings(BaseSettings):
         - In dev/test, a random key is generated if not provided
         - In production, disabling auth logs a warning
         - Resolves auth_enabled default based on environment
+        - Automatically syncs ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY for Pydantic AI
         """
         is_production = self.env == "production"
 
@@ -397,6 +398,12 @@ class Settings(BaseSettings):
                 logger.debug(
                     "Generated random auth secret for development (tokens invalid after restart)"
                 )
+
+        # Auto-sync ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY for Pydantic AI
+        # This runs at Settings instantiation so Pydantic AI agents always find the key
+        if self.openai_api_key and not os.environ.get("OPENAI_API_KEY"):
+            os.environ["OPENAI_API_KEY"] = self.openai_api_key
+            logger.debug("Synced ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY")
 
         return self
 
@@ -567,6 +574,10 @@ class Settings(BaseSettings):
     def sync_openai_api_key(self) -> None:
         """Sync ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY for Pydantic AI.
 
+        NOTE: This is now called automatically at Settings initialization.
+        You do not need to call this method manually. It remains for
+        backwards compatibility.
+
         Pydantic AI's OpenAI provider looks for OPENAI_API_KEY in the environment.
         This method syncs ENGRAM_OPENAI_API_KEY -> OPENAI_API_KEY so users only
         need to set one environment variable.
@@ -574,8 +585,6 @@ class Settings(BaseSettings):
         Only sets OPENAI_API_KEY if:
         1. self.openai_api_key is set (from ENGRAM_OPENAI_API_KEY)
         2. OPENAI_API_KEY is not already set in the environment
-
-        Call this early in application startup before creating Pydantic AI agents.
         """
         if self.openai_api_key and not os.environ.get("OPENAI_API_KEY"):
             os.environ["OPENAI_API_KEY"] = self.openai_api_key
