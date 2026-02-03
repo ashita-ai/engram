@@ -54,3 +54,6 @@ htmlcov/
 qdrant_data/
 engram_dbos.sqlite
 .swarm/
+
+# Claude Flow runtime
+.claude-flow/
