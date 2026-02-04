@@ -576,7 +576,7 @@ async with EngramService.create() as engram:
     )
 
     # Background operations (run as durable workflows)
-    await engram.consolidate(user_id="user_123")  # Extract, link, strengthen
+    await engram.consolidate(user_id="user_123", org_id="my-project")  # Extract, link, strengthen
 ```
 
 ## Background Operations

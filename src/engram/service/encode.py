@@ -448,11 +448,18 @@ class EncodeMixin:
         """Trigger consolidation for high-importance episodes.
 
         Uses the configured workflow backend for execution.
+        Skips if org_id is not available, since consolidation must be
+        scoped to a project to prevent cross-project bleed.
 
         Args:
             user_id: User ID for multi-tenancy.
-            org_id: Optional organization ID.
+            org_id: Organization/project ID. Consolidation is skipped if None.
         """
+        if org_id is None:
+            logger.debug(
+                "Skipping high-importance consolidation: org_id required for project-scoped consolidation"
+            )
+            return
         assert self.workflow_backend is not None, "workflow_backend not initialized"
         try:
             result = await self.workflow_backend.run_consolidation(

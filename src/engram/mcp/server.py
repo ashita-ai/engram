@@ -628,6 +628,9 @@ def create_server() -> FastMCP:
         episodes for a user and creates a semantic memory that captures the
         key facts and relationships. This is the core learning loop.
 
+        Consolidation is scoped to the current project/org to prevent
+        cross-project memory bleed.
+
         Based on Complementary Learning Systems theory: episodic (hippocampus)
         to semantic (neocortex) transfer with compression.
 
@@ -649,8 +652,17 @@ def create_server() -> FastMCP:
                 indent=2,
             )
 
-        # Auto-detect org_id from project context
+        # Auto-detect org_id from project context (required for consolidation)
         org_id = get_project_context()
+        if not org_id:
+            return json.dumps(
+                {
+                    "error": "org_id required for consolidation. "
+                    "Set ENGRAM_ORG env var or run from within a git repository.",
+                    "success": False,
+                },
+                indent=2,
+            )
 
         service = await get_service()
 
@@ -682,7 +694,10 @@ def create_server() -> FastMCP:
         Creates or updates a procedural memory that captures behavioral patterns,
         preferences, and communication style from all semantic memories.
 
-        Design: ONE procedural memory per user (replaces existing).
+        Promotion is scoped to the current project/org to prevent
+        cross-project memory bleed.
+
+        Design: ONE procedural memory per (user, org) pair (replaces existing).
 
         AUTO-DETECTION:
         - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
@@ -702,8 +717,17 @@ def create_server() -> FastMCP:
                 indent=2,
             )
 
-        # Auto-detect org_id from project context
+        # Auto-detect org_id from project context (required for promotion)
         org_id = get_project_context()
+        if not org_id:
+            return json.dumps(
+                {
+                    "error": "org_id required for promotion. "
+                    "Set ENGRAM_ORG env var or run from within a git repository.",
+                    "success": False,
+                },
+                indent=2,
+            )
 
         service = await get_service()
 

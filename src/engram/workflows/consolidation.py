@@ -346,7 +346,7 @@ async def run_consolidation(
     storage: EngramStorage,
     embedder: Embedder,
     user_id: str,
-    org_id: str | None = None,
+    org_id: str,
     consolidation_passes: int = 1,
     similarity_threshold: float = 0.7,
     use_llm_linking: bool = False,
@@ -355,10 +355,11 @@ async def run_consolidation(
 
     Implements hierarchical compression: N episodes → 1 semantic summary.
     Uses map-reduce for large batches that exceed token limits.
+    Scoped to a single org/project to prevent cross-project bleed.
 
     This workflow:
-    1. Fetches ALL unsummarized episodes
-    2. Gets existing summaries for context
+    1. Fetches ALL unsummarized episodes within the org
+    2. Gets existing summaries for context (within the org)
     3. Chunks episodes if needed (map phase)
     4. Creates summaries per chunk
     5. Reduces to ONE final summary (reduce phase)
@@ -369,7 +370,7 @@ async def run_consolidation(
         storage: EngramStorage instance.
         embedder: Embedder for generating vectors.
         user_id: User ID for multi-tenancy.
-        org_id: Optional organization ID.
+        org_id: Organization/project ID for isolation.
         consolidation_passes: Number of times to run (typically 1).
         similarity_threshold: Min similarity score for automatic linking.
         use_llm_linking: Use LLM to discover richer relationship types
@@ -676,7 +677,7 @@ async def run_consolidation_from_structured(
     storage: EngramStorage,
     embedder: Embedder,
     user_id: str,
-    org_id: str | None = None,
+    org_id: str,
     similarity_threshold: float = 0.7,
     use_llm_linking: bool = False,
 ) -> ConsolidationResult:
@@ -684,20 +685,20 @@ async def run_consolidation_from_structured(
 
     This is the preferred consolidation path when StructuredMemories exist.
     It synthesizes pre-extracted per-episode summaries into cross-episode
-    SemanticMemory.
+    SemanticMemory. Scoped to a single org/project.
 
     Workflow:
-    1. Get unconsolidated StructuredMemories
+    1. Get unconsolidated StructuredMemories within the org
     2. Format for LLM synthesis
     3. Create unified SemanticMemory
-    4. Link to similar existing memories
+    4. Link to similar existing memories within the org
     5. Mark StructuredMemories as consolidated
 
     Args:
         storage: EngramStorage instance.
         embedder: Embedder for generating vectors.
         user_id: User ID for multi-tenancy.
-        org_id: Optional organization ID.
+        org_id: Organization/project ID for isolation.
         similarity_threshold: Min similarity for linking.
 
     Returns:

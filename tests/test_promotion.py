@@ -137,6 +137,7 @@ class TestRunSynthesis:
             storage=mock_storage,
             embedder=mock_embedder,
             user_id="test_user",
+            org_id="test_org",
         )
 
         assert result.semantics_analyzed == 0
@@ -185,6 +186,7 @@ class TestRunSynthesis:
                 storage=mock_storage,
                 embedder=mock_embedder,
                 user_id="test_user",
+                org_id="test_org",
             )
 
         assert result.semantics_analyzed == 2
@@ -233,6 +235,7 @@ class TestRunSynthesis:
                 storage=mock_storage,
                 embedder=mock_embedder,
                 user_id="test_user",
+                org_id="test_org",
             )
 
         assert result.semantics_analyzed == 1
@@ -279,6 +282,7 @@ class TestRunSynthesis:
                 storage=mock_storage,
                 embedder=mock_embedder,
                 user_id="test_user",
+                org_id="test_org",
             )
 
         # Check the procedural was created with deduplicated episode IDs

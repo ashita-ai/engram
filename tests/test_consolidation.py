@@ -281,6 +281,7 @@ class TestRunConsolidation:
             storage=mock_storage,
             embedder=mock_embedder,
             user_id="test_user",
+            org_id="test_org",
         )
 
         assert result.episodes_processed == 0
@@ -325,6 +326,7 @@ class TestRunConsolidation:
                 storage=mock_storage,
                 embedder=mock_embedder,
                 user_id="test_user",
+                org_id="test_org",
             )
 
         # Should process all episodes into ONE semantic memory
@@ -378,6 +380,7 @@ class TestRunConsolidation:
                 storage=mock_storage,
                 embedder=mock_embedder,
                 user_id="test_user",
+                org_id="test_org",
             )
 
             # Verify only user episode was passed to summarization
@@ -635,6 +638,7 @@ class TestConsolidationLinking:
                 storage=mock_storage,
                 embedder=mock_embedder,
                 user_id="test_user",
+                org_id="test_org",
             )
 
         # Should have created memory and link
@@ -678,6 +682,7 @@ class TestConsolidationLinking:
                 storage=mock_storage,
                 embedder=mock_embedder,
                 user_id="test_user",
+                org_id="test_org",
             )
 
         # Memory created but no links
@@ -734,6 +739,7 @@ class TestConsolidationStrengthening:
                 storage=mock_storage,
                 embedder=mock_embedder,
                 user_id="test_user",
+                org_id="test_org",
             )
 
         # Should have created memory and strengthened existing

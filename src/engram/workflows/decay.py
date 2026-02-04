@@ -53,25 +53,27 @@ async def run_decay(
     storage: EngramStorage,
     settings: Settings,
     user_id: str,
-    org_id: str | None = None,
+    org_id: str,
     embedder: Embedder | None = None,
     run_promotion: bool = True,
 ) -> DecayResult:
     """Run the decay workflow.
 
     This workflow:
-    1. Fetches all semantic memories for the user
+    1. Fetches all semantic memories for the user within the org
     2. Recomputes confidence using time-based decay
     3. Archives memories below archive threshold (confidence-based)
     4. Archives memories with low access count (access-based)
     5. Deletes memories below delete threshold
     6. Runs promotion to elevate behavioral patterns to procedural memory
 
+    Scoped to a single org/project to prevent cross-project bleed.
+
     Args:
         storage: EngramStorage instance.
         settings: Engram settings with decay configuration.
         user_id: User ID for multi-tenancy.
-        org_id: Optional organization ID.
+        org_id: Organization/project ID for isolation.
         embedder: Optional embedder for promotion workflow. Required if run_promotion=True.
         run_promotion: Whether to run promotion after decay. Defaults to True.
 

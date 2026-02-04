@@ -546,6 +546,7 @@ class TestConsolidationIntegration:
             storage=mock_storage,
             embedder=real_embedder,
             user_id="test_user",
+            org_id="test_org",
         )
 
         # Should process all 3 episodes into ONE summary
@@ -575,6 +576,7 @@ class TestConsolidationIntegration:
             storage=mock_storage,
             embedder=real_embedder,
             user_id="test_user",
+            org_id="test_org",
         )
 
         # Get the summary content
@@ -601,6 +603,7 @@ class TestConsolidationIntegration:
             storage=empty_storage,
             embedder=real_embedder,
             user_id="test_user",
+            org_id="test_org",
         )
 
         assert result.episodes_processed == 0

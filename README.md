@@ -145,8 +145,8 @@ async with EngramService.create() as engram:
     verified = await engram.verify(memories[0].memory_id, user_id="user_123")
     print(verified.explanation)
 
-    # Run consolidation (N episodes → semantic memory)
-    await engram.consolidate(user_id="user_123")
+    # Run consolidation (N episodes → semantic memory, scoped to project)
+    await engram.consolidate(user_id="user_123", org_id="my-project")
 ```
 
 ### REST API
