@@ -488,7 +488,7 @@ class OperationsMixin:
     async def consolidate(
         self,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
     ) -> ConsolidationResult:
         """Consolidate unsummarized episodes into a semantic summary.
 
@@ -496,10 +496,10 @@ class OperationsMixin:
         Uses map-reduce for large batches that exceed token limits.
 
         This method:
-        1. Fetches ALL unsummarized episodes for the user
+        1. Fetches ALL unsummarized episodes for the user within the org
         2. Creates ONE coherent semantic summary via LLM
         3. Marks episodes as summarized with link to the summary
-        4. Links new summary to similar existing memories
+        4. Links new summary to similar existing memories within the org
 
         Based on Complementary Learning Systems (McClelland et al., 1995):
         hippocampus (episodic) → neocortex (semantic) transfer with compression.
@@ -509,7 +509,9 @@ class OperationsMixin:
 
         Args:
             user_id: User ID for multi-tenancy isolation.
-            org_id: Optional organization ID for further isolation.
+            org_id: Organization/project ID. Required to prevent cross-project
+                memory bleed. Auto-detected from git remote or directory name
+                when using the MCP server.
 
         Returns:
             ConsolidationResult with processing statistics:
@@ -520,8 +522,8 @@ class OperationsMixin:
 
         Example:
             ```python
-            # Consolidate all unsummarized episodes
-            result = await engram.consolidate(user_id="u1")
+            # Consolidate all unsummarized episodes for a project
+            result = await engram.consolidate(user_id="u1", org_id="my-project")
             print(f"{result.episodes_processed} episodes → {result.semantic_memories_created} summary")
             print(f"Compression ratio: {result.compression_ratio:.1f}:1")
             ```
@@ -537,27 +539,30 @@ class OperationsMixin:
     async def create_procedural(
         self,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
     ) -> SynthesisResult:
         """Synthesize a procedural memory from all semantic memories.
 
         Creates or updates ONE procedural memory that captures the user's
-        behavioral patterns, preferences, and communication style.
+        behavioral patterns, preferences, and communication style within
+        a single org/project scope.
 
         This method:
-        1. Fetches ALL semantic memories for the user
+        1. Fetches ALL semantic memories for the user within the org
         2. Uses LLM to synthesize a behavioral profile
-        3. Creates or replaces the user's procedural memory
+        3. Creates or replaces the user's procedural memory for this org
         4. Links procedural to all source semantic IDs
 
-        Design decision: ONE procedural per user (replaces existing).
+        Design decision: ONE procedural per (user, org) pair (replaces existing).
 
         Uses the configured workflow backend for execution, which may provide
         durability guarantees depending on the backend (DBOS, Temporal, Prefect).
 
         Args:
             user_id: User ID for multi-tenancy isolation.
-            org_id: Optional organization ID for further isolation.
+            org_id: Organization/project ID. Required to prevent cross-project
+                memory bleed. Auto-detected from git remote or directory name
+                when using the MCP server.
 
         Returns:
             SynthesisResult with processing statistics:
@@ -568,8 +573,8 @@ class OperationsMixin:
 
         Example:
             ```python
-            # Create/update the user's behavioral profile
-            result = await engram.create_procedural(user_id="u1")
+            # Create/update the user's behavioral profile for a project
+            result = await engram.create_procedural(user_id="u1", org_id="my-project")
             if result.procedural_created:
                 print(f"Created procedural: {result.procedural_id}")
             elif result.procedural_updated:

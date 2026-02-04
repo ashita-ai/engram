@@ -15,11 +15,12 @@ Example:
     settings = Settings(durable_backend="dbos")
     backend = get_workflow_backend(settings)
 
-    # Run consolidation
+    # Run consolidation (org_id required to scope to a project)
     result = await backend.run_consolidation(
         storage=storage,
         embedder=embedder,
         user_id="user123",
+        org_id="my-project",
     )
     ```
 """
@@ -97,19 +98,20 @@ class WorkflowBackend(Protocol):
         storage: EngramStorage,
         embedder: Embedder,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
         consolidation_passes: int = 1,
         similarity_threshold: float = 0.7,
     ) -> ConsolidationResult:
         """Run the consolidation workflow.
 
         Consolidates unsummarized episodes into semantic memories.
+        Scoped to a single org/project to prevent cross-project bleed.
 
         Args:
             storage: EngramStorage instance.
             embedder: Embedder for vector operations.
             user_id: User ID for multi-tenancy.
-            org_id: Optional organization ID.
+            org_id: Organization/project ID for isolation.
             consolidation_passes: Number of passes for consolidation.
             similarity_threshold: Threshold for linking similar memories.
 
@@ -124,19 +126,20 @@ class WorkflowBackend(Protocol):
         storage: EngramStorage,
         settings: Settings,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
         embedder: Embedder | None = None,
         run_promotion: bool = True,
     ) -> DecayResult:
         """Run the decay workflow.
 
         Applies time-based decay to memory confidence scores.
+        Scoped to a single org/project to prevent cross-project bleed.
 
         Args:
             storage: EngramStorage instance.
             settings: Engram settings with decay configuration.
             user_id: User ID for multi-tenancy.
-            org_id: Optional organization ID.
+            org_id: Organization/project ID for isolation.
             embedder: Optional embedder for promotion.
             run_promotion: Whether to run promotion after decay.
 
@@ -201,17 +204,18 @@ class WorkflowBackend(Protocol):
         storage: EngramStorage,
         embedder: Embedder,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
     ) -> SynthesisResult:
         """Run the promotion workflow.
 
         Synthesizes semantic memories into a procedural memory.
+        Scoped to a single org/project to prevent cross-project bleed.
 
         Args:
             storage: EngramStorage instance.
             embedder: Embedder for vector operations.
             user_id: User ID for multi-tenancy.
-            org_id: Optional organization ID.
+            org_id: Organization/project ID for isolation.
 
         Returns:
             SynthesisResult with processing statistics.
@@ -258,7 +262,7 @@ class InProcessBackend:
         storage: EngramStorage,
         embedder: Embedder,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
         consolidation_passes: int = 1,
         similarity_threshold: float = 0.7,
     ) -> ConsolidationResult:
@@ -279,7 +283,7 @@ class InProcessBackend:
         storage: EngramStorage,
         settings: Settings,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
         embedder: Embedder | None = None,
         run_promotion: bool = True,
     ) -> DecayResult:
@@ -340,7 +344,7 @@ class InProcessBackend:
         storage: EngramStorage,
         embedder: Embedder,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
     ) -> SynthesisResult:
         """Run promotion as a direct async call."""
         from .promotion import run_synthesis
@@ -401,7 +405,7 @@ class DBOSBackend:
         storage: EngramStorage,
         embedder: Embedder,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
         consolidation_passes: int = 1,
         similarity_threshold: float = 0.7,
     ) -> ConsolidationResult:
@@ -430,7 +434,7 @@ class DBOSBackend:
         storage: EngramStorage,
         settings: Settings,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
         embedder: Embedder | None = None,
         run_promotion: bool = True,
     ) -> DecayResult:
@@ -515,7 +519,7 @@ class DBOSBackend:
         storage: EngramStorage,
         embedder: Embedder,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
     ) -> SynthesisResult:
         """Run promotion with DBOS durability."""
         self._ensure_initialized()
@@ -599,7 +603,7 @@ class PrefectBackend:
         storage: EngramStorage,
         embedder: Embedder,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
         consolidation_passes: int = 1,
         similarity_threshold: float = 0.7,
     ) -> ConsolidationResult:
@@ -626,7 +630,7 @@ class PrefectBackend:
         storage: EngramStorage,
         settings: Settings,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
         embedder: Embedder | None = None,
         run_promotion: bool = True,
     ) -> DecayResult:
@@ -705,7 +709,7 @@ class PrefectBackend:
         storage: EngramStorage,
         embedder: Embedder,
         user_id: str,
-        org_id: str | None = None,
+        org_id: str,
     ) -> SynthesisResult:
         """Run promotion as a Prefect flow."""
         from prefect import flow

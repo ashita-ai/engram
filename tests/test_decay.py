@@ -132,6 +132,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
         )
 
         assert result.memories_updated == 0
@@ -152,6 +153,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
         )
 
         # High confidence memory may be updated if confidence changed
@@ -173,6 +175,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
         )
 
         assert result.memories_archived == 1
@@ -199,6 +202,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
         )
 
         assert result.memories_deleted == 1
@@ -221,6 +225,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
         )
 
         # Already archived, so just updated not newly archived
@@ -250,6 +255,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
         )
 
         # Should have: 1 archived, 1 deleted
@@ -293,6 +299,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
             run_promotion=False,  # Skip promotion for this test
         )
 
@@ -318,6 +325,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
             run_promotion=False,
         )
 
@@ -337,6 +345,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
             embedder=mock_embedder,
             run_promotion=True,
         )
@@ -354,6 +363,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
             embedder=None,
             run_promotion=True,
         )
@@ -373,6 +383,7 @@ class TestRunDecay:
             storage=mock_storage,
             settings=settings,
             user_id="test_user",
+            org_id="test_org",
             embedder=mock_embedder,
             run_promotion=False,  # Explicitly disabled
         )

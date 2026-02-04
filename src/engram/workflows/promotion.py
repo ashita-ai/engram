@@ -139,24 +139,25 @@ async def run_synthesis(
     storage: EngramStorage,
     embedder: Embedder,
     user_id: str,
-    org_id: str | None = None,
+    org_id: str,
 ) -> SynthesisResult:
     """Run procedural synthesis workflow.
 
-    Synthesizes ALL semantic memories into ONE procedural memory.
-    If a procedural memory already exists for the user, it is replaced.
+    Synthesizes ALL semantic memories into ONE procedural memory per
+    (user, org) pair. If a procedural memory already exists, it is replaced.
+    Scoped to a single org/project to prevent cross-project bleed.
 
     This workflow:
-    1. Fetches ALL semantic memories for the user
+    1. Fetches ALL semantic memories for the user within the org
     2. Uses LLM to synthesize behavioral patterns
-    3. Creates/replaces ONE procedural memory
+    3. Creates/replaces ONE procedural memory for this org
     4. Links procedural to all source semantic IDs
 
     Args:
         storage: EngramStorage instance.
         embedder: Embedder for generating vectors.
         user_id: User ID for multi-tenancy.
-        org_id: Optional organization ID.
+        org_id: Organization/project ID for isolation.
 
     Returns:
         SynthesisResult with processing statistics.

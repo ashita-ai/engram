@@ -705,14 +705,17 @@ class WorkflowTriggerRequest(BaseModel):
 
     Attributes:
         user_id: User ID for multi-tenancy isolation.
-        org_id: Optional organization ID filter.
+        org_id: Organization/project ID for isolation.
         async_execution: If True, run in background and return workflow ID for polling.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     user_id: str = Field(min_length=1, description="User ID for isolation")
-    org_id: str | None = Field(default=None, description="Optional org ID filter")
+    org_id: str = Field(
+        min_length=1,
+        description="Organization/project ID. Required to scope workflows to a single project.",
+    )
     async_execution: bool = Field(
         default=False,
         description="If True, run in background and return workflow ID for status polling",

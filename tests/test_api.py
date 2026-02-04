@@ -1117,6 +1117,7 @@ class TestWorkflowEndpoints:
             "/api/v1/workflows/consolidate",
             json={
                 "user_id": "user_123",
+                "org_id": "test_org",
                 "consolidation_passes": 2,
                 "similarity_threshold": 0.8,
             },
@@ -1174,6 +1175,7 @@ class TestWorkflowEndpoints:
             "/api/v1/workflows/decay",
             json={
                 "user_id": "user_123",
+                "org_id": "test_org",
                 "run_promotion": True,
             },
         )
@@ -1203,6 +1205,7 @@ class TestWorkflowEndpoints:
             "/api/v1/workflows/decay",
             json={
                 "user_id": "user_123",
+                "org_id": "test_org",
                 "run_promotion": False,
             },
         )
@@ -1226,7 +1229,7 @@ class TestWorkflowEndpoints:
 
         response = client.post(
             "/api/v1/workflows/promote",
-            json={"user_id": "user_123"},
+            json={"user_id": "user_123", "org_id": "test_org"},
         )
 
         assert response.status_code == 200
@@ -1352,6 +1355,7 @@ class TestWorkflowEndpoints:
             "/api/v1/workflows/structure/batch",
             json={
                 "user_id": "user_123",
+                "org_id": "test_org",
                 "limit": 10,
             },
         )
@@ -1405,7 +1409,7 @@ class TestWorkflowEndpoints:
 
         response = test_client.post(
             "/api/v1/workflows/consolidate",
-            json={"user_id": "user_123"},
+            json={"user_id": "user_123", "org_id": "test_org"},
         )
 
         assert response.status_code == 503

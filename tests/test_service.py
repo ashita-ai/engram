@@ -156,7 +156,7 @@ class TestEngramServiceEncode:
 
     @pytest.mark.asyncio
     async def test_encode_high_importance_triggers_consolidation(self, mock_service):
-        """Should trigger consolidation when importance >= threshold."""
+        """Should trigger consolidation when importance >= threshold and org_id is set."""
         from engram.workflows.consolidation import ConsolidationResult
 
         # Configure workflow_backend.run_consolidation to return proper result
@@ -172,6 +172,7 @@ class TestEngramServiceEncode:
             content="Critical information",
             role="user",
             user_id="user_123",
+            org_id="test_org",
             importance=0.9,  # Above threshold (default is 0.8)
         )
 
@@ -202,7 +203,7 @@ class TestEngramServiceEncode:
 
     @pytest.mark.asyncio
     async def test_encode_at_threshold_triggers_consolidation(self, mock_service):
-        """Should trigger consolidation when importance == threshold."""
+        """Should trigger consolidation when importance == threshold and org_id is set."""
         from engram.workflows.consolidation import ConsolidationResult
 
         # Configure workflow_backend.run_consolidation to return proper result
@@ -218,6 +219,7 @@ class TestEngramServiceEncode:
             content="Important information",
             role="user",
             user_id="user_123",
+            org_id="test_org",
             importance=0.8,  # Exactly at threshold (default is 0.8)
         )
 
@@ -236,6 +238,7 @@ class TestEngramServiceEncode:
             content="Critical information",
             role="user",
             user_id="user_123",
+            org_id="test_org",
             importance=0.9,  # Above threshold (default is 0.8)
         )
 

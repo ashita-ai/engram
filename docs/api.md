@@ -618,7 +618,7 @@ Trigger memory consolidation workflow. Consolidates episodic memories into seman
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `user_id` | string | Yes | - | User ID for isolation |
-| `org_id` | string | No | `null` | Optional org filter |
+| `org_id` | string | Yes | - | Organization/project ID (prevents cross-project bleed) |
 | `consolidation_passes` | int | No | `1` | Number of LLM passes for refinement (1-5) |
 | `similarity_threshold` | float | No | `0.7` | Threshold for memory linking (0.0-1.0) |
 | `async_execution` | bool | No | `false` | Run in background, return workflow ID |
@@ -660,7 +660,7 @@ Trigger memory decay workflow. Applies time-based confidence decay.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `user_id` | string | Yes | - | User ID for isolation |
-| `org_id` | string | No | `null` | Optional org filter |
+| `org_id` | string | Yes | - | Organization/project ID (prevents cross-project bleed) |
 | `run_promotion` | bool | No | `true` | Run promotion workflow after decay |
 | `async_execution` | bool | No | `false` | Run in background |
 
@@ -700,7 +700,7 @@ Trigger promotion/synthesis workflow. Promotes semantic memories to procedural.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `user_id` | string | Yes | - | User ID for isolation |
-| `org_id` | string | No | `null` | Optional org filter |
+| `org_id` | string | Yes | - | Organization/project ID (prevents cross-project bleed) |
 | `async_execution` | bool | No | `false` | Run in background |
 
 **Response (200 OK):**
@@ -782,7 +782,7 @@ Trigger batch structure workflow for multiple episodes.
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `user_id` | string | Yes | - | User ID for isolation |
-| `org_id` | string | No | `null` | Optional org filter |
+| `org_id` | string | Yes | - | Organization/project ID (prevents cross-project bleed) |
 | `limit` | int | No | `null` | Max episodes to process (null = all unstructured) |
 | `model` | string | No | default | Optional model override |
 | `async_execution` | bool | No | `false` | Run in background |
