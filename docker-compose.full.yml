@@ -89,8 +89,8 @@ services:
       ENGRAM_DURABLE_BACKEND: ${ENGRAM_DURABLE_BACKEND:-dbos}
       ENGRAM_DATABASE_URL: postgresql://engram:engram@postgres:5432/engram_dbos
       ENGRAM_PREFECT_API_URL: http://prefect-server:4200/api
-      ENGRAM_OPENAI_API_KEY: ${ENGRAM_OPENAI_API_KEY:-}
-      ENGRAM_ANTHROPIC_API_KEY: ${ENGRAM_ANTHROPIC_API_KEY:-}
+      ENGRAM_OPENAI_API_KEY: ${ENGRAM_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
+      ENGRAM_ANTHROPIC_API_KEY: ${ENGRAM_ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY:-}}
     depends_on:
       qdrant:
         condition: service_healthy

@@ -6,18 +6,8 @@
 # Usage:
 #   docker compose up -d        # Start Qdrant + Engram MCP server
 #
-# Claude Code config (~/.claude/claude_desktop_config.json):
-#   {
-#     "mcpServers": {
-#       "engram": {
-#         "command": "docker",
-#         "args": ["exec", "-i", "engram-mcp", "python", "-m", "engram.mcp"],
-#         "env": {
-#           "ENGRAM_OPENAI_API_KEY": "your-key-here"
-#         }
-#       }
-#     }
-#   }
+# API Key: Set OPENAI_API_KEY or ENGRAM_OPENAI_API_KEY in your shell or .env
+# file. Either name works — engram accepts both.
 #
 # For full setup with DBOS durability and Prefect workflows:
 #   docker compose -f docker-compose.full.yml up -d
@@ -38,8 +28,8 @@ services:
     container_name: engram-mcp
     environment:
       ENGRAM_QDRANT_URL: http://qdrant:6333
-      ENGRAM_OPENAI_API_KEY: ${ENGRAM_OPENAI_API_KEY:-}
-      ENGRAM_ANTHROPIC_API_KEY: ${ENGRAM_ANTHROPIC_API_KEY:-}
+      ENGRAM_OPENAI_API_KEY: ${ENGRAM_OPENAI_API_KEY:-${OPENAI_API_KEY:-}}
+      ENGRAM_ANTHROPIC_API_KEY: ${ENGRAM_ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY:-}}
     depends_on:
       - qdrant
     stdin_open: true

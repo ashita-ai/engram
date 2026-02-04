@@ -399,8 +399,18 @@ class Settings(BaseSettings):
                     "Generated random auth secret for development (tokens invalid after restart)"
                 )
 
-        # Auto-sync ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY for Pydantic AI
-        # This runs at Settings instantiation so Pydantic AI agents always find the key
+        # Bidirectional sync between ENGRAM_OPENAI_API_KEY and OPENAI_API_KEY.
+        # Users commonly have OPENAI_API_KEY set (standard convention) but not
+        # ENGRAM_OPENAI_API_KEY. In Docker MCP configs, only env vars present in the
+        # parent process get inherited, so we must accept either name.
+        if not self.openai_api_key:
+            fallback_key = os.environ.get("OPENAI_API_KEY")
+            if fallback_key:
+                object.__setattr__(self, "openai_api_key", fallback_key)
+                logger.debug("Using OPENAI_API_KEY as fallback for ENGRAM_OPENAI_API_KEY")
+
+        # Forward sync: ensure OPENAI_API_KEY is set for libraries that expect it
+        # (Pydantic AI, OpenAI SDK, etc.)
         if self.openai_api_key and not os.environ.get("OPENAI_API_KEY"):
             os.environ["OPENAI_API_KEY"] = self.openai_api_key
             logger.debug("Synced ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY")
@@ -572,20 +582,22 @@ class Settings(BaseSettings):
     }
 
     def sync_openai_api_key(self) -> None:
-        """Sync ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY for Pydantic AI.
+        """Bidirectional sync between ENGRAM_OPENAI_API_KEY and OPENAI_API_KEY.
 
         NOTE: This is now called automatically at Settings initialization.
         You do not need to call this method manually. It remains for
         backwards compatibility.
 
-        Pydantic AI's OpenAI provider looks for OPENAI_API_KEY in the environment.
-        This method syncs ENGRAM_OPENAI_API_KEY -> OPENAI_API_KEY so users only
-        need to set one environment variable.
-
-        Only sets OPENAI_API_KEY if:
-        1. self.openai_api_key is set (from ENGRAM_OPENAI_API_KEY)
-        2. OPENAI_API_KEY is not already set in the environment
+        Accepts either ENGRAM_OPENAI_API_KEY or OPENAI_API_KEY. If only one
+        is set, the other is populated so both the engram config and downstream
+        libraries (Pydantic AI, OpenAI SDK) can find the key.
         """
+        if not self.openai_api_key:
+            fallback_key = os.environ.get("OPENAI_API_KEY")
+            if fallback_key:
+                object.__setattr__(self, "openai_api_key", fallback_key)
+                logger.debug("Using OPENAI_API_KEY as fallback for ENGRAM_OPENAI_API_KEY")
+
         if self.openai_api_key and not os.environ.get("OPENAI_API_KEY"):
             os.environ["OPENAI_API_KEY"] = self.openai_api_key
             logger.debug("Synced ENGRAM_OPENAI_API_KEY to OPENAI_API_KEY")

@@ -288,18 +288,18 @@ uv run pre-commit run --all-files # All checks
 
 ### Required: OpenAI API Key
 
-Engram uses OpenAI for embeddings and LLM operations. **You must set `ENGRAM_OPENAI_API_KEY`.**
+Engram uses OpenAI for embeddings and LLM operations. Set **either** of these environment variables — engram accepts both:
 
-Engram automatically syncs this to `OPENAI_API_KEY` at startup — you only need to set one variable.
+- `OPENAI_API_KEY` (standard OpenAI convention)
+- `ENGRAM_OPENAI_API_KEY` (engram-prefixed)
 
-**Docker gotcha:** When using Docker, pass the key value explicitly. Docker's `-e VAR_NAME` syntax (without `=value`) does NOT inherit from Claude Code's MCP env block.
+If both are set, `ENGRAM_OPENAI_API_KEY` takes precedence.
 
-```bash
-# WRONG - Docker can't inherit env vars this way
+**Docker gotcha:** Docker's `-e VAR_NAME` syntax (without `=value`) inherits the variable from the **parent process**, not from your shell profile. When Claude Code launches the MCP server, the parent process is Claude Code's Node runtime — which may not have your shell's env vars. To be safe, pass both names so whichever is available gets picked up:
+
+```json
+"-e", "OPENAI_API_KEY",
 "-e", "ENGRAM_OPENAI_API_KEY"
-
-# CORRECT - Pass the value explicitly
-"-e", "ENGRAM_OPENAI_API_KEY=sk-proj-..."
 ```
 
 ### Docker with DBOS (Recommended)
@@ -313,28 +313,29 @@ docker compose -f docker-compose.full.yml up -d  # Starts Qdrant + PostgreSQL
 docker build -t engram-mcp .
 ```
 
-Add to `~/.claude/settings.json` (or `~/.claude.json`):
+Add to your project's MCP config in `~/.claude.json` (under `projects.<path>.mcpServers`):
 
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm",
-        "-e", "ENGRAM_QDRANT_URL=http://host.docker.internal:6333",
-        "-e", "ENGRAM_EMBEDDING_PROVIDER=openai",
-        "-e", "ENGRAM_OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE",
-        "-e", "ENGRAM_DURABLE_BACKEND=dbos",
-        "-e", "ENGRAM_DATABASE_URL=postgresql://engram:engram@host.docker.internal:5432/engram_dbos",
-        "engram-mcp"
-      ]
-    }
+  "engram": {
+    "type": "stdio",
+    "command": "docker",
+    "args": [
+      "run", "-i", "--rm",
+      "-e", "ENGRAM_QDRANT_URL=http://host.docker.internal:6333",
+      "-e", "ENGRAM_USER=your-username",
+      "-e", "ENGRAM_EMBEDDING_PROVIDER=openai",
+      "-e", "OPENAI_API_KEY",
+      "-e", "ENGRAM_OPENAI_API_KEY",
+      "-e", "ENGRAM_DURABLE_BACKEND=dbos",
+      "-e", "ENGRAM_DATABASE_URL=postgresql://engram:engram@host.docker.internal:5432/engram_dbos",
+      "engram-mcp"
+    ]
   }
 }
 ```
 
-**Replace `sk-proj-YOUR_KEY_HERE` with your actual OpenAI API key.**
+Both `-e OPENAI_API_KEY` and `-e ENGRAM_OPENAI_API_KEY` are passed so whichever is set in Claude Code's environment gets forwarded to the container. You don't need to hardcode the key value.
 
 ### Docker Minimal (No Durability)
 
@@ -347,17 +348,17 @@ docker build -t engram-mcp .
 
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm",
-        "-e", "ENGRAM_QDRANT_URL=http://host.docker.internal:6333",
-        "-e", "ENGRAM_EMBEDDING_PROVIDER=openai",
-        "-e", "ENGRAM_OPENAI_API_KEY=sk-proj-YOUR_KEY_HERE",
-        "engram-mcp"
-      ]
-    }
+  "engram": {
+    "type": "stdio",
+    "command": "docker",
+    "args": [
+      "run", "-i", "--rm",
+      "-e", "ENGRAM_QDRANT_URL=http://host.docker.internal:6333",
+      "-e", "ENGRAM_EMBEDDING_PROVIDER=openai",
+      "-e", "OPENAI_API_KEY",
+      "-e", "ENGRAM_OPENAI_API_KEY",
+      "engram-mcp"
+    ]
   }
 }
 ```
@@ -372,21 +373,19 @@ uv sync --extra mcp
 
 ```json
 {
-  "mcpServers": {
-    "engram": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/engram", "python", "-m", "engram.mcp"],
-      "env": {
-        "ENGRAM_OPENAI_API_KEY": "sk-proj-YOUR_KEY_HERE",
-        "ENGRAM_DURABLE_BACKEND": "dbos",
-        "ENGRAM_DATABASE_URL": "postgresql://engram:engram@localhost:5432/engram_dbos"
-      }
+  "engram": {
+    "command": "uv",
+    "args": ["run", "--directory", "/path/to/engram", "python", "-m", "engram.mcp"],
+    "env": {
+      "OPENAI_API_KEY": "sk-proj-YOUR_KEY_HERE",
+      "ENGRAM_DURABLE_BACKEND": "dbos",
+      "ENGRAM_DATABASE_URL": "postgresql://engram:engram@localhost:5432/engram_dbos"
     }
   }
 }
 ```
 
-For local (non-Docker) setup, the `env` block works correctly to set environment variables.
+For local (non-Docker) setup, the `env` block sets environment variables directly in the subprocess, so either variable name works.
 
 ### Tools
 
