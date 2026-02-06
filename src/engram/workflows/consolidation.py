@@ -41,14 +41,19 @@ class SummaryOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    summary: str = Field(description="Coherent summary of the episodes (2-5 sentences)")
+    summary: str = Field(
+        description="Knowledge summary of the episodes (2-5 sentences). "
+        "States facts directly without 'The user...' framing.",
+    )
     key_facts: list[str] = Field(
         default_factory=list,
-        description="Most important facts mentioned (3-5 items)",
+        description="3-8 concrete facts extracted from the episodes. "
+        "Each should be a standalone fact stated directly "
+        "(e.g., 'PostgreSQL is the primary database' not 'The user prefers PostgreSQL').",
     )
     keywords: list[str] = Field(
         default_factory=list,
-        description="Key terms for retrieval (5-10 words)",
+        description="Key terms for retrieval: names, tools, versions, technologies (5-10 words)",
     )
     context: str = Field(
         default="",
@@ -206,19 +211,25 @@ async def _summarize_chunk(
 
     formatted_text = format_episodes_for_llm(episodes) + existing_context
 
-    summarization_prompt = """You are summarizing conversation episodes into a coherent memory.
+    summarization_prompt = """You are extracting knowledge from conversation episodes.
 
-Create ONE summary that captures:
-- Key facts about the user (name, preferences, context)
-- Important decisions or statements made
-- Any patterns in behavior or communication style
+Create ONE summary that captures concrete, reusable knowledge:
+- Specific facts: names, tools, versions, configurations, constraints
+- Decisions and their rationale (why something was chosen or rejected)
+- Technical details: dependencies, architecture choices, requirements
+- Corrections and negations (what was ruled out and why)
 
 The summary should be:
 - Concise (2-5 sentences)
-- Written in third person ("The user...", "They mentioned...")
-- Focused on lasting/stable information, not transient details
+- Stated directly as facts, not as observations about a person
+- Focused on lasting/stable knowledge, not transient details
 
-Do NOT list individual facts. Create a coherent narrative summary.
+Examples:
+- BAD: "The user mentioned they prefer PostgreSQL for their database needs."
+- GOOD: "PostgreSQL is the primary database. MongoDB was evaluated and rejected due to schema requirements."
+- BAD: "The user is deeply engaged in developing their AI platform."
+- GOOD: "pgstream should target v0.9.7 because schemalog breaks on v1.0.0."
+
 Be conservative - only include information that appears in the episodes.
 
 CONFIDENCE ASSESSMENT:
@@ -270,13 +281,14 @@ async def _reduce_summaries(summaries: list[SummaryOutput]) -> MapReduceSummary:
 
     formatted_text = "\n".join(lines)
 
-    reduce_prompt = """You are combining multiple summaries into one unified summary.
+    reduce_prompt = """You are combining multiple knowledge summaries into one unified summary.
 
 Create a single coherent summary that:
 - Integrates all key information without redundancy
-- Maintains third person perspective
+- Preserves specific technical details (versions, names, constraints, rationale)
 - Is 3-6 sentences total
-- Preserves the most important facts from each summary
+- States facts directly, not as observations about a person
+- Does not generalize specific details into vague statements
 
 Do not add information that wasn't in the original summaries.
 
@@ -635,22 +647,28 @@ async def _synthesize_structured(
 
     formatted_text = format_structured_for_llm(structured_memories) + existing_context
 
-    synthesis_prompt = """You are synthesizing pre-extracted memory summaries into a coherent knowledge base.
+    synthesis_prompt = """You are synthesizing pre-extracted memory summaries into concrete knowledge.
 
 Each entry already has:
 - A per-episode summary
 - Extracted entities (people, organizations)
-- User preferences
+- Preferences
 - Negations/corrections
 
 Your task:
 - Combine these into ONE unified summary (3-5 sentences)
 - Resolve any contradictions (prefer more recent information)
-- Extract overarching themes and patterns
-- Identify stable facts vs transient details
+- Preserve specific facts: names, tools, versions, configurations, constraints
+- Preserve decision rationale (why something was chosen or rejected)
+- Preserve negations explicitly (what was ruled out and why)
 
-Write in third person ("The user...", "They work at...").
-Focus on lasting/stable information. Be conservative.
+State facts directly, not as observations about a person.
+
+Examples:
+- BAD: "The user is a developer who works extensively with data pipelines."
+- GOOD: "The data pipeline uses Airflow for orchestration with PostgreSQL as the metadata store. Redis was removed in v2.3 due to connection pooling issues."
+
+Focus on lasting/stable knowledge. Be conservative.
 
 CONFIDENCE ASSESSMENT:
 After synthesizing, assess your confidence in the unified summary (0.0-1.0):
