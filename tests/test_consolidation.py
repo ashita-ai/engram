@@ -166,8 +166,8 @@ class TestSummaryOutput:
 
     def test_create_with_defaults(self) -> None:
         """Test creating summary output with defaults."""
-        output = SummaryOutput(summary="The user prefers Python programming.")
-        assert output.summary == "The user prefers Python programming."
+        output = SummaryOutput(summary="Python is the primary programming language.")
+        assert output.summary == "Python is the primary programming language."
         assert output.key_facts == []
         assert output.keywords == []
         assert output.context == ""
@@ -175,9 +175,12 @@ class TestSummaryOutput:
     def test_create_with_all_fields(self) -> None:
         """Test creating summary output with all fields."""
         output = SummaryOutput(
-            summary="The user is a Python developer who works at TechCorp.",
-            key_facts=["Works at TechCorp", "Prefers Python"],
-            keywords=["python", "developer", "techcorp"],
+            summary="Python is the primary language at TechCorp. The backend runs Django 4.2.",
+            key_facts=[
+                "TechCorp uses Python for backend services",
+                "Django 4.2 is the web framework",
+            ],
+            keywords=["python", "django", "techcorp"],
             context="professional background",
         )
         assert "TechCorp" in output.summary
@@ -192,13 +195,13 @@ class TestMapReduceSummary:
     def test_create_summary(self) -> None:
         """Test creating map-reduce summary."""
         summary = MapReduceSummary(
-            summary="Combined summary of user information.",
-            keywords=["user", "info"],
-            context="general",
+            summary="PostgreSQL 15 is the primary database. Redis handles caching.",
+            keywords=["postgresql", "redis"],
+            context="infrastructure",
         )
-        assert summary.summary == "Combined summary of user information."
-        assert summary.keywords == ["user", "info"]
-        assert summary.context == "general"
+        assert summary.summary == "PostgreSQL 15 is the primary database. Redis handles caching."
+        assert summary.keywords == ["postgresql", "redis"]
+        assert summary.context == "infrastructure"
 
 
 class TestConsolidationResult:
@@ -313,8 +316,8 @@ class TestRunConsolidation:
 
         # Mock the LLM summarization
         mock_summary = SummaryOutput(
-            summary="The user sent three messages.",
-            keywords=["messages", "user"],
+            summary="Three messages were exchanged covering general topics.",
+            keywords=["messages", "conversation"],
             context="general",
         )
 
@@ -367,7 +370,7 @@ class TestRunConsolidation:
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
         mock_summary = SummaryOutput(
-            summary="The user said hello.",
+            summary="A greeting was exchanged.",
             keywords=["greeting"],
             context="conversation",
         )
@@ -625,7 +628,7 @@ class TestConsolidationLinking:
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
         mock_summary = SummaryOutput(
-            summary="The user enjoys Python programming.",
+            summary="Python is used for programming tasks.",
             keywords=["python", "programming"],
             context="technical",
         )
@@ -669,7 +672,7 @@ class TestConsolidationLinking:
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
         mock_summary = SummaryOutput(
-            summary="Test summary.",
+            summary="Test content was discussed.",
             keywords=["test"],
             context="general",
         )
@@ -726,7 +729,7 @@ class TestConsolidationStrengthening:
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
         mock_summary = SummaryOutput(
-            summary="User prefers Python.",
+            summary="Python is the preferred programming language.",
             keywords=["python"],
             context="programming",
         )
