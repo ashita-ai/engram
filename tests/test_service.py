@@ -129,13 +129,13 @@ class TestEngramServiceEncode:
     async def test_encode_extracts_multiple_patterns(self, mock_service):
         """Should extract emails, phones, and URLs via regex."""
         result = await mock_service.encode(
-            content="Email: test@example.com, Phone: 555-123-4567, URL: https://example.com",
+            content="Email: test@example.com, Phone: (202) 456-1414, URL: https://example.com",
             role="user",
             user_id="user_123",
         )
 
         assert "test@example.com" in result.structured.emails
-        assert any("555" in p for p in result.structured.phones)
+        assert "+12024561414" in result.structured.phones
         assert "https://example.com" in result.structured.urls
 
     @pytest.mark.asyncio

@@ -167,6 +167,56 @@ class TestPhoneExtractor:
         assert len(phones) == 1
         assert phones[0] == "+12024561414"
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Meeting on 2026-02-05/06",
+            "Date: 2025-01-15",
+            "Published 20250115",
+            "Filed on 2024/12/31",
+            "Between 2026-02-05 and 2026-02-06",
+            "Version 20250115.1",
+        ],
+        ids=[
+            "YYYY-MM-DD/DD",
+            "YYYY-MM-DD",
+            "YYYYMMDD",
+            "YYYY/MM/DD",
+            "date-range",
+            "version-string",
+        ],
+    )
+    def test_date_strings_not_extracted_as_phones(self, text: str):
+        """Date-like strings must not produce phone number matches."""
+        extractor = PhoneExtractor()
+        episode = make_episode(text)
+        phones = extractor.extract(episode)
+
+        assert phones == [], f"Date text {text!r} falsely extracted as phone: {phones}"
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("Call (415) 555-2671", "+14155552671"),
+            ("Phone: 212-555-0198", "+12125550198"),
+            ("Reach me at +1 650 253 0000", "+16502530000"),
+            ("UK office: +44 20 7946 0958", "+442079460958"),
+        ],
+        ids=[
+            "us-parens",
+            "us-dashes",
+            "us-e164-spaces",
+            "uk-international",
+        ],
+    )
+    def test_valid_phones_still_extracted(self, text: str, expected: str):
+        """Real phone numbers in common formats must still be extracted."""
+        extractor = PhoneExtractor()
+        episode = make_episode(text)
+        phones = extractor.extract(episode)
+
+        assert expected in phones
+
 
 class TestURLExtractor:
     """Tests for URLExtractor."""
