@@ -5,6 +5,8 @@ Uses Google's phonenumbers library for robust international phone parsing.
 
 from __future__ import annotations
 
+import re
+
 import phonenumbers
 from phonenumbers import Leniency, PhoneNumberFormat
 
@@ -12,6 +14,13 @@ from engram.config import settings
 from engram.models import Episode
 
 from .base import Extractor
+
+# Matches raw strings that are date-like rather than phone-like.
+# Covers YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD, and ranges like YYYY-MM-DD/DD.
+_DATE_PATTERN = re.compile(
+    r"^\d{4}[-/]\d{2}[-/]\d{2}(?:[/\-]\d{2})?$"  # YYYY-MM-DD, YYYY/MM/DD, with optional /DD
+    r"|^\d{8}$"  # YYYYMMDD
+)
 
 
 class PhoneExtractor(Extractor):
@@ -53,18 +62,17 @@ class PhoneExtractor(Extractor):
         """
         valid_phones: list[str] = []
 
-        # PhoneNumberMatcher with POSSIBLE leniency finds more phone formats
-        # including local numbers without country codes
         for match in phonenumbers.PhoneNumberMatcher(
             episode.content,
             self.default_region,
-            Leniency.POSSIBLE,
+            Leniency.VALID,
         ):
+            if _DATE_PATTERN.match(match.raw_string):
+                continue
+
             phone = match.number
 
-            # Accept both valid numbers and possible numbers (local formats)
-            if phonenumbers.is_possible_number(phone):
-                # Format as E.164 (+15551234567)
+            if phonenumbers.is_valid_number(phone):
                 formatted = phonenumbers.format_number(phone, PhoneNumberFormat.E164)
                 valid_phones.append(formatted)
 
