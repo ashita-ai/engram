@@ -131,6 +131,10 @@ class EngramStorage(
         """
         from qdrant_client import models
 
+        from engram.config import settings as app_settings
+
+        scroll_limit = app_settings.storage_max_scroll_limit
+
         # Build filter for user/org
         filter_conditions = [
             models.FieldCondition(
@@ -199,7 +203,7 @@ class EngramStorage(
                 structured_result = await self.client.scroll(
                     collection_name=f"{prefix}_structured",
                     scroll_filter=query_filter,
-                    limit=1000,
+                    limit=scroll_limit,
                     with_payload=["confidence"],
                 )
                 confidences = self._extract_confidences_from_points(structured_result[0])
@@ -217,7 +221,7 @@ class EngramStorage(
                 semantic_result = await self.client.scroll(
                     collection_name=f"{prefix}_semantic",
                     scroll_filter=query_filter,
-                    limit=1000,
+                    limit=scroll_limit,
                     with_payload=["confidence"],
                 )
                 confidences = self._extract_confidences_from_points(semantic_result[0])
@@ -261,10 +265,8 @@ class EngramStorage(
         return confidences
 
     def _get_collection_prefix(self) -> str:
-        """Get the collection name prefix from settings."""
-        from engram.config import settings
-
-        return settings.collection_prefix
+        """Get the collection name prefix for this storage instance."""
+        return self._prefix
 
 
 __all__ = [

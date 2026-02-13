@@ -398,6 +398,71 @@ class TestRunConsolidation:
         assert "ep_user" in episode_ids
         assert "ep_system" in episode_ids
 
+    @pytest.mark.asyncio
+    async def test_source_episode_ids_excludes_system_prompts(self) -> None:
+        """System prompts should NOT appear in source_episode_ids provenance.
+
+        Regression test for bug #7: system episodes were included in
+        source_episode_ids, polluting verify() traces with irrelevant
+        system prompts that didn't contribute content.
+        """
+        from engram.models import Episode
+
+        user_episode = MagicMock(spec=Episode)
+        user_episode.id = "ep_user"
+        user_episode.role = "user"
+        user_episode.content = "I prefer dark mode."
+
+        system_episode = MagicMock(spec=Episode)
+        system_episode.id = "ep_system"
+        system_episode.role = "system"
+        system_episode.content = "You are a helpful assistant."
+
+        stored_memory = None
+
+        async def capture_store(memory: object) -> str:
+            nonlocal stored_memory
+            stored_memory = memory
+            return "sem_123"
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unsummarized_episodes = AsyncMock(
+            return_value=[user_episode, system_episode]
+        )
+        mock_storage.store_semantic = AsyncMock(side_effect=capture_store)
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=2)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_summary = SummaryOutput(
+            summary="User prefers dark mode.",
+            keywords=["dark mode", "preference"],
+            context="settings",
+        )
+
+        with patch(
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
+        ):
+            await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+                org_id="test_org",
+            )
+
+        # source_episode_ids should ONLY contain user episodes
+        assert stored_memory is not None
+        assert "ep_user" in stored_memory.source_episode_ids
+        assert "ep_system" not in stored_memory.source_episode_ids
+
+        # But ALL episodes (including system) should be marked as summarized
+        mark_args = mock_storage.mark_episodes_summarized.call_args[0][0]
+        assert "ep_user" in mark_args
+        assert "ep_system" in mark_args
+
 
 class TestDurableAgentFactory:
     """Tests for DurableAgentFactory with DBOS backend."""
