@@ -152,16 +152,25 @@ async def run_decay(
                 # Already archived, just update confidence
                 await storage.update_semantic_memory(memory)
                 updated += 1
-        elif abs(old_confidence - new_confidence) > 0.001:
-            # Update confidence if it changed significantly
-            # Unarchive if confidence recovered
+        else:
+            # Confidence is above archive threshold
+            needs_update = False
+
+            # Unarchive if confidence recovered above threshold
             if memory.archived:
                 memory.archived = False
+                needs_update = True
                 logger.debug(
                     f"Unarchived memory {memory.id}: confidence recovered to {new_confidence:.3f}"
                 )
-            await storage.update_semantic_memory(memory)
-            updated += 1
+
+            # Also persist if confidence changed significantly
+            if abs(old_confidence - new_confidence) > 0.001:
+                needs_update = True
+
+            if needs_update:
+                await storage.update_semantic_memory(memory)
+                updated += 1
 
     logger.info(
         f"Decay complete: {updated} updated, {archived} archived, "

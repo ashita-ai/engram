@@ -489,7 +489,7 @@ async def run_consolidation(
             final_confidence_reasoning = reduced.confidence_reasoning
 
         # 6. Create semantic memory with source links
-        all_episode_ids = [ep.id for ep in episodes]  # Include system prompts for audit
+        all_episode_ids = [ep.id for ep in episodes]
         user_episode_ids = [ep.id for ep in user_episodes]
 
         embedding = await embedder.embed(final_summary)
@@ -497,9 +497,11 @@ async def run_consolidation(
         # Get derivation method from settings
         from engram.config import settings
 
+        # Only include user episodes in provenance — system prompts don't contribute
+        # content and would pollute verify() traces
         memory = SemanticMemory(
             content=final_summary,
-            source_episode_ids=all_episode_ids,
+            source_episode_ids=user_episode_ids,
             user_id=user_id,
             org_id=org_id,
             embedding=embedding,

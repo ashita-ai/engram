@@ -13,7 +13,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from tenacity import (
     RetryCallState,
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -38,18 +38,26 @@ def _log_retry(retry_state: RetryCallState) -> None:
         )
 
 
+def _is_retryable_qdrant_error(exc: BaseException) -> bool:
+    """Check if an exception is a retryable Qdrant error.
+
+    Only retries network errors and 5xx server errors.
+    Client errors (4xx) are not retried since they indicate
+    a problem with the request itself.
+    """
+    if isinstance(exc, httpx.ConnectError | httpx.TimeoutException):
+        return True
+    if isinstance(exc, UnexpectedResponse):
+        return exc.status_code is not None and exc.status_code >= 500
+    return False
+
+
 # Decorator for retrying transient Qdrant errors
 # Only retries network/server errors, not client errors (4xx)
 qdrant_retry = retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception_type(
-        (
-            httpx.ConnectError,  # Connection failed
-            httpx.TimeoutException,  # Request timed out
-            UnexpectedResponse,  # 5xx server errors
-        )
-    ),
+    retry=retry_if_exception(_is_retryable_qdrant_error),
     before_sleep=_log_retry,
     reraise=True,
 )

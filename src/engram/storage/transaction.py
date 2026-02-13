@@ -259,19 +259,25 @@ class TransactionContext:
     ) -> bool:
         """Exit the transaction context.
 
-        If an exception occurred and the transaction wasn't committed,
-        rolls back all tracked operations.
+        Rolls back tracked operations if the transaction wasn't committed,
+        whether due to an exception or a missing commit() call.
 
         Returns:
             False to propagate any exception.
         """
-        if exc_type is not None and not self.committed:
-            logger.warning(
-                "Transaction failed with %s: %s. Rolling back %d operations.",
-                exc_type.__name__,
-                exc_val,
-                len(self.operations),
-            )
+        if not self.committed and self.operations:
+            if exc_type is not None:
+                logger.warning(
+                    "Transaction failed with %s: %s. Rolling back %d operations.",
+                    exc_type.__name__,
+                    exc_val,
+                    len(self.operations),
+                )
+            else:
+                logger.warning(
+                    "Transaction exited without commit(). Rolling back %d uncommitted operations.",
+                    len(self.operations),
+                )
             rolled_back = await self.rollback()
             logger.info("Rolled back %d operations", rolled_back)
 
@@ -289,7 +295,7 @@ class TransactionMixin:
             async with storage.transaction() as txn:
                 await txn.store_episode(episode)
                 await txn.store_structured(structured)
-                txn.commit()  # Optional, auto-commits if no exception
+                txn.commit()  # Required — uncommitted operations are rolled back on exit
             ```
 
         Returns:
