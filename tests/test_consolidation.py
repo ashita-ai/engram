@@ -16,7 +16,10 @@ from engram.workflows.consolidation import (
     MapReduceSummary,
     MemoryEvolution,
     SummaryOutput,
+    _check_for_near_duplicate,
     _find_matching_memory,
+    _format_existing_memories_for_llm,
+    _is_profile_style,
     format_episodes_for_llm,
     run_consolidation,
 )
@@ -310,6 +313,7 @@ class TestRunConsolidation:
         mock_storage.store_semantic = AsyncMock(return_value="sem_123")
         mock_storage.mark_episodes_summarized = AsyncMock(return_value=3)
         mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.search_semantic = AsyncMock(return_value=[])
 
         mock_embedder = AsyncMock()
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
@@ -365,6 +369,7 @@ class TestRunConsolidation:
         mock_storage.store_semantic = AsyncMock(return_value="sem_123")
         mock_storage.mark_episodes_summarized = AsyncMock(return_value=2)
         mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.search_semantic = AsyncMock(return_value=[])
 
         mock_embedder = AsyncMock()
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
@@ -432,6 +437,7 @@ class TestRunConsolidation:
         mock_storage.store_semantic = AsyncMock(side_effect=capture_store)
         mock_storage.mark_episodes_summarized = AsyncMock(return_value=2)
         mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.search_semantic = AsyncMock(return_value=[])
 
         mock_embedder = AsyncMock()
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
@@ -817,3 +823,277 @@ class TestConsolidationStrengthening:
         # Existing memory should have increased strength
         assert existing_memory.consolidation_strength == 0.1  # Increased by 0.1
         assert existing_memory.consolidation_passes == 1
+
+
+class TestProfileDetection:
+    """Tests for _is_profile_style and profile filtering."""
+
+    def test_detects_personality_profile(self) -> None:
+        """Classic personality profile content should be detected."""
+        content = (
+            "Evan demonstrates a methodical approach to software engineering "
+            "and is consistently engaged in improving code quality."
+        )
+        assert _is_profile_style(content) is True
+
+    def test_detects_behavioral_description(self) -> None:
+        """Behavioral description in third person should be detected."""
+        content = (
+            "The user exhibits strong attention to detail and demonstrates "
+            "a systematic approach to debugging."
+        )
+        assert _is_profile_style(content) is True
+
+    def test_allows_factual_content(self) -> None:
+        """Factual technical content should NOT be flagged."""
+        content = (
+            "PostgreSQL 16 is the primary database. "
+            "Redis was removed in v2.3 due to connection pooling issues."
+        )
+        assert _is_profile_style(content) is False
+
+    def test_allows_actionable_knowledge(self) -> None:
+        """Actionable technical knowledge should NOT be flagged."""
+        content = (
+            "OrderedDict LRU cache needs asyncio.Lock to prevent coroutine races. "
+            "ruff check must pass before committing."
+        )
+        assert _is_profile_style(content) is False
+
+    def test_requires_two_matches(self) -> None:
+        """Single pattern match should NOT trigger profile detection."""
+        # Only one pattern: "demonstrates"
+        content = "The code demonstrates proper error handling with retries."
+        assert _is_profile_style(content) is False
+
+    def test_format_filters_profiles(self) -> None:
+        """_format_existing_memories_for_llm should filter out profile-style memories."""
+        from engram.models import SemanticMemory
+
+        profile_mem = SemanticMemory(
+            content=(
+                "Evan demonstrates a methodical approach and is consistently engaged "
+                "in reviewing code."
+            ),
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+        factual_mem = SemanticMemory(
+            content="PostgreSQL 16 is the primary database.",
+            user_id="test_user",
+            embedding=[0.2] * 384,
+        )
+
+        result = _format_existing_memories_for_llm([profile_mem, factual_mem])
+
+        assert "PostgreSQL 16" in result
+        assert "methodical approach" not in result
+
+    def test_format_handles_all_profiles(self) -> None:
+        """When all memories are profiles, format returns empty string."""
+        from engram.models import SemanticMemory
+
+        profile_mem = SemanticMemory(
+            content=(
+                "The user demonstrates attention to detail and exhibits "
+                "a methodical approach to problem-solving."
+            ),
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+
+        result = _format_existing_memories_for_llm([profile_mem])
+        assert result == ""
+
+    def test_format_respects_config_limit(self) -> None:
+        """Format should limit to consolidation_max_context_memories."""
+        from engram.models import SemanticMemory
+
+        memories = [
+            SemanticMemory(
+                content=f"Fact number {i} about the system.",
+                user_id="test_user",
+                embedding=[0.1] * 384,
+            )
+            for i in range(50)
+        ]
+
+        result = _format_existing_memories_for_llm(memories)
+        # Default limit is 25
+        assert result.count("Fact number") == 25
+
+
+class TestDeduplication:
+    """Tests for embedding-based deduplication."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_detected_above_threshold(self) -> None:
+        """Near-duplicate above threshold should be returned."""
+        from engram.models import SemanticMemory
+
+        existing = SemanticMemory(
+            id="sem_existing",
+            content="PostgreSQL 16 is the primary database.",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+
+        mock_storage = AsyncMock()
+        mock_storage.search_semantic = AsyncMock(
+            return_value=[MagicMock(memory=existing, score=0.92)]
+        )
+
+        result = await _check_for_near_duplicate(
+            embedding=[0.1] * 384,
+            storage=mock_storage,
+            user_id="test_user",
+            org_id="test_org",
+        )
+
+        assert result is existing
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_below_threshold(self) -> None:
+        """Memories below threshold should not be considered duplicates."""
+        from engram.models import SemanticMemory
+
+        existing = SemanticMemory(
+            id="sem_existing",
+            content="Redis handles caching.",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+        )
+
+        mock_storage = AsyncMock()
+        mock_storage.search_semantic = AsyncMock(
+            return_value=[MagicMock(memory=existing, score=0.85)]
+        )
+
+        result = await _check_for_near_duplicate(
+            embedding=[0.1] * 384,
+            storage=mock_storage,
+            user_id="test_user",
+            org_id="test_org",
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_empty_results(self) -> None:
+        """Empty search results should return None."""
+        mock_storage = AsyncMock()
+        mock_storage.search_semantic = AsyncMock(return_value=[])
+
+        result = await _check_for_near_duplicate(
+            embedding=[0.1] * 384,
+            storage=mock_storage,
+            user_id="test_user",
+            org_id="test_org",
+        )
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_consolidation_merges_on_duplicate(self) -> None:
+        """run_consolidation should merge into existing when duplicate is found."""
+        from engram.models import Episode, SemanticMemory
+
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_new"
+        mock_episode.role = "user"
+        mock_episode.content = "PostgreSQL 16 is great"
+
+        existing = SemanticMemory(
+            id="sem_existing",
+            content="- PostgreSQL 16 is the primary database",
+            user_id="test_user",
+            embedding=[0.1] * 384,
+            source_episode_ids=["ep_old"],
+            keywords=["postgresql"],
+        )
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.search_semantic = AsyncMock(
+            return_value=[MagicMock(memory=existing, score=0.95)]
+        )
+        mock_storage.update_semantic_memory = AsyncMock(return_value=True)
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=1)
+        mock_storage.store_semantic = AsyncMock()
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_summary = SummaryOutput(
+            summary="PostgreSQL 16 is the primary database.",
+            key_facts=["PostgreSQL 16 is the primary database"],
+            keywords=["postgresql", "database"],
+        )
+
+        with patch(
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
+        ):
+            result = await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+                org_id="test_org",
+            )
+
+        # Should NOT have created a new memory
+        mock_storage.store_semantic.assert_not_called()
+        # Should have updated the existing one
+        mock_storage.update_semantic_memory.assert_called()
+        # Source IDs should be merged
+        assert "ep_new" in existing.source_episode_ids
+        assert "ep_old" in existing.source_episode_ids
+        # Keywords should be merged
+        assert "database" in existing.keywords
+        # Strength should have increased
+        assert existing.consolidation_strength == 0.1
+        # Episodes processed but no new memories created
+        assert result.episodes_processed == 1
+        assert result.semantic_memories_created == 0
+
+    @pytest.mark.asyncio
+    async def test_consolidation_creates_when_no_duplicate(self) -> None:
+        """run_consolidation should create normally when no duplicate exists."""
+        from engram.models import Episode
+
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_unique"
+        mock_episode.role = "user"
+        mock_episode.content = "Something completely new"
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.search_semantic = AsyncMock(return_value=[])  # No duplicates
+        mock_storage.store_semantic = AsyncMock(return_value="sem_new")
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=1)
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_summary = SummaryOutput(
+            summary="Something completely new was discussed.",
+            key_facts=["Something completely new"],
+            keywords=["new"],
+        )
+
+        with patch(
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
+        ):
+            result = await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+                org_id="test_org",
+            )
+
+        # Should have created a new memory
+        mock_storage.store_semantic.assert_called_once()
+        assert result.semantic_memories_created == 1

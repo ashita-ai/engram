@@ -46,28 +46,27 @@ class TestSynthesisOutput:
     """Tests for SynthesisOutput model."""
 
     def test_create_output(self) -> None:
-        """Test creating synthesis output."""
+        """Test creating synthesis output with all fields."""
         output = SynthesisOutput(
-            behavioral_profile="The user prefers Python and detailed explanations.",
-            communication_style="Concise and technical",
-            technical_preferences=["Python", "PostgreSQL"],
-            work_patterns=["Asks clarifying questions"],
-            keywords=["python", "technical"],
+            operational_rules=[
+                "Always use Pydantic for data models",
+                "Run ruff check before committing",
+            ],
+            technical_constraints=["PostgreSQL 16 is the primary database"],
+            rejected_approaches=["Redis was removed due to connection pooling issues"],
+            keywords=["python", "postgresql"],
         )
-        assert "Python" in output.behavioral_profile
-        assert output.communication_style == "Concise and technical"
-        assert "Python" in output.technical_preferences
-        assert len(output.work_patterns) == 1
+        assert len(output.operational_rules) == 2
+        assert "PostgreSQL" in output.technical_constraints[0]
+        assert len(output.rejected_approaches) == 1
 
     def test_create_minimal_output(self) -> None:
-        """Test creating output with only required field."""
-        output = SynthesisOutput(
-            behavioral_profile="The user is a developer.",
-        )
-        assert output.behavioral_profile == "The user is a developer."
-        assert output.communication_style == ""
-        assert output.technical_preferences == []
-        assert output.work_patterns == []
+        """Test creating output with defaults (all empty lists)."""
+        output = SynthesisOutput()
+        assert output.operational_rules == []
+        assert output.technical_constraints == []
+        assert output.rejected_approaches == []
+        assert output.keywords == []
 
 
 class TestFormatSemanticsForLLM:
@@ -151,13 +150,13 @@ class TestRunSynthesis:
 
         memories = [
             SemanticMemory(
-                content="User prefers Python programming",
+                content="- PostgreSQL 16 is the primary database",
                 user_id="test_user",
                 embedding=[0.1] * 384,
                 source_episode_ids=["ep_001"],
             ),
             SemanticMemory(
-                content="User works as a backend developer",
+                content="- Always run ruff check before committing",
                 user_id="test_user",
                 embedding=[0.2] * 384,
                 source_episode_ids=["ep_002"],
@@ -173,13 +172,12 @@ class TestRunSynthesis:
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
         mock_synthesis = SynthesisOutput(
-            behavioral_profile="The user is a Python backend developer.",
-            communication_style="Technical",
-            technical_preferences=["Python"],
+            operational_rules=["Always run ruff check before committing"],
+            technical_constraints=["PostgreSQL 16 is the primary database"],
         )
 
         with patch(
-            "engram.workflows.promotion._synthesize_behavioral_profile",
+            "engram.workflows.promotion._synthesize_operational_knowledge",
             return_value=mock_synthesis,
         ):
             result = await run_synthesis(
@@ -194,6 +192,11 @@ class TestRunSynthesis:
         assert result.procedural_updated is False
         mock_storage.store_procedural.assert_called_once()
 
+        # Verify content has section headers, not personality prose
+        procedural = mock_storage.store_procedural.call_args[0][0]
+        assert "## Operational Rules" in procedural.content
+        assert "## Technical Constraints" in procedural.content
+
     @pytest.mark.asyncio
     async def test_updates_existing_procedural(self) -> None:
         """Test update of existing procedural memory."""
@@ -201,7 +204,7 @@ class TestRunSynthesis:
 
         memories = [
             SemanticMemory(
-                content="User prefers Python programming",
+                content="- Use Pydantic for all data models",
                 user_id="test_user",
                 embedding=[0.1] * 384,
                 source_episode_ids=["ep_001"],
@@ -224,11 +227,11 @@ class TestRunSynthesis:
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
         mock_synthesis = SynthesisOutput(
-            behavioral_profile="Updated profile.",
+            operational_rules=["Use Pydantic for all data models"],
         )
 
         with patch(
-            "engram.workflows.promotion._synthesize_behavioral_profile",
+            "engram.workflows.promotion._synthesize_operational_knowledge",
             return_value=mock_synthesis,
         ):
             result = await run_synthesis(
@@ -272,10 +275,12 @@ class TestRunSynthesis:
         mock_embedder = AsyncMock()
         mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
 
-        mock_synthesis = SynthesisOutput(behavioral_profile="Profile.")
+        mock_synthesis = SynthesisOutput(
+            operational_rules=["Some rule"],
+        )
 
         with patch(
-            "engram.workflows.promotion._synthesize_behavioral_profile",
+            "engram.workflows.promotion._synthesize_operational_knowledge",
             return_value=mock_synthesis,
         ):
             await run_synthesis(
@@ -289,3 +294,51 @@ class TestRunSynthesis:
         call_args = mock_storage.store_procedural.call_args
         procedural = call_args[0][0]
         assert set(procedural.source_episode_ids) == {"ep_001", "ep_002", "ep_003"}
+
+    @pytest.mark.asyncio
+    async def test_procedural_content_has_no_personality_prose(self) -> None:
+        """Procedural content should contain structured rules, not personality descriptions."""
+        from engram.models import SemanticMemory
+
+        memories = [
+            SemanticMemory(
+                content="- PostgreSQL 16 is the primary database",
+                user_id="test_user",
+                embedding=[0.1] * 384,
+                source_episode_ids=["ep_001"],
+            ),
+        ]
+
+        mock_storage = AsyncMock()
+        mock_storage.list_semantic_memories = AsyncMock(return_value=memories)
+        mock_storage.list_procedural_memories = AsyncMock(return_value=[])
+        mock_storage.store_procedural = AsyncMock(return_value="proc_123")
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        mock_synthesis = SynthesisOutput(
+            operational_rules=["Always use asyncio.Lock with shared caches"],
+            technical_constraints=["PostgreSQL 16 is the primary database"],
+            rejected_approaches=["Redis was removed due to connection pooling issues"],
+        )
+
+        with patch(
+            "engram.workflows.promotion._synthesize_operational_knowledge",
+            return_value=mock_synthesis,
+        ):
+            await run_synthesis(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+                org_id="test_org",
+            )
+
+        procedural = mock_storage.store_procedural.call_args[0][0]
+        assert "## Operational Rules" in procedural.content
+        assert "## Technical Constraints" in procedural.content
+        assert "## Rejected Approaches" in procedural.content
+        assert "asyncio.Lock" in procedural.content
+        # Should NOT contain personality prose
+        assert "The user" not in procedural.content
+        assert "They tend" not in procedural.content

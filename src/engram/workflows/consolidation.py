@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,13 +48,13 @@ class SummaryOutput(BaseModel):
     )
     key_facts: list[str] = Field(
         default_factory=list,
-        description="3-8 concrete facts extracted from the episodes. "
+        description="Extract ALL distinct facts from the episodes. "
         "Each should be a standalone fact stated directly "
         "(e.g., 'PostgreSQL is the primary database' not 'The user prefers PostgreSQL').",
     )
     keywords: list[str] = Field(
         default_factory=list,
-        description="Key terms for retrieval: names, tools, versions, technologies (5-10 words)",
+        description="Key terms for retrieval: names, tools, versions, technologies",
     )
     context: str = Field(
         default="",
@@ -81,7 +82,7 @@ class MapReduceSummary(BaseModel):
     summary: str = Field(description="Final unified summary")
     key_facts: list[str] = Field(
         default_factory=list,
-        description="3-8 concrete facts extracted from the combined chunks.",
+        description="All distinct facts extracted from the combined chunks.",
     )
     keywords: list[str] = Field(default_factory=list)
     context: str = Field(default="")
@@ -175,11 +176,46 @@ def format_structured_for_llm(structured_memories: list[dict[str, str | list[str
     return "\n".join(lines)
 
 
+# Patterns that indicate profile-style content rather than actionable knowledge.
+# A memory must match 2+ patterns to be classified as a profile (avoids false positives).
+_PROFILE_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"\b(demonstrates?|exhibits?|showcases?|displays?)\b", re.IGNORECASE),
+    re.compile(r"\b(methodical|systematic|thorough|meticulous)\s+approach\b", re.IGNORECASE),
+    re.compile(
+        r"\b(consistently|regularly|frequently)\s+(engaged|involved|focused)\b", re.IGNORECASE
+    ),
+    re.compile(
+        r"\b(the user|they|he|she)\s+(is|are|tends?|prefers?|demonstrates?)\b", re.IGNORECASE
+    ),
+    re.compile(r"\b(behavioral|personality|character)\s+(profile|pattern|trait)\b", re.IGNORECASE),
+    re.compile(r"\b(work ethic|communication style|problem.solving style)\b", re.IGNORECASE),
+    re.compile(r"\bdeeply\s+(engaged|committed|invested)\b", re.IGNORECASE),
+    re.compile(r"\b(attention to detail|strong focus|keen interest)\b", re.IGNORECASE),
+]
+
+
+def _is_profile_style(content: str) -> bool:
+    """Detect profile-style content that describes personality rather than facts.
+
+    Requires 2+ pattern matches to avoid false positives on content that
+    incidentally uses one profile-like phrase.
+
+    Args:
+        content: Memory content to check.
+
+    Returns:
+        True if the content appears to be a personality profile.
+    """
+    matches = sum(1 for pattern in _PROFILE_PATTERNS if pattern.search(content))
+    return matches >= 2
+
+
 def _format_existing_memories_for_llm(memories: list[SemanticMemory]) -> str:
     """Format existing memories for LLM context.
 
-    Provides the LLM with existing summaries so it can avoid redundancy
-    and identify what's new.
+    Provides the LLM with existing knowledge so it can avoid redundancy
+    and identify what's new. Profile-style memories are filtered out
+    to prevent contaminating new consolidation runs.
 
     Args:
         memories: List of existing semantic memories.
@@ -187,11 +223,19 @@ def _format_existing_memories_for_llm(memories: list[SemanticMemory]) -> str:
     Returns:
         Formatted text for LLM input.
     """
+    from engram.config import settings
+
     if not memories:
         return ""
 
-    lines = ["\n# Existing Summaries (avoid redundancy)\n"]
-    for mem in memories[:10]:  # Limit to avoid token overflow
+    # Filter out profile-style contamination
+    filtered = [m for m in memories if not _is_profile_style(m.content)]
+    if not filtered:
+        return ""
+
+    limit = settings.consolidation_max_context_memories
+    lines = ["\n# Existing Knowledge (avoid redundancy)\n"]
+    for mem in filtered[:limit]:
         lines.append(f"- {mem.content}")
     return "\n".join(lines)
 
@@ -215,7 +259,10 @@ async def _summarize_chunk(
 
     formatted_text = format_episodes_for_llm(episodes) + existing_context
 
-    summarization_prompt = """You are extracting knowledge from conversation episodes.
+    # Dynamic fact cap: scale with episode count
+    fact_cap = min(50, max(8, len(episodes) * settings.consolidation_max_facts_per_episode))
+
+    summarization_prompt = f"""You are extracting knowledge from conversation episodes.
 
 Create ONE summary that captures concrete, reusable knowledge:
 - Specific facts: names, tools, versions, configurations, constraints
@@ -228,23 +275,29 @@ The summary should be:
 - Stated directly as facts, not as observations about a person
 - Focused on lasting/stable knowledge, not transient details
 
+Extract up to {fact_cap} key_facts. Each fact should be a standalone sentence.
+
 Examples:
 - BAD: "The user mentioned they prefer PostgreSQL for their database needs."
 - GOOD: "PostgreSQL is the primary database. MongoDB was evaluated and rejected due to schema requirements."
 - BAD: "The user is deeply engaged in developing their AI platform."
 - GOOD: "pgstream should target v0.9.7 because schemalog breaks on v1.0.0."
+- BAD: "Evan demonstrates a methodical approach to software engineering."
+- GOOD: "OrderedDict LRU cache needs asyncio.Lock to prevent coroutine races."
+- BAD: "Evan is consistently engaged in reviewing and refining code quality."
+- GOOD: "ruff check must pass before committing; mypy strict mode is enforced."
 
 Be conservative - only include information that appears in the episodes.
 
 CONFIDENCE ASSESSMENT:
-After creating the summary, assess your confidence in the synthesis (0.0-1.0):
-- 0.9-1.0: Strong source agreement, directly supported by multiple episodes
-- 0.7-0.9: Good source agreement, clearly implied by episodes
-- 0.5-0.7: Reasonable inference, some gaps in evidence
-- 0.3-0.5: Speculative, weak source agreement
-- 0.0-0.3: Sources conflict or don't clearly support the summary
+After creating the summary, assess your confidence in the synthesis (0.0-1.0).
+Most consolidation should score 0.4-0.7. Synthesis is inherently uncertain.
+- 0.6-0.7: Strong source agreement, directly supported by multiple episodes
+- 0.4-0.6: Reasonable inference from the episodes
+- 0.2-0.4: Speculative, weak source agreement
+- 0.0-0.2: Sources conflict or don't clearly support the summary
 
-Synthesis should generally score lower than extraction. Be conservative."""
+Do NOT inflate confidence. 0.5 is a reasonable default for most synthesis."""
 
     from engram.workflows.llm_utils import run_agent_with_retry
 
@@ -298,21 +351,21 @@ Create a single coherent summary that:
 - States facts directly, not as observations about a person
 - Does not generalize specific details into vague statements
 
-Extract 3-8 key_facts: concrete, standalone facts from the combined summaries.
+Extract ALL key_facts: concrete, standalone facts from the combined summaries.
 Each fact should be a single sentence that stands on its own
 (e.g., "PostgreSQL 16 is the primary database" not "The user prefers PostgreSQL").
 
 Do not add information that wasn't in the original summaries.
 
 CONFIDENCE ASSESSMENT:
-After combining, assess your confidence in the unified summary (0.0-1.0):
-- 0.9-1.0: Summaries strongly agree, clear integration
-- 0.7-0.9: Good agreement, minor gaps
-- 0.5-0.7: Some disagreement or gaps
-- 0.3-0.5: Significant disagreement
-- 0.0-0.3: Summaries conflict or don't support the conclusion
+After combining, assess your confidence in the unified summary (0.0-1.0).
+Most consolidation should score 0.4-0.7. Synthesis is inherently uncertain.
+- 0.6-0.7: Summaries strongly agree, clear integration
+- 0.4-0.6: Good agreement, minor gaps
+- 0.2-0.4: Some disagreement or gaps
+- 0.0-0.2: Summaries conflict or don't support the conclusion
 
-Be conservative - lower confidence is better than false certainty."""
+Do NOT inflate confidence. 0.5 is a reasonable default for most synthesis."""
 
     from engram.workflows.llm_utils import run_agent_with_retry
 
@@ -325,7 +378,9 @@ Be conservative - lower confidence is better than false certainty."""
     output = await run_agent_with_retry(agent, formatted_text)
 
     # Merge keywords from all chunks
-    output.keywords = list(all_keywords.union(set(output.keywords)))[:15]
+    output.keywords = list(all_keywords.union(set(output.keywords)))[
+        : settings.consolidation_max_keywords
+    ]
 
     # Use most common context or combine
     if contexts:
@@ -364,6 +419,48 @@ async def _find_semantically_similar_memories(
 
     # Filter by minimum score
     return [r.memory for r in results if r.score >= min_score]
+
+
+async def _check_for_near_duplicate(
+    embedding: list[float],
+    storage: EngramStorage,
+    user_id: str,
+    org_id: str | None,
+) -> SemanticMemory | None:
+    """Check if a near-duplicate semantic memory already exists.
+
+    Uses embedding similarity to detect paraphrased duplicates that
+    text matching would miss. Returns the best match above the
+    configured dedup threshold, or None.
+
+    Args:
+        embedding: Embedding of the candidate content.
+        storage: Storage instance.
+        user_id: User ID for isolation.
+        org_id: Optional org ID.
+
+    Returns:
+        The near-duplicate SemanticMemory if found, else None.
+    """
+    from engram.config import settings
+
+    results = await storage.search_semantic(
+        query_vector=embedding,
+        user_id=user_id,
+        org_id=org_id,
+        limit=1,
+    )
+
+    if results and results[0].score >= settings.consolidation_dedup_threshold:
+        logger.info(
+            "Near-duplicate detected (score=%.3f >= threshold=%.2f): %s",
+            results[0].score,
+            settings.consolidation_dedup_threshold,
+            results[0].memory.id,
+        )
+        return results[0].memory
+
+    return None
 
 
 async def run_consolidation(
@@ -528,6 +625,36 @@ async def run_consolidation(
 
         # Get derivation method from settings
         from engram.config import settings
+
+        # 6a. Check for near-duplicate before creating a new memory
+        existing_duplicate = await _check_for_near_duplicate(
+            embedding=embedding,
+            storage=storage,
+            user_id=user_id,
+            org_id=org_id,
+        )
+
+        if existing_duplicate is not None:
+            # Merge into existing memory instead of creating a new one
+            logger.info(
+                "Merging into existing duplicate %s instead of creating new memory",
+                existing_duplicate.id,
+            )
+            # Append new source episode IDs
+            for eid in user_episode_ids:
+                if eid not in existing_duplicate.source_episode_ids:
+                    existing_duplicate.source_episode_ids.append(eid)
+            # Merge keywords
+            existing_keywords = set(existing_duplicate.keywords)
+            existing_keywords.update(final_keywords)
+            existing_duplicate.keywords = list(existing_keywords)
+            # Strengthen through consolidation
+            existing_duplicate.strengthen(delta=0.1)
+            await storage.update_semantic_memory(existing_duplicate)
+            # Mark all episodes as summarized
+            await storage.mark_episodes_summarized(all_episode_ids, user_id, existing_duplicate.id)
+            total_episodes += len(episodes)
+            continue
 
         # Only include user episodes in provenance — system prompts don't contribute
         # content and would pollute verify() traces
@@ -696,7 +823,12 @@ async def _synthesize_structured(
 
     formatted_text = format_structured_for_llm(structured_memories) + existing_context
 
-    synthesis_prompt = """You are synthesizing pre-extracted memory summaries into concrete knowledge.
+    # Dynamic fact cap: scale with input count
+    fact_cap = min(
+        50, max(8, len(structured_memories) * settings.consolidation_max_facts_per_episode)
+    )
+
+    synthesis_prompt = f"""You are synthesizing pre-extracted memory summaries into concrete knowledge.
 
 Each entry already has:
 - A per-episode summary
@@ -711,23 +843,29 @@ Your task:
 - Preserve decision rationale (why something was chosen or rejected)
 - Preserve negations explicitly (what was ruled out and why)
 
+Extract up to {fact_cap} key_facts. Each fact should be a standalone sentence.
+
 State facts directly, not as observations about a person.
 
 Examples:
 - BAD: "The user is a developer who works extensively with data pipelines."
 - GOOD: "The data pipeline uses Airflow for orchestration with PostgreSQL as the metadata store. Redis was removed in v2.3 due to connection pooling issues."
+- BAD: "Evan demonstrates a methodical approach to software engineering."
+- GOOD: "OrderedDict LRU cache needs asyncio.Lock to prevent coroutine races."
+- BAD: "Evan is consistently engaged in reviewing and refining code quality."
+- GOOD: "ruff check must pass before committing; mypy strict mode is enforced."
 
 Focus on lasting/stable knowledge. Be conservative.
 
 CONFIDENCE ASSESSMENT:
-After synthesizing, assess your confidence in the unified summary (0.0-1.0):
-- 0.9-1.0: Strong source agreement across all structured memories
-- 0.7-0.9: Good agreement, minor gaps or resolved contradictions
-- 0.5-0.7: Reasonable synthesis but some gaps in evidence
-- 0.3-0.5: Weak source agreement, speculative conclusions
-- 0.0-0.3: Sources conflict or don't support the synthesis
+After synthesizing, assess your confidence in the unified summary (0.0-1.0).
+Most consolidation should score 0.4-0.7. Synthesis is inherently uncertain.
+- 0.6-0.7: Strong source agreement across all structured memories
+- 0.4-0.6: Good agreement, minor gaps or resolved contradictions
+- 0.2-0.4: Weak source agreement, speculative conclusions
+- 0.0-0.2: Sources conflict or don't support the synthesis
 
-Synthesis should generally score lower than extraction. Be conservative."""
+Do NOT inflate confidence. 0.5 is a reasonable default for most synthesis."""
 
     from engram.workflows.llm_utils import run_agent_with_retry
 
@@ -844,6 +982,38 @@ async def run_consolidation_from_structured(
 
     # Get derivation method from settings
     from engram.config import settings
+
+    # 5a. Check for near-duplicate before creating a new memory
+    existing_duplicate = await _check_for_near_duplicate(
+        embedding=embedding,
+        storage=storage,
+        user_id=user_id,
+        org_id=org_id,
+    )
+
+    if existing_duplicate is not None:
+        # Merge into existing memory instead of creating a new one
+        logger.info(
+            "Merging into existing duplicate %s instead of creating new memory",
+            existing_duplicate.id,
+        )
+        for eid in source_episode_ids:
+            if eid not in existing_duplicate.source_episode_ids:
+                existing_duplicate.source_episode_ids.append(eid)
+        existing_keywords = set(existing_duplicate.keywords)
+        existing_keywords.update(synthesis.keywords)
+        existing_duplicate.keywords = list(existing_keywords)
+        existing_duplicate.strengthen(delta=0.1)
+        await storage.update_semantic_memory(existing_duplicate)
+        await storage.mark_structured_consolidated(structured_ids, user_id, existing_duplicate.id)
+        await storage.mark_episodes_summarized(source_episode_ids, user_id, existing_duplicate.id)
+
+        return ConsolidationResult(
+            episodes_processed=len(structured),
+            semantic_memories_created=0,
+            links_created=0,
+            compression_ratio=float(len(structured)),
+        )
 
     memory = SemanticMemory(
         content=content,
@@ -1084,6 +1254,7 @@ __all__ = [
     "MapReduceSummary",
     "MemoryEvolution",
     "SummaryOutput",
+    "_is_profile_style",
     "format_episodes_for_llm",
     "format_structured_for_llm",
     "run_consolidation",

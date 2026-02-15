@@ -37,21 +37,40 @@ class TestConfidenceScore:
         assert score.value == 0.9
         assert score.extraction_method == ExtractionMethod.EXTRACTED
 
-    def test_inferred_with_llm_confidence(self) -> None:
-        """LLM-inferred content should use LLM-assessed confidence."""
+    def test_inferred_caps_at_0_6(self) -> None:
+        """LLM-inferred content should be capped at 0.6 regardless of LLM assessment."""
         score = ConfidenceScore.for_inferred(
             confidence=0.85,
             reasoning="Clearly stated preference",
         )
-        assert score.value == 0.85
-        assert score.extraction_base == 0.85
-        assert score.llm_reasoning == "Clearly stated preference"
+        assert score.value <= 0.6
+        assert score.extraction_base == 0.6
+        # Original LLM assessment preserved in reasoning
+        assert "0.85" in (score.llm_reasoning or "")
+        assert "Clearly stated preference" in (score.llm_reasoning or "")
+
+    def test_inferred_low_value_passes_through(self) -> None:
+        """Low LLM confidence values below the cap pass through unchanged."""
+        score = ConfidenceScore.for_inferred(
+            confidence=0.4,
+            reasoning="Weak inference",
+        )
+        assert score.value == 0.4
+        assert score.extraction_base == 0.4
+        assert score.llm_reasoning == "Weak inference"
 
     def test_inferred_default_confidence(self) -> None:
         """Default inferred confidence is 0.6."""
         score = ConfidenceScore.for_inferred()
         assert score.value == 0.6
         assert score.llm_reasoning is None
+
+    def test_inferred_at_cap_boundary(self) -> None:
+        """Exactly 0.6 should pass through without cap note."""
+        score = ConfidenceScore.for_inferred(confidence=0.6, reasoning="Moderate")
+        assert score.value == 0.6
+        assert score.extraction_base == 0.6
+        assert score.llm_reasoning == "Moderate"
 
     def test_explain_includes_llm_reasoning(self) -> None:
         """Explain should include LLM reasoning when present."""
@@ -62,10 +81,22 @@ class TestConfidenceScore:
         explanation = score.explain()
         assert "LLM:" in explanation
 
+    def test_recompute_can_exceed_cap(self) -> None:
+        """recompute() with many sources can push confidence above the 0.6 cap."""
+        score = ConfidenceScore.for_inferred(
+            confidence=0.9,
+            supporting_episodes=10,
+        )
+        assert score.value <= 0.6  # Initially capped
+        score.verified = True
+        score.recompute()
+        # With 10 sources and verification, recompute should exceed 0.6
+        assert score.value > 0.6
+
     def test_recompute_with_corroboration(self) -> None:
         """More corroborating sources should increase confidence."""
-        score1 = ConfidenceScore.for_inferred(confidence=0.7, supporting_episodes=1)
-        score2 = ConfidenceScore.for_inferred(confidence=0.7, supporting_episodes=5)
+        score1 = ConfidenceScore.for_inferred(confidence=0.5, supporting_episodes=1)
+        score2 = ConfidenceScore.for_inferred(confidence=0.5, supporting_episodes=5)
 
         score1.recompute()
         score2.recompute()
@@ -74,11 +105,11 @@ class TestConfidenceScore:
 
     def test_recompute_with_contradictions(self) -> None:
         """Contradictions should reduce confidence."""
-        score = ConfidenceScore.for_inferred(confidence=0.8)
+        score = ConfidenceScore.for_inferred(confidence=0.6)
         score.contradictions = 2
         score.recompute()
 
-        assert score.value < 0.8
+        assert score.value < 0.6
 
 
 class TestBayesianConfidence:
