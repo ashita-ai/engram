@@ -164,7 +164,7 @@ class TransactionContext:
         Raises:
             Exception: If the storage operation fails.
         """
-        audit_id = await self.storage.log_audit(entry)
+        audit_id: str = await self.storage.log_audit(entry)
         self.operations.append(
             TrackedOperation(
                 operation=OperationType.LOG_AUDIT,

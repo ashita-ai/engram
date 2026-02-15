@@ -79,6 +79,10 @@ class MapReduceSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str = Field(description="Final unified summary")
+    key_facts: list[str] = Field(
+        default_factory=list,
+        description="3-8 concrete facts extracted from the combined chunks.",
+    )
     keywords: list[str] = Field(default_factory=list)
     context: str = Field(default="")
 
@@ -274,6 +278,10 @@ async def _reduce_summaries(summaries: list[SummaryOutput]) -> MapReduceSummary:
     for i, summary in enumerate(summaries, 1):
         lines.append(f"## Summary {i}")
         lines.append(summary.summary)
+        if summary.key_facts:
+            lines.append("Key facts:")
+            for fact in summary.key_facts:
+                lines.append(f"  - {fact}")
         lines.append("")
         all_keywords.update(summary.keywords)
         if summary.context:
@@ -289,6 +297,10 @@ Create a single coherent summary that:
 - Is 3-6 sentences total
 - States facts directly, not as observations about a person
 - Does not generalize specific details into vague statements
+
+Extract 3-8 key_facts: concrete, standalone facts from the combined summaries.
+Each fact should be a single sentence that stands on its own
+(e.g., "PostgreSQL 16 is the primary database" not "The user prefers PostgreSQL").
 
 Do not add information that wasn't in the original summaries.
 
@@ -475,18 +487,38 @@ async def run_consolidation(
 
         # 5. Reduce phase: combine chunk summaries into one
         if len(chunk_summaries) == 1:
-            final_summary = chunk_summaries[0].summary
-            final_keywords = chunk_summaries[0].keywords
-            final_context = chunk_summaries[0].context
-            final_confidence = chunk_summaries[0].confidence
-            final_confidence_reasoning = chunk_summaries[0].confidence_reasoning
+            chunk = chunk_summaries[0]
+            # Use key_facts as canonical content when available (Issue #207)
+            if chunk.key_facts:
+                final_summary = "\n".join(f"- {fact}" for fact in chunk.key_facts)
+            else:
+                final_summary = chunk.summary
+            final_keywords = chunk.keywords
+            final_context = chunk.context
+            final_confidence = chunk.confidence
+            final_confidence_reasoning = chunk.confidence_reasoning
         else:
             reduced = await _reduce_summaries(chunk_summaries)
-            final_summary = reduced.summary
+            # Use key_facts as canonical content when available (Issue #207)
+            if reduced.key_facts:
+                final_summary = "\n".join(f"- {fact}" for fact in reduced.key_facts)
+            else:
+                final_summary = reduced.summary
             final_keywords = reduced.keywords
             final_context = reduced.context
             final_confidence = reduced.confidence
             final_confidence_reasoning = reduced.confidence_reasoning
+
+        # Validate content is non-empty before creating SemanticMemory
+        if not final_summary or not final_summary.strip():
+            logger.warning(
+                "Consolidation produced empty content for %d episodes — skipping",
+                len(episodes),
+            )
+            # Mark episodes as summarized so they're not reprocessed
+            all_episode_ids = [ep.id for ep in episodes]
+            await storage.mark_episodes_summarized(all_episode_ids, user_id, "")
+            continue
 
         # 6. Create semantic memory with source links
         all_episode_ids = [ep.id for ep in episodes]
@@ -534,6 +566,9 @@ async def run_consolidation(
                 min_score=similarity_threshold,
             )
 
+            # Collect all link updates, then persist in a batch to reduce
+            # partial-failure risk from interleaved writes.
+            updated_similar: list[SemanticMemory] = []
             for similar_mem in similar:
                 if similar_mem.id == memory.id:
                     continue
@@ -541,12 +576,24 @@ async def run_consolidation(
                     memory.add_link(similar_mem.id)
                     similar_mem.add_link(memory.id)
                     similar_mem.strengthen(delta=0.1)
-                    await storage.update_semantic_memory(similar_mem)
+                    updated_similar.append(similar_mem)
                     links_created += 1
                     logger.debug(f"Linked {memory.id} <--> {similar_mem.id}")
 
+            # Persist all link updates — new memory first, then each similar
+            # memory individually so a single failure doesn't lose all links.
             if links_created > 0:
                 await storage.update_semantic_memory(memory)
+            for sim_mem in updated_similar:
+                try:
+                    await storage.update_semantic_memory(sim_mem)
+                except Exception as e:
+                    logger.error(
+                        "Failed to persist reverse link %s -> %s: %s",
+                        sim_mem.id,
+                        memory.id,
+                        e,
+                    )
 
         # 7b. Optional: LLM-driven link discovery for richer relationship types
         if use_llm_linking and similar:
@@ -770,17 +817,36 @@ async def run_consolidation_from_structured(
     # 4. Synthesize into semantic memory
     synthesis = await _synthesize_structured(struct_data, existing_context)
 
+    # Use key_facts as canonical content when available (Issue #207)
+    if synthesis.key_facts:
+        content = "\n".join(f"- {fact}" for fact in synthesis.key_facts)
+    else:
+        content = synthesis.summary
+
+    # Validate content is non-empty before creating SemanticMemory
+    if not content or not content.strip():
+        logger.warning(
+            "Consolidation from structured produced empty content for %d memories — skipping",
+            len(structured),
+        )
+        return ConsolidationResult(
+            episodes_processed=len(structured),
+            semantic_memories_created=0,
+            links_created=0,
+            compression_ratio=0.0,
+        )
+
     # 5. Create SemanticMemory
     source_episode_ids = [s.source_episode_id for s in structured]
     structured_ids = [s.id for s in structured]
 
-    embedding = await embedder.embed(synthesis.summary)
+    embedding = await embedder.embed(content)
 
     # Get derivation method from settings
     from engram.config import settings
 
     memory = SemanticMemory(
-        content=synthesis.summary,
+        content=content,
         source_episode_ids=source_episode_ids,
         user_id=user_id,
         org_id=org_id,
@@ -815,6 +881,9 @@ async def run_consolidation_from_structured(
             min_score=similarity_threshold,
         )
 
+        # Collect all link updates, then persist in a batch to reduce
+        # partial-failure risk from interleaved writes.
+        updated_similar: list[SemanticMemory] = []
         for similar_mem in similar:
             if similar_mem.id == memory.id:
                 continue
@@ -822,12 +891,24 @@ async def run_consolidation_from_structured(
                 memory.add_link(similar_mem.id)
                 similar_mem.add_link(memory.id)
                 similar_mem.strengthen(delta=0.1)
-                await storage.update_semantic_memory(similar_mem)
+                updated_similar.append(similar_mem)
                 links_created += 1
                 logger.debug(f"Linked {memory.id} <--> {similar_mem.id}")
 
+        # Persist all link updates — new memory first, then each similar
+        # memory individually so a single failure doesn't lose all links.
         if links_created > 0:
             await storage.update_semantic_memory(memory)
+        for sim_mem in updated_similar:
+            try:
+                await storage.update_semantic_memory(sim_mem)
+            except Exception as e:
+                logger.error(
+                    "Failed to persist reverse link %s -> %s: %s",
+                    sim_mem.id,
+                    memory.id,
+                    e,
+                )
 
     # 6b. Optional: LLM-driven link discovery for richer relationship types
     if use_llm_linking and existing_memories:
@@ -897,11 +978,11 @@ async def run_consolidation_from_structured(
     # Also mark source episodes as summarized
     await storage.mark_episodes_summarized(source_episode_ids, user_id, memory.id)
 
-    compression_ratio = len(structured) if len(structured) > 0 else 0.0
+    compression_ratio = float(len(structured)) if len(structured) > 0 else 0.0
 
     logger.info(
         f"Consolidation complete: {len(structured)} StructuredMemories → 1 SemanticMemory "
-        f"({compression_ratio:.1f}:1 compression)"
+        f"({compression_ratio:.0f}:1 compression)"
     )
 
     return ConsolidationResult(

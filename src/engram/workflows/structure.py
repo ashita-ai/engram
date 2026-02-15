@@ -445,14 +445,25 @@ async def run_structure_batch(
                 logger.error(f"Failed to structure episode {episode.id}: {e}")
                 return None
 
-    # Process all episodes in parallel
+    # Process all episodes in parallel with return_exceptions=True to prevent
+    # a single failure from cancelling the entire batch.
     tasks = [_structure_with_semaphore(ep) for ep in episodes]
-    all_results = await asyncio.gather(*tasks, return_exceptions=False)
+    all_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Filter out None results (skipped or failed)
-    results = [r for r in all_results if r is not None]
+    # Filter out None results (skipped or failed) and exceptions
+    results: list[StructureResult] = []
+    errors = 0
+    for r in all_results:
+        if isinstance(r, BaseException):
+            errors += 1
+            logger.error(f"Structure batch task failed: {r}")
+        elif r is not None:
+            results.append(r)
 
-    logger.info(f"Structured {len(results)} episodes")
+    if errors:
+        logger.warning(f"Structured {len(results)} episodes, {errors} failed")
+    else:
+        logger.info(f"Structured {len(results)} episodes")
     return results
 
 

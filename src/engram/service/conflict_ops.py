@@ -144,20 +144,62 @@ class ConflictMixin:
         if len(all_memories) < 2:
             return []
 
-        # Compare all pairs (using first half vs second half to avoid N^2 comparisons)
-        mid = len(all_memories) // 2
-        new_memories = all_memories[:mid] if mid > 0 else all_memories[:1]
-        existing_memories = all_memories[mid:] if mid > 0 else all_memories[1:]
+        # Compare all unique pairs using a sliding window approach.
+        # Each memory is compared against all memories that come after it,
+        # ensuring every pair is checked exactly once (no same-half blind spots).
+        # For large sets, we cap at 50 memories to keep LLM calls bounded.
+        capped = all_memories[:50]
+        if len(all_memories) > 50:
+            logger.warning(
+                "Capping conflict detection to 50 of %d memories",
+                len(all_memories),
+            )
 
-        conflicts = await detect_contradictions(
-            new_memories=new_memories,
-            existing_memories=existing_memories,
-            embedder=self.embedder,
-            user_id=user_id,
-            org_id=org_id,
-            similarity_threshold=similarity_threshold,
-            model=model,
-        )
+        all_conflicts: list[ConflictDetection] = []
+        # Compare each memory against all subsequent ones in overlapping windows
+        window_size = min(10, len(capped))
+        for i in range(0, len(capped), window_size):
+            window = capped[i : i + window_size]
+            # Compare this window against the rest (everything after it)
+            rest = capped[i + window_size :]
+            if not rest:
+                # For the last window, compare within itself
+                if len(window) >= 2:
+                    batch_conflicts = await detect_contradictions(
+                        new_memories=window[:1],
+                        existing_memories=window[1:],
+                        embedder=self.embedder,
+                        user_id=user_id,
+                        org_id=org_id,
+                        similarity_threshold=similarity_threshold,
+                        model=model,
+                    )
+                    all_conflicts.extend(batch_conflicts)
+            else:
+                batch_conflicts = await detect_contradictions(
+                    new_memories=window,
+                    existing_memories=rest,
+                    embedder=self.embedder,
+                    user_id=user_id,
+                    org_id=org_id,
+                    similarity_threshold=similarity_threshold,
+                    model=model,
+                )
+                all_conflicts.extend(batch_conflicts)
+                # Also check within this window
+                if len(window) >= 2:
+                    intra_conflicts = await detect_contradictions(
+                        new_memories=window[:1],
+                        existing_memories=window[1:],
+                        embedder=self.embedder,
+                        user_id=user_id,
+                        org_id=org_id,
+                        similarity_threshold=similarity_threshold,
+                        model=model,
+                    )
+                    all_conflicts.extend(intra_conflicts)
+
+        conflicts = all_conflicts
 
         # Store conflicts
         for conflict in conflicts:

@@ -847,7 +847,8 @@ class RecallMixin:
             else:
                 # If no embedding, use original index with zero embedding
                 # This ensures we don't lose results that lack embeddings
-                candidates.append((result.score, [0.0] * 1536, i))
+                placeholder_dim = self.embedder.dimensions
+                candidates.append((result.score, [0.0] * placeholder_dim, i))
                 logger.debug(
                     f"No embedding for {result.memory_type} {result.memory_id}, "
                     "using placeholder for diversity"

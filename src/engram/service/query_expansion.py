@@ -6,6 +6,7 @@ Uses LLM to expand queries with semantically related terms.
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
@@ -17,6 +18,9 @@ if TYPE_CHECKING:
     from engram.embeddings import Embedder
 
 logger = logging.getLogger(__name__)
+
+# Maximum query length to prevent token exhaustion
+_MAX_QUERY_LENGTH = 500
 
 
 class ExpandedQuery(BaseModel):
@@ -111,7 +115,10 @@ async def expand_query(
 
     agent = get_expansion_agent(model)
     try:
-        expanded = await run_agent_with_retry(agent, f"Expand this query: {query}")
+        # Sanitize user input: strip newlines that could break prompt structure
+        # and limit length to prevent token exhaustion
+        safe_query = re.sub(r"[\n\r]+", " ", query).strip()[:_MAX_QUERY_LENGTH]
+        expanded = await run_agent_with_retry(agent, f"Expand this query: {safe_query}")
         expanded.original = query  # Ensure original is set
         logger.debug(f"Expanded '{query}' → {expanded.expanded_terms} ({expanded.reasoning})")
         return expanded
