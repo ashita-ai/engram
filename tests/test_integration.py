@@ -520,6 +520,7 @@ class TestConsolidationIntegration:
         storage.store_semantic = AsyncMock(side_effect=store_semantic)
         storage.mark_episodes_summarized = AsyncMock(side_effect=mark_episodes_summarized)
         storage.list_semantic_memories = AsyncMock(side_effect=list_semantic_memories)
+        storage.search_semantic = AsyncMock(return_value=[])
 
         return storage
 

@@ -84,10 +84,11 @@ class TestConfidenceScore:
         assert score.extraction_method == ExtractionMethod.INFERRED
         assert score.extraction_base == 0.6
 
-    def test_for_inferred_custom_confidence(self):
-        """Custom confidence can be specified for inferred."""
+    def test_for_inferred_caps_high_confidence(self):
+        """High LLM confidence is capped at 0.6 for inferred content."""
         score = ConfidenceScore.for_inferred(confidence=0.75)
-        assert score.value == 0.75
+        assert score.value == 0.6
+        assert score.extraction_base == 0.6
 
     def test_value_bounds(self):
         """Confidence value must be between 0 and 1."""

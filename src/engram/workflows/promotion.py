@@ -29,28 +29,41 @@ logger = logging.getLogger(__name__)
 
 
 class SynthesisOutput(BaseModel):
-    """Structured output from the procedural synthesis LLM agent."""
+    """Structured output from the procedural synthesis LLM agent.
+
+    Produces actionable operational knowledge instead of personality profiles.
+    Each field contains imperative rules, not descriptive prose.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    behavioral_profile: str = Field(
-        description="Coherent description of behavioral patterns (3-6 sentences)"
-    )
-    communication_style: str = Field(
-        default="",
-        description="How the user prefers to communicate",
-    )
-    technical_preferences: list[str] = Field(
+    operational_rules: list[str] = Field(
         default_factory=list,
-        description="Technical tools, languages, frameworks preferred",
+        description=(
+            "Actionable rules in imperative form. "
+            "Examples: 'Always use asyncio.Lock with shared OrderedDict caches', "
+            "'Run ruff check before committing', 'Use Pydantic for all data models'."
+        ),
     )
-    work_patterns: list[str] = Field(
+    technical_constraints: list[str] = Field(
         default_factory=list,
-        description="How the user approaches problems",
+        description=(
+            "Technical boundaries and requirements. "
+            "Examples: 'PostgreSQL 16 is the primary database', "
+            "'mypy strict mode is enforced', 'Never use dataclasses'."
+        ),
+    )
+    rejected_approaches: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Approaches that were tried and rejected, with rationale. "
+            "Examples: 'Redis was removed due to connection pooling issues', "
+            "'dataclasses rejected in favor of Pydantic for validation'."
+        ),
     )
     keywords: list[str] = Field(
         default_factory=list,
-        description="Key terms for retrieval (5-10 words)",
+        description="Key terms for retrieval",
     )
 
 
@@ -93,16 +106,19 @@ def _format_semantics_for_llm(semantics: list[SemanticMemory]) -> str:
     return "\n".join(lines)
 
 
-async def _synthesize_behavioral_profile(
+async def _synthesize_operational_knowledge(
     semantics: list[SemanticMemory],
 ) -> SynthesisOutput:
-    """Synthesize behavioral profile from semantic memories using LLM.
+    """Synthesize operational knowledge from semantic memories using LLM.
+
+    Extracts actionable rules, technical constraints, and rejected approaches
+    instead of personality profiles. Output is in imperative form.
 
     Args:
         semantics: Semantic memories to synthesize.
 
     Returns:
-        SynthesisOutput with behavioral profile.
+        SynthesisOutput with operational rules, constraints, and rejections.
     """
     from pydantic_ai import Agent
 
@@ -110,19 +126,37 @@ async def _synthesize_behavioral_profile(
 
     formatted_text = _format_semantics_for_llm(semantics)
 
-    synthesis_prompt = """You are analyzing semantic memory summaries to create a behavioral profile.
+    synthesis_prompt = """You are extracting operational knowledge from semantic memory summaries.
 
-From these summaries, identify and describe:
-- Communication preferences (tone, detail level, format they prefer)
-- Technical preferences (languages, tools, frameworks they use)
-- Work patterns (how they approach problems, what they prioritize)
-- Personal context (role, goals, constraints)
+Extract three categories of actionable knowledge:
 
-Create a coherent behavioral profile that can guide future interactions.
-Write in third person ("The user prefers...", "They tend to...").
+1. OPERATIONAL RULES: Imperative statements about how things should be done.
+   Format: "Always X", "Never Y because Z", "When X happens, do Y"
+   Examples:
+   - "Always use asyncio.Lock with shared OrderedDict caches"
+   - "Run ruff check and mypy before committing"
+   - "Use Pydantic for all data models, never dataclasses"
 
-Format as a description, not a bulleted list.
-Only include patterns that appear across multiple summaries or are explicitly stated."""
+2. TECHNICAL CONSTRAINTS: Fixed facts about the system or environment.
+   Format: Direct factual statements
+   Examples:
+   - "PostgreSQL 16 is the primary database"
+   - "mypy strict mode is enforced"
+   - "Minimum Python version is 3.11"
+
+3. REJECTED APPROACHES: Things that were tried and abandoned, with reasons.
+   Format: "X was rejected because Y"
+   Examples:
+   - "Redis was removed due to connection pooling issues"
+   - "Retrieval-induced forgetting was removed due to context mismatch"
+
+CRITICAL RULES:
+- Write in imperative form, NOT third person
+- NO personality descriptions ("The user is methodical...")
+- NO behavioral observations ("They tend to...")
+- NO communication style analysis
+- ONLY include knowledge that appears in the source memories
+- Each rule should be specific enough to act on"""
 
     from engram.workflows.llm_utils import run_agent_with_retry
 
@@ -188,24 +222,33 @@ async def run_synthesis(
         existing_procedural = existing_procedurals[0]  # There should be at most one
         logger.info(f"Found existing procedural memory: {existing_procedural.id}")
 
-    # 3. Synthesize behavioral profile via LLM
-    synthesis_output = await _synthesize_behavioral_profile(semantics)
+    # 3. Synthesize operational knowledge via LLM
+    synthesis_output = await _synthesize_operational_knowledge(semantics)
 
-    # 4. Build the procedural content
-    content_parts = [synthesis_output.behavioral_profile]
+    # 4. Build the procedural content from structured sections
+    content_parts: list[str] = []
 
-    if synthesis_output.communication_style:
-        content_parts.append(f"\nCommunication style: {synthesis_output.communication_style}")
+    if synthesis_output.operational_rules:
+        content_parts.append("## Operational Rules")
+        for rule in synthesis_output.operational_rules:
+            content_parts.append(f"- {rule}")
+        content_parts.append("")
 
-    if synthesis_output.technical_preferences:
-        content_parts.append(
-            f"\nTechnical preferences: {', '.join(synthesis_output.technical_preferences)}"
-        )
+    if synthesis_output.technical_constraints:
+        content_parts.append("## Technical Constraints")
+        for constraint in synthesis_output.technical_constraints:
+            content_parts.append(f"- {constraint}")
+        content_parts.append("")
 
-    if synthesis_output.work_patterns:
-        content_parts.append(f"\nWork patterns: {', '.join(synthesis_output.work_patterns)}")
+    if synthesis_output.rejected_approaches:
+        content_parts.append("## Rejected Approaches")
+        for rejection in synthesis_output.rejected_approaches:
+            content_parts.append(f"- {rejection}")
+        content_parts.append("")
 
-    full_content = "\n".join(content_parts)
+    full_content = (
+        "\n".join(content_parts) if content_parts else "No operational knowledge extracted."
+    )
 
     # 5. Collect all source episode IDs from semantics (deduplicated, order preserved)
     all_source_episode_ids: list[str] = []

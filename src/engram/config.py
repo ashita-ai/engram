@@ -276,6 +276,36 @@ class Settings(BaseSettings):
         le=1.0,
         description="Trigger immediate consolidation for episodes at or above this importance",
     )
+    consolidation_max_facts_per_episode: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description=(
+            "Maximum facts to extract per episode during consolidation. "
+            "Total fact cap = max(8, episode_count * this value), capped at 50."
+        ),
+    )
+    consolidation_max_keywords: int = Field(
+        default=30,
+        ge=5,
+        le=100,
+        description="Maximum keywords to retain after map-reduce consolidation",
+    )
+    consolidation_max_context_memories: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+        description="Maximum existing semantic memories to pass as LLM context during consolidation",
+    )
+    consolidation_dedup_threshold: float = Field(
+        default=0.90,
+        ge=0.5,
+        le=1.0,
+        description=(
+            "Embedding similarity threshold for near-duplicate detection. "
+            "Semantic memories above this threshold are merged instead of created."
+        ),
+    )
 
     # Retrieval Strengthening (Testing Effect)
     retrieval_strengthening_enabled: bool = Field(

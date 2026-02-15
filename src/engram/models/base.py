@@ -19,7 +19,7 @@ class ExtractionMethod(str, Enum):
 
     VERBATIM = "verbatim"  # Exact quote, immutable (confidence: 1.0)
     EXTRACTED = "extracted"  # Deterministic pattern match (confidence: 0.9)
-    INFERRED = "inferred"  # LLM-derived, uncertain (confidence: LLM-assessed)
+    INFERRED = "inferred"  # LLM-derived, uncertain (confidence: capped at 0.6)
 
 
 class OperationStatus(str, Enum):
@@ -48,6 +48,12 @@ class Staleness(str, Enum):
     FRESH = "fresh"  # Fully consolidated, up-to-date
     CONSOLIDATING = "consolidating"  # Background consolidation in progress
     STALE = "stale"  # Needs re-consolidation or hasn't been processed
+
+
+# Maximum initial confidence for inferred (LLM-derived) content.
+# Confidence can rise above this through recompute() (corroboration,
+# verification, recency), but the extraction base is always capped here.
+INFERRED_CONFIDENCE_CAP: float = 0.6
 
 
 class ConfidenceScore(BaseModel):
@@ -236,20 +242,42 @@ class ConfidenceScore(BaseModel):
     ) -> ConfidenceScore:
         """Create confidence score for LLM-inferred content.
 
+        The value and extraction_base are capped at INFERRED_CONFIDENCE_CAP (0.6)
+        regardless of LLM self-assessment. LLMs routinely rate their own output
+        at 0.8-0.9, which inflates inferred content to near-verbatim confidence.
+        The original LLM-assessed value is preserved in llm_reasoning for
+        auditability.
+
+        Confidence can still exceed 0.6 through recompute() when corroboration,
+        verification, or recency factors justify it.
+
         Args:
-            confidence: LLM-assessed confidence (0.0-1.0).
+            confidence: LLM-assessed confidence (0.0-1.0). Capped at 0.6.
             supporting_episodes: Number of source episodes.
             reasoning: LLM's explanation for the confidence.
 
         Returns:
-            ConfidenceScore with LLM-assessed value.
+            ConfidenceScore with capped value and extraction_base.
         """
+        capped_value = min(confidence, INFERRED_CONFIDENCE_CAP)
+
+        # Preserve original LLM assessment in reasoning for auditability
+        full_reasoning: str | None
+        if confidence > INFERRED_CONFIDENCE_CAP:
+            llm_note = f"LLM assessed {confidence:.2f}, capped to {capped_value:.2f}"
+            if reasoning:
+                full_reasoning = f"{reasoning} ({llm_note})"
+            else:
+                full_reasoning = llm_note
+        else:
+            full_reasoning = reasoning
+
         return cls(
-            value=confidence,
+            value=capped_value,
             extraction_method=ExtractionMethod.INFERRED,
-            extraction_base=confidence,  # LLM sets the base
+            extraction_base=capped_value,
             supporting_episodes=supporting_episodes,
-            llm_reasoning=reasoning,
+            llm_reasoning=full_reasoning,
         )
 
 

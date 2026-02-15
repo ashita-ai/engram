@@ -78,6 +78,7 @@ class TestCascadeModes:
         storage.get_structured_for_episode = AsyncMock(return_value=mock_structured)
 
         # Mock semantic with 2 sources (will be updated, not deleted)
+        # Note: for_inferred caps at 0.6, so initial value is 0.6
         mock_semantic = SemanticMemory(
             id="sem_1",
             content="Test",
@@ -104,8 +105,8 @@ class TestCascadeModes:
         # Verify confidence was reduced
         storage.update_semantic_memory.assert_called_once()
         updated_sem = storage.update_semantic_memory.call_args[0][0]
-        # Original: 0.8, after removing 1 of 2 sources: 0.8 * 0.5 = 0.4
-        assert updated_sem.confidence.value == pytest.approx(0.4, rel=0.01)
+        # Original: 0.6 (capped from 0.8), after removing 1 of 2 sources: 0.6 * 0.5 = 0.3
+        assert updated_sem.confidence.value == pytest.approx(0.3, rel=0.01)
 
     @pytest.mark.asyncio
     async def test_cascade_soft_deletes_orphaned_semantic(self, storage):
@@ -225,6 +226,7 @@ class TestConfidenceReduction:
         storage._find_semantics_by_source_episode = AsyncMock(return_value=[])
 
         # Procedural with episode sources and semantic sources
+        # Note: for_inferred caps at 0.6, so initial value is 0.6
         mock_procedural = ProceduralMemory(
             id="proc_1",
             content="Pattern",
@@ -242,8 +244,8 @@ class TestConfidenceReduction:
 
         assert result["procedural_updated"] == 1
         updated_proc = storage.update_procedural_memory.call_args[0][0]
-        # 2 sources -> 1 source = 50% confidence
-        assert updated_proc.confidence.value == pytest.approx(0.4, rel=0.01)
+        # 2 sources -> 1 source = 50% confidence: 0.6 * 0.5 = 0.3
+        assert updated_proc.confidence.value == pytest.approx(0.3, rel=0.01)
 
     @pytest.mark.asyncio
     async def test_procedural_deleted_when_no_sources_remain(self, storage):
