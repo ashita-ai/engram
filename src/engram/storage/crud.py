@@ -5,6 +5,7 @@ Provides methods to retrieve and delete individual memories.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -21,6 +22,22 @@ if TYPE_CHECKING:
         SemanticMemory,
         StructuredMemory,
     )
+
+logger = logging.getLogger(__name__)
+
+
+def _warn_if_truncated(result_count: int, limit: int, operation: str) -> None:
+    """Log a warning if scroll results may have been truncated."""
+    if result_count >= limit:
+        logger.warning(
+            "Scroll result count (%d) equals limit (%d) in %s — "
+            "results may be truncated. Increase ENGRAM_STORAGE_MAX_SCROLL_LIMIT "
+            "or paginate to process all records.",
+            result_count,
+            limit,
+            operation,
+        )
+
 
 MemoryT = TypeVar(
     "MemoryT",
@@ -45,6 +62,7 @@ class CRUDMixin:
     _collection_name: Any
     _payload_to_memory: Any
     _memory_to_payload: Any
+    log_audit: Any
     client: Any
 
     async def get_episode(self, episode_id: str, user_id: str) -> Episode | None:
@@ -171,10 +189,25 @@ class CRUDMixin:
             }
 
         if cascade != "none":
+            from engram.models import AuditEntry as AuditEntryModel
+
+            # Safely extract org_id (may be None or absent on mock objects)
+            ep_org_id = getattr(episode, "org_id", None)
+            if not isinstance(ep_org_id, str):
+                ep_org_id = None
+
             # Handle StructuredMemory (1:1 with episode, always delete)
             structured = await self.get_structured_for_episode(episode_id, user_id)
             if structured:
                 await self._delete_by_id(structured.id, user_id, "structured")
+                await self.log_audit(
+                    AuditEntryModel.for_delete(
+                        user_id=user_id,
+                        memory_id=structured.id,
+                        memory_type="structured",
+                        org_id=ep_org_id,
+                    )
+                )
                 structured_deleted = 1
 
             # Handle SemanticMemory
@@ -183,6 +216,14 @@ class CRUDMixin:
                 if cascade == "hard":
                     # Hard cascade: delete any semantic that references this episode
                     await self._delete_by_id(sem.id, user_id, "semantic")
+                    await self.log_audit(
+                        AuditEntryModel.for_delete(
+                            user_id=user_id,
+                            memory_id=sem.id,
+                            memory_type="semantic",
+                            org_id=ep_org_id,
+                        )
+                    )
                     semantic_deleted += 1
                 else:
                     # Soft cascade: remove reference, reduce confidence
@@ -194,6 +235,14 @@ class CRUDMixin:
                     if not sem.source_episode_ids:
                         # No sources left, delete
                         await self._delete_by_id(sem.id, user_id, "semantic")
+                        await self.log_audit(
+                            AuditEntryModel.for_delete(
+                                user_id=user_id,
+                                memory_id=sem.id,
+                                memory_type="semantic",
+                                org_id=ep_org_id,
+                            )
+                        )
                         semantic_deleted += 1
                     else:
                         # Reduce confidence proportionally
@@ -209,6 +258,14 @@ class CRUDMixin:
             for proc in procedurals:
                 if cascade == "hard":
                     await self._delete_by_id(proc.id, user_id, "procedural")
+                    await self.log_audit(
+                        AuditEntryModel.for_delete(
+                            user_id=user_id,
+                            memory_id=proc.id,
+                            memory_type="procedural",
+                            org_id=ep_org_id,
+                        )
+                    )
                     procedural_deleted += 1
                 else:
                     # Soft cascade: remove reference
@@ -220,6 +277,14 @@ class CRUDMixin:
                     if not proc.source_episode_ids and not proc.source_semantic_ids:
                         # No sources left at all, delete
                         await self._delete_by_id(proc.id, user_id, "procedural")
+                        await self.log_audit(
+                            AuditEntryModel.for_delete(
+                                user_id=user_id,
+                                memory_id=proc.id,
+                                memory_type="procedural",
+                                org_id=ep_org_id,
+                            )
+                        )
                         procedural_deleted += 1
                     else:
                         # Reduce confidence proportionally (only if episode sources changed)
@@ -665,6 +730,8 @@ class CRUDMixin:
             with_vectors=True,
         )
 
+        _warn_if_truncated(len(results), scroll_limit, "get_unsummarized_episodes")
+
         episodes: list[Episode] = []
         for point in results:
             if point.payload is not None:
@@ -833,6 +900,8 @@ class CRUDMixin:
             with_payload=True,
             with_vectors=True,
         )
+
+        _warn_if_truncated(len(results), scroll_limit, "get_unconsolidated_structured")
 
         memories: list[StructuredMemory] = []
         for point in results:
@@ -1217,6 +1286,8 @@ class CRUDMixin:
             with_vectors=True,
         )
 
+        _warn_if_truncated(len(results), scroll_limit, "get_unstructured_episodes")
+
         episodes: list[Episode] = []
         for point in results:
             if point.payload is not None:
@@ -1332,6 +1403,12 @@ class CRUDMixin:
 
         point = results[0]
         payload = self._memory_to_payload(episode)
+
+        # Remove immutable fields — episode content is ground truth and must
+        # never be overwritten. Only metadata fields (consolidated, summarized,
+        # structured, importance, quick_extracts, etc.) are mutable.
+        for immutable_field in ("content", "role"):
+            payload.pop(immutable_field, None)
 
         await self.client.set_payload(
             collection_name=collection,

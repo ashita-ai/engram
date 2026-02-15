@@ -6,6 +6,7 @@ redundant computation. Uses content hashing for efficient key storage.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from collections import OrderedDict
@@ -62,6 +63,7 @@ class CachedEmbedder(Embedder):
         self._embedder = embedder
         self._cache_size = cache_size
         self._cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._lock = asyncio.Lock()
         self._hits = 0
         self._misses = 0
 
@@ -82,34 +84,37 @@ class CachedEmbedder(Embedder):
         if self._cache_size == 0:
             return await self._embedder.embed(text)
 
-        # Check cache
         key = _content_hash(text)
-        if key in self._cache:
-            self._hits += 1
-            # Move to end (most recently used)
-            self._cache.move_to_end(key)
-            logger.debug(
-                f"Embedding cache hit (hit_rate={self.hit_rate:.2%}, "
-                f"size={len(self._cache)}/{self._cache_size})"
-            )
-            return self._cache[key]
 
-        # Cache miss - compute embedding
+        # Lock protects OrderedDict operations (move_to_end, del, __setitem__)
+        # from concurrent coroutine access across await boundaries.
+        async with self._lock:
+            if key in self._cache:
+                self._hits += 1
+                self._cache.move_to_end(key)
+                logger.debug(
+                    f"Embedding cache hit (hit_rate={self.hit_rate:.2%}, "
+                    f"size={len(self._cache)}/{self._cache_size})"
+                )
+                return self._cache[key]
+
+        # Cache miss — compute embedding outside the lock to avoid
+        # blocking concurrent cache hits during the API call.
         self._misses += 1
         embedding = await self._embedder.embed(text)
 
-        # Store in cache with LRU eviction
-        if len(self._cache) >= self._cache_size:
-            # Remove oldest (first) entry
-            evicted_key = next(iter(self._cache))
-            del self._cache[evicted_key]
-            logger.debug(f"Evicted LRU cache entry (size={len(self._cache)})")
+        # Re-acquire lock to store result
+        async with self._lock:
+            if len(self._cache) >= self._cache_size:
+                evicted_key = next(iter(self._cache))
+                del self._cache[evicted_key]
+                logger.debug(f"Evicted LRU cache entry (size={len(self._cache)})")
 
-        self._cache[key] = embedding
-        logger.debug(
-            f"Embedding cache miss (hit_rate={self.hit_rate:.2%}, "
-            f"size={len(self._cache)}/{self._cache_size})"
-        )
+            self._cache[key] = embedding
+            logger.debug(
+                f"Embedding cache miss (hit_rate={self.hit_rate:.2%}, "
+                f"size={len(self._cache)}/{self._cache_size})"
+            )
 
         return embedding
 
@@ -132,41 +137,42 @@ class CachedEmbedder(Embedder):
         if self._cache_size == 0:
             return await self._embedder.embed_batch(texts)
 
-        # Check which texts are cached
+        # Check which texts are cached (under lock)
         results: list[list[float] | None] = [None] * len(texts)
         uncached_indices: list[int] = []
         uncached_texts: list[str] = []
 
-        for i, text in enumerate(texts):
-            key = _content_hash(text)
-            if key in self._cache:
-                self._hits += 1
-                self._cache.move_to_end(key)
-                results[i] = self._cache[key]
-            else:
-                uncached_indices.append(i)
-                uncached_texts.append(text)
+        async with self._lock:
+            for i, text in enumerate(texts):
+                key = _content_hash(text)
+                if key in self._cache:
+                    self._hits += 1
+                    self._cache.move_to_end(key)
+                    results[i] = self._cache[key]
+                else:
+                    uncached_indices.append(i)
+                    uncached_texts.append(text)
 
-        # Fetch uncached embeddings
+        # Fetch uncached embeddings outside the lock
         if uncached_texts:
             self._misses += len(uncached_texts)
             uncached_embeddings = await self._embedder.embed_batch(uncached_texts)
 
-            # Store in cache and fill results
-            for idx, text, embedding in zip(
-                uncached_indices,
-                uncached_texts,
-                uncached_embeddings,
-                strict=True,
-            ):
-                # LRU eviction
-                if len(self._cache) >= self._cache_size:
-                    evicted_key = next(iter(self._cache))
-                    del self._cache[evicted_key]
+            # Store in cache under lock
+            async with self._lock:
+                for idx, text, embedding in zip(
+                    uncached_indices,
+                    uncached_texts,
+                    uncached_embeddings,
+                    strict=True,
+                ):
+                    if len(self._cache) >= self._cache_size:
+                        evicted_key = next(iter(self._cache))
+                        del self._cache[evicted_key]
 
-                key = _content_hash(text)
-                self._cache[key] = embedding
-                results[idx] = embedding
+                    key = _content_hash(text)
+                    self._cache[key] = embedding
+                    results[idx] = embedding
 
         logger.debug(
             f"Batch embed: {len(texts)} texts, "

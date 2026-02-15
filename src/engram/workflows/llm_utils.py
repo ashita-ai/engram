@@ -188,5 +188,7 @@ def _is_retriable_error(error_str: str) -> bool:
         if pattern in error_str:
             return True
 
-    # Default to retriable for unknown errors (be optimistic)
-    return True
+    # Default to non-retriable for unknown errors — retrying validation
+    # or schema errors wastes time and masks bugs. Only known transient
+    # patterns (rate limits, server errors, network issues) should retry.
+    return False

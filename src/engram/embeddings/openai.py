@@ -5,9 +5,13 @@ Uses OpenAI's text-embedding models via the official SDK.
 
 from __future__ import annotations
 
+import logging
+
 from openai import AsyncOpenAI
 
 from .base import Embedder
+
+logger = logging.getLogger(__name__)
 
 # Model dimensions for known models
 MODEL_DIMENSIONS = {
@@ -55,12 +59,35 @@ class OpenAIEmbedder(Embedder):
 
         Returns:
             Embedding vector (1536 or 3072 dimensions depending on model).
+
+        Raises:
+            EmbeddingError: If the API call fails or returns unexpected data.
         """
-        response = await self._client.embeddings.create(
-            model=self.model,
-            input=text,
-        )
-        return list(response.data[0].embedding)
+        from engram.exceptions import EmbeddingError
+
+        try:
+            response = await self._client.embeddings.create(
+                model=self.model,
+                input=text,
+            )
+        except Exception as e:
+            raise EmbeddingError(f"OpenAI embedding API failed: {e}") from e
+
+        if not response.data:
+            raise EmbeddingError("OpenAI returned empty embedding data")
+
+        embedding = list(response.data[0].embedding)
+        if len(embedding) != self._dimensions:
+            logger.warning(
+                "Embedding dimension mismatch: expected %d, got %d (model=%s)",
+                self._dimensions,
+                len(embedding),
+                self.model,
+            )
+            # Update dimensions to match actual response
+            self._dimensions = len(embedding)
+
+        return embedding
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts.
@@ -72,14 +99,26 @@ class OpenAIEmbedder(Embedder):
 
         Returns:
             List of embedding vectors in same order as input.
+
+        Raises:
+            EmbeddingError: If the API call fails or returns unexpected data.
         """
         if not texts:
             return []
 
-        response = await self._client.embeddings.create(
-            model=self.model,
-            input=texts,
-        )
+        from engram.exceptions import EmbeddingError
+
+        try:
+            response = await self._client.embeddings.create(
+                model=self.model,
+                input=texts,
+            )
+        except Exception as e:
+            raise EmbeddingError(f"OpenAI batch embedding API failed: {e}") from e
+
+        if not response.data:
+            raise EmbeddingError("OpenAI returned empty batch embedding data")
+
         return [list(d.embedding) for d in response.data]
 
     @property

@@ -17,6 +17,7 @@ class MockStorageWithCRUD(CRUDMixin):
     def __init__(self):
         self.client = AsyncMock()
         self._prefix = "test"
+        self.log_audit = AsyncMock(return_value="audit_1")
 
     def _collection_name(self, memory_type: str) -> str:
         return f"{self._prefix}_{memory_type}"
