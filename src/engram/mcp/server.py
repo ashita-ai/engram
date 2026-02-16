@@ -7,7 +7,7 @@ and other MCP-compatible clients.
 The server uses STDIO transport for communication, which is the standard
 for local MCP servers integrated with Claude Code.
 
-Tools provided (10):
+Tools provided (15):
 
 Core Operations:
 - engram_encode: Store a memory and extract structured data
@@ -20,12 +20,15 @@ Core Operations:
 Memory Management:
 - engram_get: Get a specific memory by ID
 - engram_delete: Delete a memory by ID
+- engram_update: Update memory metadata (keywords, importance, trigger_context)
+- engram_link: Create a bidirectional link between memories
+- engram_unlink: Remove a link between memories
+- engram_links: List all links from a memory
 
 Workflows:
 - engram_consolidate: Consolidate episodes into semantic memories
 - engram_promote: Promote semantic memories to procedural
-
-For admin/debug tools (linking, batch import, sessions, history), see engram-admin server.
+- engram_decay: Apply temporal decay to memories
 """
 
 from __future__ import annotations
@@ -33,7 +36,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from engram.models.procedural import ProceduralMemory
+    from engram.models.semantic import SemanticMemory
 
 from mcp.server.fastmcp import FastMCP
 
@@ -939,6 +946,408 @@ def create_server() -> FastMCP:
                 response.append(item)
 
             return json.dumps(response, indent=2)
+
+        except Exception as e:
+            return json.dumps({"error": str(e)}, indent=2)
+
+    # ------------------------------------------------------------------ #
+    # Memory Update Tool (#193)
+    # ------------------------------------------------------------------ #
+
+    @mcp.tool()
+    async def engram_update(
+        memory_id: str,
+        user_id: str | None = None,
+        importance: float | None = None,
+        keywords: str | None = None,
+        add_keywords: str | None = None,
+        trigger_context: str | None = None,
+    ) -> str:
+        """Update memory metadata (keywords, importance, trigger_context).
+
+        WHEN TO USE:
+        - Adjust importance of an episode after learning its significance
+        - Replace or extend keywords on a semantic memory for better retrieval
+        - Set trigger_context on a procedural memory so it activates in the right situations
+
+        KEYWORD OPTIONS (for semantic/procedural memories):
+        - keywords: Replaces all existing keywords (comma-separated string)
+        - add_keywords: Appends to existing keywords (comma-separated string)
+        - If both are provided, keywords takes priority (replaces first, then no add needed)
+
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+
+        Args:
+            memory_id: ID of the memory (ep_, struct_, sem_, or proc_ prefix).
+            user_id: User identifier. Auto-detected if not provided.
+            importance: New importance score (0.0-1.0). Only for episodes.
+            keywords: Replace all keywords (comma-separated). For sem_/proc_ memories.
+            add_keywords: Add to existing keywords (comma-separated). For sem_/proc_ memories.
+            trigger_context: Set activation context. Only for proc_ memories.
+
+        Returns:
+            JSON string with update result.
+        """
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        service = await get_service()
+
+        try:
+            if memory_id.startswith("ep_"):
+                if importance is None:
+                    return json.dumps(
+                        {"error": "Only 'importance' can be updated on episodes."},
+                        indent=2,
+                    )
+                episode = await service.storage.get_episode(memory_id, resolved_user_id)
+                if not episode:
+                    return json.dumps({"error": f"Episode not found: {memory_id}"}, indent=2)
+                updated = episode.model_copy(update={"importance": importance})
+                await service.storage.update_episode(updated)
+                return json.dumps(
+                    {"updated": True, "memory_id": memory_id, "importance": importance},
+                    indent=2,
+                )
+
+            elif memory_id.startswith("sem_"):
+                sem_mem = await service.storage.get_semantic(memory_id, resolved_user_id)
+                if not sem_mem:
+                    return json.dumps(
+                        {"error": f"Semantic memory not found: {memory_id}"}, indent=2
+                    )
+                if keywords is not None:
+                    sem_mem.keywords = [k.strip() for k in keywords.split(",") if k.strip()]
+                elif add_keywords is not None:
+                    new_kws = {k.strip() for k in add_keywords.split(",") if k.strip()}
+                    sem_mem.keywords = list(set(sem_mem.keywords) | new_kws)
+                await service.storage.update_semantic_memory(sem_mem)
+                return json.dumps(
+                    {
+                        "updated": True,
+                        "memory_id": memory_id,
+                        "keywords": sem_mem.keywords,
+                    },
+                    indent=2,
+                )
+
+            elif memory_id.startswith("proc_"):
+                proc_mem = await service.storage.get_procedural(memory_id, resolved_user_id)
+                if not proc_mem:
+                    return json.dumps(
+                        {"error": f"Procedural memory not found: {memory_id}"}, indent=2
+                    )
+                if keywords is not None or add_keywords is not None:
+                    return json.dumps(
+                        {
+                            "error": "Procedural memories do not have keywords. Use trigger_context instead."
+                        },
+                        indent=2,
+                    )
+                if trigger_context is not None:
+                    proc_mem.trigger_context = trigger_context
+                await service.storage.update_procedural_memory(proc_mem)
+                update_response: dict[str, Any] = {
+                    "updated": True,
+                    "memory_id": memory_id,
+                    "trigger_context": proc_mem.trigger_context,
+                }
+                return json.dumps(update_response, indent=2)
+
+            else:
+                return json.dumps(
+                    {"error": f"Cannot update memory type: {memory_id}"},
+                    indent=2,
+                )
+
+        except Exception as e:
+            return json.dumps({"error": str(e), "memory_id": memory_id}, indent=2)
+
+    # ------------------------------------------------------------------ #
+    # Decay Tool (#192)
+    # ------------------------------------------------------------------ #
+
+    @mcp.tool()
+    async def engram_decay(
+        user_id: str | None = None,
+        dry_run: bool = False,
+    ) -> str:
+        """Apply temporal decay to memories (Ebbinghaus forgetting curve).
+
+        WHEN TO USE:
+        - Periodically clean up stale memories that haven't been accessed
+        - Before recall-heavy sessions, to ensure only relevant memories surface
+        - At end of session, to let low-value memories fade naturally
+
+        WHAT IT DOES:
+        1. Recomputes confidence for all semantic memories using time-based decay
+        2. Archives memories below the archive confidence threshold
+        3. Archives memories with very low access counts
+        4. Deletes memories below the delete confidence threshold
+        5. Optionally runs promotion (semantic -> procedural) afterward
+
+        DRY RUN:
+        Set dry_run=True to preview what would be affected without making changes.
+
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+        - org_id: Auto-detected from git remote, repo name, or directory name
+
+        Args:
+            user_id: User identifier. Auto-detected if not provided.
+            dry_run: If True, preview effects without applying changes.
+
+        Returns:
+            JSON string with decay statistics.
+        """
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        org_id = get_project_context()
+        if not org_id:
+            return json.dumps(
+                {
+                    "error": "org_id required for decay. "
+                    "Set ENGRAM_ORG env var or run from within a git repository.",
+                    "success": False,
+                },
+                indent=2,
+            )
+
+        service = await get_service()
+
+        try:
+            if dry_run:
+                # Preview: list memories that would be affected
+                memories = await service.storage.list_semantic_memories(resolved_user_id, org_id)
+                low_confidence = [
+                    {"id": m.id, "confidence": round(m.confidence.value, 3)}
+                    for m in memories
+                    if m.confidence.value < service.settings.decay_archive_threshold
+                ]
+                return json.dumps(
+                    {
+                        "dry_run": True,
+                        "total_semantic_memories": len(memories),
+                        "would_archive_or_delete": len(low_confidence),
+                        "affected": low_confidence[:20],
+                    },
+                    indent=2,
+                )
+
+            from engram.workflows.decay import run_decay
+
+            result = await run_decay(
+                storage=service.storage,
+                settings=service.settings,
+                user_id=resolved_user_id,
+                org_id=org_id,
+                embedder=service.embedder,
+                run_promotion=True,
+            )
+
+            return json.dumps(
+                {
+                    "success": True,
+                    "memories_updated": result.memories_updated,
+                    "memories_archived": result.memories_archived,
+                    "memories_deleted": result.memories_deleted,
+                    "low_access_archived": result.low_access_archived,
+                    "procedural_promoted": result.procedural_promoted,
+                },
+                indent=2,
+            )
+
+        except Exception as e:
+            return json.dumps({"error": str(e), "success": False}, indent=2)
+
+    # ------------------------------------------------------------------ #
+    # Linking Tools (#190)
+    # ------------------------------------------------------------------ #
+
+    @mcp.tool()
+    async def engram_link(
+        source_id: str,
+        target_id: str,
+        user_id: str | None = None,
+        link_type: str = "related",
+    ) -> str:
+        """Create a bidirectional link between two memories (A-MEM multi-hop).
+
+        WHEN TO USE:
+        - Connect related semantic memories for multi-hop reasoning
+        - Mark one memory as superseding another (e.g., updated preference)
+        - Flag contradictions between memories for resolution
+
+        LINK TYPES:
+        - "related" (default): General semantic relationship
+        - "supersedes": Source replaces/updates target
+        - "contradicts": Source conflicts with target
+
+        Links are bidirectional: linking A->B also links B->A.
+
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+
+        Args:
+            source_id: ID of the source memory (sem_ or proc_ prefix).
+            target_id: ID of the target memory (sem_ or proc_ prefix).
+            user_id: User identifier. Auto-detected if not provided.
+            link_type: Relationship type (related, supersedes, contradicts).
+
+        Returns:
+            JSON string with link result.
+        """
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        service = await get_service()
+
+        try:
+            result = await service.storage.link_memories(
+                source_id=source_id,
+                target_id=target_id,
+                user_id=resolved_user_id,
+                link_type=link_type,
+            )
+
+            return json.dumps(
+                {
+                    "success": result.success,
+                    "source_id": result.source_id,
+                    "target_id": result.target_id,
+                    "link_type": result.link_type,
+                    "source_updated": result.source_updated,
+                    "target_updated": result.target_updated,
+                    "error": result.error,
+                },
+                indent=2,
+            )
+
+        except Exception as e:
+            return json.dumps({"error": str(e)}, indent=2)
+
+    @mcp.tool()
+    async def engram_unlink(
+        source_id: str,
+        target_id: str,
+        user_id: str | None = None,
+    ) -> str:
+        """Remove a link between two memories.
+
+        Removes the bidirectional link between source and target.
+
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+
+        Args:
+            source_id: ID of the source memory (sem_ or proc_ prefix).
+            target_id: ID of the target memory (sem_ or proc_ prefix).
+            user_id: User identifier. Auto-detected if not provided.
+
+        Returns:
+            JSON string with unlink result.
+        """
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        service = await get_service()
+
+        try:
+            result = await service.storage.unlink_memories(
+                source_id=source_id,
+                target_id=target_id,
+                user_id=resolved_user_id,
+            )
+
+            return json.dumps(
+                {
+                    "success": result.success,
+                    "source_id": result.source_id,
+                    "target_id": result.target_id,
+                    "source_updated": result.source_updated,
+                    "target_updated": result.target_updated,
+                    "error": result.error,
+                },
+                indent=2,
+            )
+
+        except Exception as e:
+            return json.dumps({"error": str(e)}, indent=2)
+
+    @mcp.tool()
+    async def engram_links(
+        memory_id: str,
+        user_id: str | None = None,
+    ) -> str:
+        """List all links from a memory.
+
+        Shows all memories linked to the given memory, with link types.
+
+        AUTO-DETECTION:
+        - user_id: Auto-detected from ENGRAM_USER env, git user.name, or system username
+
+        Args:
+            memory_id: ID of the memory (sem_ or proc_ prefix).
+            user_id: User identifier. Auto-detected if not provided.
+
+        Returns:
+            JSON string with list of linked memory IDs and their link types.
+        """
+        resolved_user_id = user_id or get_default_user()
+        if not resolved_user_id:
+            return json.dumps(
+                {"error": "user_id required. Set ENGRAM_USER env var or pass explicitly."},
+                indent=2,
+            )
+
+        service = await get_service()
+
+        try:
+            memory: SemanticMemory | ProceduralMemory | None = None
+            if memory_id.startswith("sem_"):
+                memory = await service.storage.get_semantic(memory_id, resolved_user_id)
+            elif memory_id.startswith("proc_"):
+                memory = await service.storage.get_procedural(memory_id, resolved_user_id)
+            else:
+                return json.dumps(
+                    {"error": f"Only sem_ and proc_ memories have links: {memory_id}"},
+                    indent=2,
+                )
+
+            if not memory:
+                return json.dumps({"error": f"Memory not found: {memory_id}"}, indent=2)
+
+            links = []
+            for related_id in memory.related_ids:
+                link_type = memory.get_link_type(related_id) or "related"
+                links.append({"id": related_id, "link_type": link_type})
+
+            return json.dumps(
+                {
+                    "memory_id": memory_id,
+                    "link_count": len(links),
+                    "links": links,
+                },
+                indent=2,
+            )
 
         except Exception as e:
             return json.dumps({"error": str(e)}, indent=2)
