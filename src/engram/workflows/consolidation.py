@@ -283,6 +283,51 @@ def _is_profile_style(content: str) -> bool:
     return matches >= 2
 
 
+def _needs_quality_retry(output: SummaryOutput, item_count: int) -> bool:
+    """Check whether LLM output needs a corrective retry.
+
+    Returns True when:
+    - ``key_facts`` is empty but there was input to summarize
+    - The ``summary`` field reads like a personality profile
+    - Any individual key fact reads like a personality profile
+
+    Args:
+        output: The LLM's summarization result.
+        item_count: Number of episodes or structured memories that were summarized.
+
+    Returns:
+        True if the output should be rejected and retried.
+    """
+    if item_count > 0 and not output.key_facts:
+        return True
+    if _is_profile_style(output.summary):
+        return True
+    if any(_is_profile_style(fact) for fact in output.key_facts):
+        return True
+    return False
+
+
+_CORRECTIVE_PROMPT = """Your previous attempt was REJECTED because it produced a personality profile instead of factual knowledge.
+
+DO NOT describe a person. DO NOT write sentences like "The user demonstrates...", "Evan is engaged in...", "The user actively...".
+
+Instead, extract CONCRETE claims, decisions, recommendations, arguments, or constraints that appeared in the input.
+
+Each key_fact MUST be a standalone factual sentence. Examples of GOOD facts:
+- "Akashi check returns 5 verbose JSON objects per call — agents skip it because the cost-to-read exceeds the value."
+- "Git hooks that auto-trace on commit are more effective than CLAUDE.md instructions because they're blocking, not advisory."
+- "ruff check must pass before committing; mypy strict mode is enforced."
+
+Examples of BAD facts (personality descriptions — these will be rejected again):
+- "The user advocates for high engineering standards."
+- "Evan actively engages with the Akashi platform."
+- "The user identifies barriers to tool adoption."
+
+You MUST return at least one key_fact. Empty key_facts is not acceptable.
+
+State facts directly. Be specific. Include names, versions, tools, constraints, and rationale."""
+
+
 def _format_existing_memories_for_llm(memories: list[SemanticMemory]) -> str:
     """Format existing memories for LLM context.
 
@@ -359,6 +404,10 @@ Examples:
 - GOOD: "OrderedDict LRU cache needs asyncio.Lock to prevent coroutine races."
 - BAD: "Evan is consistently engaged in reviewing and refining code quality."
 - GOOD: "ruff check must pass before committing; mypy strict mode is enforced."
+- BAD: "The user identifies barriers to tool adoption and proposes improvements."
+- GOOD: "Akashi check returns 5 verbose JSON objects per call — agents skip it because the cost-to-read exceeds the value. A one-line relevance summary would increase adoption."
+- BAD: "Evan emphasizes the need for streamlined workflows and automation."
+- GOOD: "Git hooks that auto-trace on commit are more effective than CLAUDE.md instructions because they're blocking, not advisory."
 
 Be conservative - only include information that appears in the episodes.
 
@@ -380,7 +429,19 @@ Do NOT inflate confidence. 0.5 is a reasonable default for most synthesis."""
         instructions=summarization_prompt,
     )
 
-    return await run_agent_with_retry(agent, formatted_text)
+    result = await run_agent_with_retry(agent, formatted_text)
+
+    # Validate output quality — retry once with corrective prompt if profile-style
+    if _needs_quality_retry(result, len(episodes)):
+        logger.warning("Consolidation output failed quality check, retrying with corrective prompt")
+        corrective_agent: Agent[None, SummaryOutput] = Agent(
+            settings.consolidation_model,
+            output_type=SummaryOutput,
+            instructions=_CORRECTIVE_PROMPT,
+        )
+        result = await run_agent_with_retry(corrective_agent, formatted_text)
+
+    return result
 
 
 async def _reduce_summaries(summaries: list[SummaryOutput]) -> MapReduceSummary:
@@ -1010,6 +1071,10 @@ Examples:
 - GOOD: "OrderedDict LRU cache needs asyncio.Lock to prevent coroutine races."
 - BAD: "Evan is consistently engaged in reviewing and refining code quality."
 - GOOD: "ruff check must pass before committing; mypy strict mode is enforced."
+- BAD: "The user identifies barriers to tool adoption and proposes improvements."
+- GOOD: "Akashi check returns 5 verbose JSON objects per call — agents skip it because the cost-to-read exceeds the value. A one-line relevance summary would increase adoption."
+- BAD: "Evan emphasizes the need for streamlined workflows and automation."
+- GOOD: "Git hooks that auto-trace on commit are more effective than CLAUDE.md instructions because they're blocking, not advisory."
 
 Focus on lasting/stable knowledge. Be conservative.
 
@@ -1031,7 +1096,21 @@ Do NOT inflate confidence. 0.5 is a reasonable default for most synthesis."""
         instructions=synthesis_prompt,
     )
 
-    return await run_agent_with_retry(agent, formatted_text)
+    result = await run_agent_with_retry(agent, formatted_text)
+
+    # Validate output quality — retry once with corrective prompt if profile-style
+    if _needs_quality_retry(result, len(structured_memories)):
+        logger.warning(
+            "Structured synthesis output failed quality check, retrying with corrective prompt"
+        )
+        corrective_agent: Agent[None, SummaryOutput] = Agent(
+            settings.consolidation_model,
+            output_type=SummaryOutput,
+            instructions=_CORRECTIVE_PROMPT,
+        )
+        result = await run_agent_with_retry(corrective_agent, formatted_text)
+
+    return result
 
 
 async def run_consolidation_from_structured(
@@ -1508,6 +1587,7 @@ __all__ = [
     "MemoryEvolution",
     "SummaryOutput",
     "_is_profile_style",
+    "_needs_quality_retry",
     "format_episodes_for_llm",
     "format_structured_for_llm",
     "run_consolidation",

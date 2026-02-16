@@ -21,6 +21,7 @@ from engram.workflows.consolidation import (
     _find_matching_memory,
     _format_existing_memories_for_llm,
     _is_profile_style,
+    _needs_quality_retry,
     format_episodes_for_llm,
     run_consolidation,
 )
@@ -1475,3 +1476,232 @@ class TestCheckpointIntegration:
         # chunk 0 was loaded from checkpoint
         assert mock_summarize.call_count == 1
         assert result.episodes_processed == episode_count
+
+
+class TestNeedsQualityRetry:
+    """Unit tests for _needs_quality_retry detection."""
+
+    def test_empty_key_facts_with_episodes(self) -> None:
+        """Empty key_facts when episodes exist should trigger retry."""
+        output = SummaryOutput(
+            summary="Some summary.",
+            key_facts=[],
+            confidence=0.5,
+        )
+        assert _needs_quality_retry(output, item_count=3) is True
+
+    def test_empty_key_facts_with_zero_episodes(self) -> None:
+        """Empty key_facts with zero episodes should NOT trigger retry."""
+        output = SummaryOutput(
+            summary="No episodes to summarize.",
+            key_facts=[],
+            confidence=0.5,
+        )
+        assert _needs_quality_retry(output, item_count=0) is False
+
+    def test_profile_style_summary(self) -> None:
+        """Profile-style summary should trigger retry even with facts."""
+        output = SummaryOutput(
+            summary=(
+                "Evan demonstrates a methodical approach to software engineering "
+                "and is consistently engaged in improving code quality."
+            ),
+            key_facts=["ruff check must pass before committing."],
+            confidence=0.5,
+        )
+        assert _needs_quality_retry(output, item_count=1) is True
+
+    def test_profile_style_key_fact(self) -> None:
+        """A profile-style key fact should trigger retry."""
+        output = SummaryOutput(
+            summary="Technical setup details.",
+            key_facts=[
+                "PostgreSQL 16 is the primary database.",
+                (
+                    "The user exhibits strong attention to detail and demonstrates "
+                    "a systematic approach to debugging."
+                ),
+            ],
+            confidence=0.5,
+        )
+        assert _needs_quality_retry(output, item_count=2) is True
+
+    def test_good_output_no_retry(self) -> None:
+        """Factual output with key_facts should NOT trigger retry."""
+        output = SummaryOutput(
+            summary="PostgreSQL 16 is the primary database. Redis handles caching.",
+            key_facts=[
+                "PostgreSQL 16 is the primary database.",
+                "Redis was removed in v2.3 due to connection pooling issues.",
+            ],
+            keywords=["postgresql", "redis"],
+            confidence=0.5,
+        )
+        assert _needs_quality_retry(output, item_count=3) is False
+
+    def test_single_profile_pattern_not_enough(self) -> None:
+        """A single profile-like word in a fact should NOT trigger retry.
+
+        _is_profile_style requires 2+ pattern matches.
+        """
+        output = SummaryOutput(
+            summary="The code demonstrates proper error handling.",
+            key_facts=["Error handling uses retries with exponential backoff."],
+            confidence=0.5,
+        )
+        assert _needs_quality_retry(output, item_count=1) is False
+
+
+class TestQualityRetryIntegration:
+    """Integration tests for quality retry in _summarize_chunk and _synthesize_structured."""
+
+    @pytest.mark.asyncio
+    async def test_retry_on_empty_key_facts(self) -> None:
+        """_summarize_chunk should retry when LLM returns empty key_facts."""
+        from engram.workflows.consolidation import _summarize_chunk
+
+        episodes = [{"id": "ep_1", "role": "user", "content": "PostgreSQL 16 is great."}]
+
+        bad_output = SummaryOutput(
+            summary="A database discussion occurred.",
+            key_facts=[],  # Empty — should trigger retry
+            confidence=0.5,
+        )
+        good_output = SummaryOutput(
+            summary="PostgreSQL 16 is the primary database.",
+            key_facts=["PostgreSQL 16 is the primary database."],
+            confidence=0.5,
+        )
+
+        call_count = 0
+
+        async def mock_run_agent(agent: object, prompt: str, **kwargs: object) -> SummaryOutput:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return bad_output
+            return good_output
+
+        with patch(
+            "engram.workflows.llm_utils.run_agent_with_retry",
+            side_effect=mock_run_agent,
+        ):
+            result = await _summarize_chunk(episodes, "")
+
+        assert call_count == 2, "Should have retried once"
+        assert result.key_facts == ["PostgreSQL 16 is the primary database."]
+
+    @pytest.mark.asyncio
+    async def test_retry_on_profile_summary(self) -> None:
+        """_summarize_chunk should retry when LLM returns profile-style summary."""
+        from engram.workflows.consolidation import _summarize_chunk
+
+        episodes = [{"id": "ep_1", "role": "user", "content": "I use ruff for linting."}]
+
+        profile_output = SummaryOutput(
+            summary=(
+                "Evan demonstrates a methodical approach to software engineering "
+                "and is consistently engaged in maintaining code quality."
+            ),
+            key_facts=["ruff is used for linting."],
+            confidence=0.5,
+        )
+        good_output = SummaryOutput(
+            summary="ruff is the linting tool. mypy strict mode is enforced.",
+            key_facts=["ruff is used for linting."],
+            confidence=0.5,
+        )
+
+        call_count = 0
+
+        async def mock_run_agent(agent: object, prompt: str, **kwargs: object) -> SummaryOutput:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return profile_output
+            return good_output
+
+        with patch(
+            "engram.workflows.llm_utils.run_agent_with_retry",
+            side_effect=mock_run_agent,
+        ):
+            result = await _summarize_chunk(episodes, "")
+
+        assert call_count == 2, "Should have retried once"
+        assert "methodical approach" not in result.summary
+
+    @pytest.mark.asyncio
+    async def test_no_retry_on_good_output(self) -> None:
+        """_summarize_chunk should NOT retry when LLM output is acceptable."""
+        from engram.workflows.consolidation import _summarize_chunk
+
+        episodes = [{"id": "ep_1", "role": "user", "content": "PostgreSQL 16 is primary."}]
+
+        good_output = SummaryOutput(
+            summary="PostgreSQL 16 is the primary database.",
+            key_facts=["PostgreSQL 16 is the primary database."],
+            keywords=["postgresql"],
+            confidence=0.5,
+        )
+
+        call_count = 0
+
+        async def mock_run_agent(agent: object, prompt: str, **kwargs: object) -> SummaryOutput:
+            nonlocal call_count
+            call_count += 1
+            return good_output
+
+        with patch(
+            "engram.workflows.llm_utils.run_agent_with_retry",
+            side_effect=mock_run_agent,
+        ):
+            result = await _summarize_chunk(episodes, "")
+
+        assert call_count == 1, "Should NOT have retried"
+        assert result.key_facts == ["PostgreSQL 16 is the primary database."]
+
+    @pytest.mark.asyncio
+    async def test_synthesize_structured_retries_on_profile(self) -> None:
+        """_synthesize_structured should retry on profile-style output."""
+        from engram.workflows.consolidation import _synthesize_structured
+
+        struct_data: list[dict[str, str | list[str]]] = [
+            {
+                "id": "struct_1",
+                "source_episode_id": "ep_1",
+                "summary": "Uses Airflow for pipeline orchestration.",
+                "keywords": ["airflow"],
+            }
+        ]
+
+        profile_output = SummaryOutput(
+            summary=(
+                "The user exhibits a systematic approach to data engineering "
+                "and demonstrates attention to detail in pipeline design."
+            ),
+            key_facts=[],
+            confidence=0.5,
+        )
+        good_output = SummaryOutput(
+            summary="Airflow orchestrates the data pipeline with PostgreSQL metadata store.",
+            key_facts=["Airflow is the pipeline orchestrator."],
+            confidence=0.5,
+        )
+
+        call_count = 0
+
+        async def mock_run_agent(agent: object, prompt: str, **kwargs: object) -> SummaryOutput:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return profile_output
+            return good_output
+
+        with patch(
+            "engram.workflows.llm_utils.run_agent_with_retry",
+            side_effect=mock_run_agent,
+        ):
+            result = await _synthesize_structured(struct_data, "")
+
+        assert call_count == 2, "Should have retried once"
+        assert result.key_facts == ["Airflow is the pipeline orchestrator."]
