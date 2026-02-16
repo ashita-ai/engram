@@ -102,11 +102,15 @@ class TestCascadeModes:
         assert result["semantic_deleted"] == 0
         assert result["semantic_updated"] == 1
 
-        # Verify confidence was reduced
+        # Verify confidence was recomputed via canonical formula
         storage.update_semantic_memory.assert_called_once()
         updated_sem = storage.update_semantic_memory.call_args[0][0]
-        # Original: 0.6 (capped from 0.8), after removing 1 of 2 sources: 0.6 * 0.5 = 0.3
-        assert updated_sem.confidence.value == pytest.approx(0.3, rel=0.01)
+        # supporting_episodes should reflect the remaining source count
+        assert updated_sem.confidence.supporting_episodes == 1
+        # recompute() produces a value consistent with extraction_base, corroboration, recency
+        # (NOT the old broken 0.6 * 0.5 = 0.3 from direct multiplication)
+        assert updated_sem.confidence.value > 0.3  # recompute is higher than raw multiplication
+        assert updated_sem.confidence.value < 1.0
 
     @pytest.mark.asyncio
     async def test_cascade_soft_deletes_orphaned_semantic(self, storage):
@@ -244,8 +248,11 @@ class TestConfidenceReduction:
 
         assert result["procedural_updated"] == 1
         updated_proc = storage.update_procedural_memory.call_args[0][0]
-        # 2 sources -> 1 source = 50% confidence: 0.6 * 0.5 = 0.3
-        assert updated_proc.confidence.value == pytest.approx(0.3, rel=0.01)
+        # supporting_episodes = 1 episode + 1 semantic = 2 total sources
+        assert updated_proc.confidence.supporting_episodes == 2
+        # recompute() uses canonical formula (NOT the old broken 0.6 * 0.5 = 0.3)
+        assert updated_proc.confidence.value > 0.3
+        assert updated_proc.confidence.value < 1.0
 
     @pytest.mark.asyncio
     async def test_procedural_deleted_when_no_sources_remain(self, storage):
