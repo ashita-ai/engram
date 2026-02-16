@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 
 from qdrant_client import models
 
+from engram.storage.retry import qdrant_retry
+
 if TYPE_CHECKING:
     from engram.models import HistoryEntry
 
@@ -34,6 +36,7 @@ class HistoryMixin:
     _embedding_dim: int
     client: Any
 
+    @qdrant_retry
     async def log_history(self, entry: HistoryEntry) -> str:
         """Log a history entry for a memory change.
 
@@ -66,6 +69,7 @@ class HistoryMixin:
 
         return entry.id
 
+    @qdrant_retry
     async def get_memory_history(
         self,
         memory_id: str,
@@ -125,6 +129,7 @@ class HistoryMixin:
 
         return entries
 
+    @qdrant_retry
     async def get_user_history(
         self,
         user_id: str,

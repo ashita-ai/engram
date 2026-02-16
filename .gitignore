@@ -57,3 +57,6 @@ engram_dbos.sqlite
 
 # Claude Flow runtime
 .claude-flow/
+
+# Implementation specs (local only)
+specs/
