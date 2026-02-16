@@ -194,14 +194,16 @@ class TestLinkMemories:
 
     @pytest.mark.asyncio
     async def test_link_partial_failure_reported(self, mock_storage: MagicMock) -> None:
-        """Should report partial failure when target update fails."""
+        """Should rollback forward link when reverse link fails."""
         source = create_test_semantic("sem_source")
         target = create_test_semantic("sem_target")
 
         mock_storage.get_semantic = AsyncMock(
             side_effect=lambda id, _: source if id == "sem_source" else target
         )
-        # Source update succeeds, target update fails
+        # Source update succeeds, target update fails, rollback succeeds
+        # Calls: forward(source)=True, reverse(target)=False, retry(target)=False,
+        #        rollback(source)=True
         mock_storage.update_semantic_memory = AsyncMock(
             side_effect=lambda mem: mem.id == "sem_source"
         )
@@ -213,9 +215,9 @@ class TestLinkMemories:
         )
 
         assert result.success is False
-        assert result.source_updated is True
+        assert result.source_updated is False  # Rollback succeeded
         assert result.target_updated is False
-        assert "source was updated" in str(result.error)
+        assert "rollback succeeded" in str(result.error)
 
 
 class TestUnlinkMemories:

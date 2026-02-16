@@ -175,22 +175,44 @@ class LinkingMixin:
             target_updated = await self._update_linkable_memory(target, target_type)
 
             if not target_updated:
-                # Best-effort: source was updated but target failed
-                # Log warning but don't rollback source (partial success)
-                logger.warning(
-                    "Bidirectional link partially failed: source %s updated, "
-                    "target %s failed to update",
-                    source_id,
+                # Retry once before rolling back (handles transient failures)
+                logger.info(
+                    "Retrying reverse link %s -> %s after initial failure",
                     target_id,
+                    source_id,
                 )
+                target_updated = await self._update_linkable_memory(target, target_type)
+
+            if not target_updated:
+                # Reverse link failed — roll back forward link to maintain symmetry
+                logger.warning(
+                    "Reverse link failed for %s -> %s, rolling back forward link",
+                    target_id,
+                    source_id,
+                )
+                source.remove_link(target_id)
+                rollback_ok = await self._update_linkable_memory(source, source_type)
+
+                if not rollback_ok:
+                    logger.critical(
+                        "GRAPH INCONSISTENCY: Forward link %s -> %s persisted "
+                        "but reverse link and rollback both failed. "
+                        "Manual cleanup required.",
+                        source_id,
+                        target_id,
+                    )
+
                 return LinkResult(
                     success=False,
-                    source_updated=True,
+                    source_updated=not rollback_ok,
                     target_updated=False,
                     source_id=source_id,
                     target_id=target_id,
                     link_type=link_type,
-                    error="Failed to update target memory (source was updated)",
+                    error=(
+                        "Failed to create bidirectional link "
+                        f"(rollback {'succeeded' if rollback_ok else 'FAILED'})"
+                    ),
                 )
 
         logger.debug(
@@ -287,6 +309,33 @@ class LinkingMixin:
             removed_reverse = target.remove_link(source_id)
             if removed_reverse:
                 target_updated = await self._update_linkable_memory(target, target_type)
+
+                if not target_updated and source_updated:
+                    # Reverse unlink failed — re-add forward link for symmetry
+                    logger.warning(
+                        "Reverse unlink failed for %s -> %s, "
+                        "re-adding forward link for consistency",
+                        target_id,
+                        source_id,
+                    )
+                    source.add_link(target_id)
+                    rollback_ok = await self._update_linkable_memory(source, source_type)
+
+                    if rollback_ok:
+                        source_updated = False  # Rollback succeeded, source unchanged net
+
+                    return LinkResult(
+                        success=False,
+                        source_updated=not rollback_ok,
+                        target_updated=False,
+                        source_id=source_id,
+                        target_id=target_id,
+                        link_type="",
+                        error=(
+                            "Failed to remove reverse link "
+                            f"(rollback {'succeeded' if rollback_ok else 'FAILED'})"
+                        ),
+                    )
 
         success = source_updated or target_updated  # At least one side changed
 
