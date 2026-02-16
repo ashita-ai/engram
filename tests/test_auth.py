@@ -1,6 +1,7 @@
 """Tests for authentication and rate limiting."""
 
 import time
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -9,6 +10,7 @@ from engram.api.auth import (
     InMemoryRateLimiter,
     RateLimitInfo,
     TokenValidator,
+    extract_client_ip,
     reset_auth_singletons,
 )
 from engram.exceptions import AuthenticationError, RateLimitError
@@ -328,3 +330,117 @@ class TestRedisRateLimiter:
         # Should be able to make requests again
         info = redis_limiter.check_rate_limit("test_user", "endpoint", limit=5)
         assert info.remaining == 4
+
+
+def _make_request(
+    *,
+    client_host: str | None = "127.0.0.1",
+    headers: dict[str, str] | None = None,
+) -> MagicMock:
+    """Build a mock FastAPI Request with configurable client and headers."""
+    request = MagicMock()
+    if client_host is not None:
+        request.client.host = client_host
+    else:
+        request.client = None
+    request.headers = headers or {}
+    return request
+
+
+class TestExtractClientIp:
+    """Tests for extract_client_ip — proxy-aware IP extraction."""
+
+    def test_direct_connection_ip(self) -> None:
+        """Uses request.client.host when proxy headers are not trusted."""
+        request = _make_request(client_host="10.0.0.5")
+        assert extract_client_ip(request) == "ip:10.0.0.5"
+
+    def test_no_client_returns_unknown(self) -> None:
+        """Falls back to 'ip:unknown' when request.client is None."""
+        request = _make_request(client_host=None)
+        assert extract_client_ip(request) == "ip:unknown"
+
+    def test_ignores_proxy_headers_when_not_trusted(self) -> None:
+        """X-Forwarded-For is ignored when trust_proxy_headers=False."""
+        request = _make_request(
+            client_host="10.0.0.1",
+            headers={"x-forwarded-for": "203.0.113.50, 10.0.0.1"},
+        )
+        result = extract_client_ip(request, trust_proxy_headers=False)
+        assert result == "ip:10.0.0.1"
+
+    def test_x_forwarded_for_trusted(self) -> None:
+        """Uses leftmost X-Forwarded-For entry when trusted."""
+        request = _make_request(
+            client_host="10.0.0.1",
+            headers={"x-forwarded-for": "203.0.113.50, 10.0.0.1"},
+        )
+        result = extract_client_ip(request, trust_proxy_headers=True)
+        assert result == "ip:203.0.113.50"
+
+    def test_x_forwarded_for_single_entry(self) -> None:
+        """Handles single-entry X-Forwarded-For correctly."""
+        request = _make_request(
+            client_host="10.0.0.1",
+            headers={"x-forwarded-for": "198.51.100.7"},
+        )
+        result = extract_client_ip(request, trust_proxy_headers=True)
+        assert result == "ip:198.51.100.7"
+
+    def test_x_real_ip_trusted(self) -> None:
+        """Falls back to X-Real-IP when X-Forwarded-For is absent."""
+        request = _make_request(
+            client_host="10.0.0.1",
+            headers={"x-real-ip": "203.0.113.99"},
+        )
+        result = extract_client_ip(request, trust_proxy_headers=True)
+        assert result == "ip:203.0.113.99"
+
+    def test_x_forwarded_for_takes_priority_over_x_real_ip(self) -> None:
+        """X-Forwarded-For is preferred over X-Real-IP."""
+        request = _make_request(
+            client_host="10.0.0.1",
+            headers={
+                "x-forwarded-for": "203.0.113.50",
+                "x-real-ip": "203.0.113.99",
+            },
+        )
+        result = extract_client_ip(request, trust_proxy_headers=True)
+        assert result == "ip:203.0.113.50"
+
+    def test_empty_forwarded_for_falls_through(self) -> None:
+        """Empty X-Forwarded-For falls back to next option."""
+        request = _make_request(
+            client_host="10.0.0.1",
+            headers={"x-forwarded-for": ""},
+        )
+        result = extract_client_ip(request, trust_proxy_headers=True)
+        assert result == "ip:10.0.0.1"
+
+    def test_whitespace_only_x_real_ip_falls_through(self) -> None:
+        """Whitespace-only X-Real-IP falls back to client.host."""
+        request = _make_request(
+            client_host="10.0.0.1",
+            headers={"x-real-ip": "   "},
+        )
+        result = extract_client_ip(request, trust_proxy_headers=True)
+        assert result == "ip:10.0.0.1"
+
+    def test_ip_prefix_prevents_collision_with_user_ids(self) -> None:
+        """The 'ip:' prefix ensures IP-based keys don't collide with user_id keys."""
+        request = _make_request(client_host="user_123")
+        result = extract_client_ip(request)
+        assert result == "ip:user_123"
+        assert result != "user_123"
+
+    def test_trusted_fallback_to_client_host(self) -> None:
+        """When proxy headers trusted but absent, falls back to client.host."""
+        request = _make_request(client_host="192.168.1.100")
+        result = extract_client_ip(request, trust_proxy_headers=True)
+        assert result == "ip:192.168.1.100"
+
+    def test_trusted_no_headers_no_client(self) -> None:
+        """Returns 'ip:unknown' when everything is absent."""
+        request = _make_request(client_host=None)
+        result = extract_client_ip(request, trust_proxy_headers=True)
+        assert result == "ip:unknown"

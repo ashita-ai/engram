@@ -492,6 +492,43 @@ class AuthDependency:
         return user
 
 
+def extract_client_ip(request: Request, *, trust_proxy_headers: bool = False) -> str:
+    """Extract the best available client IP for rate limiting.
+
+    When behind a reverse proxy, ``request.client.host`` is the proxy's IP,
+    not the real client.  Enable *trust_proxy_headers* only when you control
+    the proxy that sets ``X-Forwarded-For`` / ``X-Real-IP``.
+
+    Priority (when trust_proxy_headers is True):
+        1. X-Forwarded-For — leftmost entry (original client)
+        2. X-Real-IP — typically set by nginx
+        3. request.client.host — direct connection IP
+
+    When trust_proxy_headers is False, only request.client.host is used.
+
+    Returns:
+        A string suitable as a rate-limit key, prefixed with ``ip:`` to
+        prevent collisions with authenticated user_id values.
+    """
+    if trust_proxy_headers:
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            # Format: "client, proxy1, proxy2" — first entry is the original client
+            client_ip = forwarded_for.split(",")[0].strip()
+            if client_ip:
+                return f"ip:{client_ip}"
+
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip and real_ip.strip():
+            return f"ip:{real_ip.strip()}"
+
+    # Direct connection
+    if request.client and request.client.host:
+        return f"ip:{request.client.host}"
+
+    return "ip:unknown"
+
+
 class RateLimitDependency:
     """FastAPI dependency for rate limiting.
 
@@ -518,18 +555,19 @@ class RateLimitDependency:
         """Check rate limit for the current request.
 
         If rate limiting is disabled, returns None.
-        Uses authenticated user_id if available, otherwise extracts from request.
+        Uses authenticated user_id if available, otherwise extracts client IP.
         """
         if not self.settings.rate_limit_enabled:
             return None
 
-        # Get user_id from auth or request
+        # Get user_id from auth or extract client IP
         if user is not None:
             user_id = user.user_id
         else:
-            # Try to extract from request body or query params
-            # For simplicity, use IP address as fallback
-            user_id = request.client.host if request.client else "anonymous"
+            user_id = extract_client_ip(
+                request,
+                trust_proxy_headers=self.settings.rate_limit_trust_proxy_headers,
+            )
 
         # Use configured limit or endpoint-specific default
         limit = self.limit
