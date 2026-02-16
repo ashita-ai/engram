@@ -574,26 +574,57 @@ async def run_consolidation(
                 logger.debug(f"Summarizing chunk {idx + 1}/{total} ({len(chunk)} episodes)")
                 return await _summarize_chunk(chunk, ctx)
 
-        # Process all chunks in parallel
+        # Process all chunks in parallel, tolerating individual failures
         semaphore = asyncio.Semaphore(settings.max_concurrent_llm_calls)
         tasks = [
             _summarize_with_logging(semaphore, chunk, existing_context, i, len(chunks))
             for i, chunk in enumerate(chunks)
         ]
-        chunk_summaries = await asyncio.gather(*tasks)
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Separate successes from failures
+        chunk_summaries: list[SummaryOutput] = []
+        failed_chunk_indices: set[int] = set()
+        for i, chunk_result in enumerate(raw_results):
+            if isinstance(chunk_result, BaseException):
+                failed_chunk_indices.add(i)
+                logger.error(
+                    "Chunk %d/%d failed during summarization: %s",
+                    i + 1,
+                    len(chunks),
+                    chunk_result,
+                )
+            else:
+                chunk_summaries.append(chunk_result)
+
+        if failed_chunk_indices:
+            logger.warning(
+                "%d/%d chunks failed during consolidation. Proceeding with %d successful chunks.",
+                len(failed_chunk_indices),
+                len(chunks),
+                len(chunk_summaries),
+            )
+
+        if not chunk_summaries:
+            logger.error(
+                "All %d chunks failed during consolidation — "
+                "episodes will NOT be marked as summarized for retry",
+                len(chunks),
+            )
+            continue  # Don't mark episodes — let them be retried
 
         # 5. Reduce phase: combine chunk summaries into one
         if len(chunk_summaries) == 1:
-            chunk = chunk_summaries[0]
+            single = chunk_summaries[0]
             # Use key_facts as canonical content when available (Issue #207)
-            if chunk.key_facts:
-                final_summary = "\n".join(f"- {fact}" for fact in chunk.key_facts)
+            if single.key_facts:
+                final_summary = "\n".join(f"- {fact}" for fact in single.key_facts)
             else:
-                final_summary = chunk.summary
-            final_keywords = chunk.keywords
-            final_context = chunk.context
-            final_confidence = chunk.confidence
-            final_confidence_reasoning = chunk.confidence_reasoning
+                final_summary = single.summary
+            final_keywords = single.keywords
+            final_context = single.context
+            final_confidence = single.confidence
+            final_confidence_reasoning = single.confidence_reasoning
         else:
             reduced = await _reduce_summaries(chunk_summaries)
             # Use key_facts as canonical content when available (Issue #207)
@@ -609,13 +640,11 @@ async def run_consolidation(
         # Validate content is non-empty before creating SemanticMemory
         if not final_summary or not final_summary.strip():
             logger.warning(
-                "Consolidation produced empty content for %d episodes — skipping",
+                "Consolidation produced empty content for %d episodes — "
+                "leaving episodes unmarked for retry on next consolidation run",
                 len(episodes),
             )
-            # Mark episodes as summarized so they're not reprocessed
-            all_episode_ids = [ep.id for ep in episodes]
-            await storage.mark_episodes_summarized(all_episode_ids, user_id, "")
-            continue
+            continue  # Episodes stay unsummarized for retry
 
         # 6. Create semantic memory with source links
         all_episode_ids = [ep.id for ep in episodes]
@@ -779,8 +808,27 @@ async def run_consolidation(
                 except Exception as e:
                     logger.warning("LLM link discovery failed, using embedding links: %s", e)
 
-        # 8. Mark ALL episodes as summarized (including system prompts)
-        await storage.mark_episodes_summarized(all_episode_ids, user_id, memory.id)
+        # 8. Mark episodes as summarized — only from successful chunks
+        if failed_chunk_indices:
+            # Build list of user episode IDs from successful chunks only
+            successful_episode_ids: list[str] = []
+            for chunk_idx, chunk_data in enumerate(chunks):
+                if chunk_idx not in failed_chunk_indices:
+                    successful_episode_ids.extend(ep["id"] for ep in chunk_data)
+            # Include system episodes only if all user chunks succeeded
+            mark_ids = successful_episode_ids
+            logger.info(
+                "Marking %d/%d episodes as summarized (skipping %d from failed chunks)",
+                len(mark_ids),
+                len(all_episode_ids),
+                len(all_episode_ids) - len(mark_ids),
+            )
+        else:
+            # All chunks succeeded — mark everything including system prompts
+            mark_ids = all_episode_ids
+
+        if mark_ids:
+            await storage.mark_episodes_summarized(mark_ids, user_id, memory.id)
 
         total_episodes += len(episodes)
         total_memories += 1
@@ -952,8 +1000,66 @@ async def run_consolidation_from_structured(
             data["negations"] = [n.content for n in s.negations]
         struct_data.append(data)
 
-    # 4. Synthesize into semantic memory
-    synthesis = await _synthesize_structured(struct_data, existing_context)
+    # 4. Synthesize into semantic memory (chunked for large batches)
+    from engram.config import settings
+
+    if len(struct_data) > MAX_EPISODES_PER_CHUNK:
+        struct_chunks = [
+            struct_data[i : i + MAX_EPISODES_PER_CHUNK]
+            for i in range(0, len(struct_data), MAX_EPISODES_PER_CHUNK)
+        ]
+        logger.info(
+            "Chunking %d structured memories into %d chunks",
+            len(struct_data),
+            len(struct_chunks),
+        )
+
+        synth_semaphore = asyncio.Semaphore(settings.max_concurrent_llm_calls)
+
+        async def _synth_chunk(
+            sem: asyncio.Semaphore,
+            chunk: list[dict[str, str | list[str]]],
+            ctx: str,
+        ) -> SummaryOutput:
+            async with sem:
+                return await _synthesize_structured(chunk, ctx)
+
+        raw_synth_results = await asyncio.gather(
+            *[_synth_chunk(synth_semaphore, c, existing_context) for c in struct_chunks],
+            return_exceptions=True,
+        )
+
+        chunk_syntheses: list[SummaryOutput] = []
+        for i, r in enumerate(raw_synth_results):
+            if isinstance(r, BaseException):
+                logger.error(
+                    "Structured chunk %d/%d failed: %s",
+                    i + 1,
+                    len(struct_chunks),
+                    r,
+                )
+            else:
+                chunk_syntheses.append(r)
+
+        if not chunk_syntheses:
+            logger.error(
+                "All %d structured chunks failed — leaving memories unconsolidated for retry",
+                len(struct_chunks),
+            )
+            return ConsolidationResult(
+                episodes_processed=0,
+                semantic_memories_created=0,
+                links_created=0,
+                compression_ratio=0.0,
+            )
+
+        synthesis: SummaryOutput | MapReduceSummary
+        if len(chunk_syntheses) == 1:
+            synthesis = chunk_syntheses[0]
+        else:
+            synthesis = await _reduce_summaries(chunk_syntheses)
+    else:
+        synthesis = await _synthesize_structured(struct_data, existing_context)
 
     # Use key_facts as canonical content when available (Issue #207)
     if synthesis.key_facts:
@@ -964,11 +1070,12 @@ async def run_consolidation_from_structured(
     # Validate content is non-empty before creating SemanticMemory
     if not content or not content.strip():
         logger.warning(
-            "Consolidation from structured produced empty content for %d memories — skipping",
+            "Consolidation from structured produced empty content for %d memories — "
+            "leaving unconsolidated for retry on next run",
             len(structured),
         )
         return ConsolidationResult(
-            episodes_processed=len(structured),
+            episodes_processed=0,
             semantic_memories_created=0,
             links_created=0,
             compression_ratio=0.0,
