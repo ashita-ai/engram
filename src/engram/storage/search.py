@@ -231,8 +231,8 @@ class SearchMixin:
     ) -> None:
         """Update activation metadata for searched memories.
 
-        Records retrieval_count and last_accessed for A-MEM style
-        activation-based strengthening.
+        Reads current retrieval_count from storage to minimize
+        lost-update risk from concurrent searches.
 
         Args:
             results: Search results to track activation for.
@@ -240,18 +240,21 @@ class SearchMixin:
         from datetime import UTC, datetime
 
         collection = self._collection_name("semantic")
+        now = datetime.now(UTC)
 
         for scored in results:
             memory = scored.memory
-            memory.retrieval_count += 1
-            memory.last_accessed = datetime.now(UTC)
 
-            # Update just the activation fields in storage
+            # Read current count from storage (not stale in-memory value)
+            current = await self._get_current_retrieval_count(collection, memory.id, memory.user_id)
+            new_count = current + 1
+
+            # Write incremented value
             await self.client.set_payload(
                 collection_name=collection,
                 payload={
-                    "retrieval_count": memory.retrieval_count,
-                    "last_accessed": memory.last_accessed.isoformat(),
+                    "retrieval_count": new_count,
+                    "last_accessed": now.isoformat(),
                 },
                 points=models.FilterSelector(
                     filter=models.Filter(
@@ -264,6 +267,10 @@ class SearchMixin:
                     )
                 ),
             )
+
+            # Update in-memory model for caller consistency
+            memory.retrieval_count = new_count
+            memory.last_accessed = now
 
     async def search_procedural(
         self,
@@ -320,8 +327,8 @@ class SearchMixin:
     ) -> None:
         """Update activation metadata for searched procedural memories.
 
-        Records retrieval_count and last_accessed for A-MEM style
-        activation-based strengthening.
+        Reads current retrieval_count from storage to minimize
+        lost-update risk from concurrent searches.
 
         Args:
             results: Search results to track activation for.
@@ -329,18 +336,21 @@ class SearchMixin:
         from datetime import UTC, datetime
 
         collection = self._collection_name("procedural")
+        now = datetime.now(UTC)
 
         for scored in results:
             memory = scored.memory
-            memory.retrieval_count += 1
-            memory.last_accessed = datetime.now(UTC)
 
-            # Update just the activation fields in storage
+            # Read current count from storage (not stale in-memory value)
+            current = await self._get_current_retrieval_count(collection, memory.id, memory.user_id)
+            new_count = current + 1
+
+            # Write incremented value
             await self.client.set_payload(
                 collection_name=collection,
                 payload={
-                    "retrieval_count": memory.retrieval_count,
-                    "last_accessed": memory.last_accessed.isoformat(),
+                    "retrieval_count": new_count,
+                    "last_accessed": now.isoformat(),
                 },
                 points=models.FilterSelector(
                     filter=models.Filter(
@@ -353,6 +363,51 @@ class SearchMixin:
                     )
                 ),
             )
+
+            # Update in-memory model for caller consistency
+            memory.retrieval_count = new_count
+            memory.last_accessed = now
+
+    @qdrant_retry
+    async def _get_current_retrieval_count(
+        self,
+        collection: str,
+        memory_id: str,
+        user_id: str,
+    ) -> int:
+        """Read the current retrieval_count from storage.
+
+        Used by activation tracking to read fresh values instead of
+        stale in-memory values, narrowing the race window for concurrent
+        increment operations.
+
+        Returns 0 if the field is missing or the point is not found.
+        """
+        results, _ = await self.client.scroll(
+            collection_name=collection,
+            scroll_filter=models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="id",
+                        match=models.MatchValue(value=memory_id),
+                    ),
+                    models.FieldCondition(
+                        key="user_id",
+                        match=models.MatchValue(value=user_id),
+                    ),
+                ]
+            ),
+            limit=1,
+            with_payload=models.PayloadSelectorInclude(
+                include=["retrieval_count"],
+            ),
+        )
+
+        if not results or results[0].payload is None:
+            return 0
+
+        count = results[0].payload.get("retrieval_count", 0)
+        return int(count) if isinstance(count, int | float) else 0
 
     def _build_filters(
         self,
