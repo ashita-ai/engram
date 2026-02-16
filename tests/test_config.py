@@ -19,7 +19,8 @@ class TestConfidenceWeights:
         assert weights.corroboration == 0.25
         assert weights.recency == 0.15
         assert weights.verification == 0.10
-        assert weights.validate_weights_sum()
+        total = weights.extraction + weights.corroboration + weights.recency + weights.verification
+        assert abs(total - 1.0) < 0.01
 
     def test_custom_weights(self):
         """Custom weights should be accepted."""
@@ -31,17 +32,24 @@ class TestConfidenceWeights:
         )
         assert weights.extraction == 0.4
         assert weights.corroboration == 0.3
-        assert weights.validate_weights_sum()
+        total = weights.extraction + weights.corroboration + weights.recency + weights.verification
+        assert abs(total - 1.0) < 0.01
 
-    def test_validate_weights_sum_false(self):
-        """validate_weights_sum should return False if weights don't sum to 1."""
-        weights = ConfidenceWeights(
-            extraction=0.5,
-            corroboration=0.5,
-            recency=0.5,
-            verification=0.5,
-        )
-        assert not weights.validate_weights_sum()
+    def test_bad_weights_sum_emits_warning(self):
+        """Weights not summing to 1.0 should emit a UserWarning at construction."""
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            ConfidenceWeights(
+                extraction=0.5,
+                corroboration=0.5,
+                recency=0.5,
+                verification=0.5,
+            )
+        user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+        assert len(user_warnings) == 1
+        assert "ConfidenceWeights sum to 2.000" in str(user_warnings[0].message)
 
     def test_weight_bounds(self):
         """Weights must be between 0 and 1."""
@@ -119,7 +127,9 @@ class TestSettings:
         """Default confidence weights should be included."""
         settings = Settings()
         assert isinstance(settings.confidence_weights, ConfidenceWeights)
-        assert settings.confidence_weights.validate_weights_sum()
+        w = settings.confidence_weights
+        total = w.extraction + w.corroboration + w.recency + w.verification
+        assert abs(total - 1.0) < 0.01
 
     def test_env_prefix(self):
         """Settings should use ENGRAM_ prefix for environment variables."""
