@@ -554,6 +554,12 @@ class Settings(BaseSettings):
         description="Redis URL for distributed rate limiting (e.g., redis://localhost:6379). "
         "If not set, uses in-memory rate limiting (not suitable for multi-instance deployments).",
     )
+    rate_limit_trust_proxy_headers: bool = Field(
+        default=False,
+        description="Trust X-Forwarded-For and X-Real-IP headers for rate limiting. "
+        "Enable only when running behind a trusted reverse proxy (nginx, ALB, etc). "
+        "If disabled, uses direct connection IP only.",
+    )
 
     # Batch Operations
     batch_encode_max_items: int = Field(
