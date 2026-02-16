@@ -1097,3 +1097,83 @@ class TestDeduplication:
         # Should have created a new memory
         mock_storage.store_semantic.assert_called_once()
         assert result.semantic_memories_created == 1
+
+
+class TestDynamicFactCaps:
+    """Tests for dynamic consolidation output caps (#209)."""
+
+    def test_fact_cap_scales_with_episode_count(self) -> None:
+        """Dynamic fact cap should be max(8, episodes * facts_per_episode), capped at 50."""
+        from engram.config import settings
+
+        # With 1 episode: max(8, 1*3) = 8
+        assert max(8, 1 * settings.consolidation_max_facts_per_episode) == 8
+        # With 5 episodes: max(8, 5*3) = 15
+        assert max(8, 5 * settings.consolidation_max_facts_per_episode) == 15
+        # With 20 episodes: min(50, max(8, 20*3)) = 50 (capped)
+        assert min(50, max(8, 20 * settings.consolidation_max_facts_per_episode)) == 50
+
+    def test_keyword_limit_from_config(self) -> None:
+        """Keywords should use consolidation_max_keywords config (not hardcoded 15)."""
+        from engram.config import settings
+
+        assert settings.consolidation_max_keywords == 30
+        assert settings.consolidation_max_keywords > 15  # Was previously hardcoded
+
+    def test_context_memory_limit_from_config(self) -> None:
+        """Existing context should use consolidation_max_context_memories config (not hardcoded 10)."""
+        from engram.config import settings
+
+        assert settings.consolidation_max_context_memories == 25
+        assert settings.consolidation_max_context_memories > 10  # Was previously hardcoded
+
+
+class TestConsolidationConfidenceCap:
+    """Tests that consolidation creates semantic memories with capped confidence (#215)."""
+
+    @pytest.mark.asyncio
+    async def test_created_semantic_memory_uses_inferred_confidence(self) -> None:
+        """Semantic memories created by consolidation should use for_inferred() (capped at 0.6)."""
+        from engram.models import Episode
+
+        mock_episode = MagicMock(spec=Episode)
+        mock_episode.id = "ep_conf"
+        mock_episode.role = "user"
+        mock_episode.content = "PostgreSQL 16 is the primary database"
+
+        mock_storage = AsyncMock()
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=[mock_episode])
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.search_semantic = AsyncMock(return_value=[])
+        mock_storage.store_semantic = AsyncMock(return_value="sem_conf")
+        mock_storage.mark_episodes_summarized = AsyncMock(return_value=1)
+
+        mock_embedder = AsyncMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 384)
+
+        # LLM returns high confidence (0.85) — should be capped
+        mock_summary = SummaryOutput(
+            summary="PostgreSQL 16 is the primary database.",
+            key_facts=["PostgreSQL 16 is the primary database"],
+            keywords=["postgresql"],
+            confidence=0.85,
+            confidence_reasoning="Strong source agreement",
+        )
+
+        with patch(
+            "engram.workflows.consolidation._summarize_chunk",
+            return_value=mock_summary,
+        ):
+            await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="test_user",
+                org_id="test_org",
+            )
+
+        # Verify the stored semantic memory has capped confidence
+        stored_memory = mock_storage.store_semantic.call_args[0][0]
+        assert (
+            stored_memory.confidence.value <= 0.6
+        ), f"Inferred confidence should be capped at 0.6, got {stored_memory.confidence.value}"
+        assert stored_memory.confidence.extraction_base == 0.6
