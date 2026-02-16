@@ -93,10 +93,30 @@ class RerankWeights(BaseModel):
         description="Maximum boost for high-access memories",
     )
 
-    def validate_weights_sum(self) -> bool:
-        """Check if weights sum to approximately 1.0."""
+    @model_validator(mode="after")
+    def _warn_if_weights_not_normalized(self) -> "RerankWeights":
+        """Warn if weights don't sum to approximately 1.0."""
         total = self.similarity + self.recency + self.confidence + self.session + self.access
-        return abs(total - 1.0) < 0.01
+        if abs(total - 1.0) > 0.01:
+            warnings.warn(
+                f"RerankWeights sum to {total:.3f}, expected ~1.0. "
+                f"Scores may be outside [0, 1]. "
+                f"Weights: similarity={self.similarity}, recency={self.recency}, "
+                f"confidence={self.confidence}, session={self.session}, access={self.access}",
+                UserWarning,
+                stacklevel=2,
+            )
+            logger.warning(
+                "RerankWeights sum to %.3f (expected ~1.0): "
+                "similarity=%.2f, recency=%.2f, confidence=%.2f, session=%.2f, access=%.2f",
+                total,
+                self.similarity,
+                self.recency,
+                self.confidence,
+                self.session,
+                self.access,
+            )
+        return self
 
 
 class ConfidenceWeights(BaseModel):
@@ -156,10 +176,27 @@ class ConfidenceWeights(BaseModel):
         description="Fraction to reduce confidence per contradiction",
     )
 
-    def validate_weights_sum(self) -> bool:
-        """Check if weights sum to approximately 1.0."""
+    @model_validator(mode="after")
+    def _warn_if_weights_not_normalized(self) -> "ConfidenceWeights":
+        """Warn if weights don't sum to approximately 1.0."""
         total = self.extraction + self.corroboration + self.recency + self.verification
-        return abs(total - 1.0) < 0.01
+        if abs(total - 1.0) > 0.01:
+            warnings.warn(
+                f"ConfidenceWeights sum to {total:.3f}, expected ~1.0. "
+                f"Confidence scores may be miscalibrated.",
+                UserWarning,
+                stacklevel=2,
+            )
+            logger.warning(
+                "ConfidenceWeights sum to %.3f (expected ~1.0): "
+                "extraction=%.2f, corroboration=%.2f, recency=%.2f, verification=%.2f",
+                total,
+                self.extraction,
+                self.corroboration,
+                self.recency,
+                self.verification,
+            )
+        return self
 
 
 class Settings(BaseSettings):
@@ -384,6 +421,22 @@ class Settings(BaseSettings):
 
     # Runtime-generated dev secret (not from env, generated at startup if needed)
     _runtime_dev_secret: str | None = None
+
+    @model_validator(mode="after")
+    def validate_decay_thresholds(self) -> "Settings":
+        """Validate decay thresholds are ordered correctly.
+
+        The archive threshold must be strictly greater than the delete threshold
+        because memories should be archived before being deleted. Violating this
+        invariant would skip the archive stage entirely.
+        """
+        if self.decay_delete_threshold >= self.decay_archive_threshold:
+            raise ValueError(
+                f"decay_delete_threshold ({self.decay_delete_threshold}) must be less than "
+                f"decay_archive_threshold ({self.decay_archive_threshold}). "
+                f"Memories should be archived before being deleted."
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_security_settings(self) -> "Settings":

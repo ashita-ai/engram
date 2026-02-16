@@ -34,21 +34,31 @@ class TestRerankWeightsConfig:
         assert weights.max_access_boost == 0.1
 
     def test_weights_sum_to_one(self):
-        """Weights should sum to approximately 1.0."""
+        """Default weights should sum to approximately 1.0."""
         from engram.config import RerankWeights
 
         weights = RerankWeights()
-        assert weights.validate_weights_sum() is True
+        total = (
+            weights.similarity
+            + weights.recency
+            + weights.confidence
+            + weights.session
+            + weights.access
+        )
+        assert abs(total - 1.0) < 0.01
 
     def test_custom_weights_validation(self):
-        """Custom weights can be validated."""
+        """Invalid weights should emit a UserWarning at construction."""
+        import warnings
+
         from engram.config import RerankWeights
 
-        # Invalid weights that don't sum to 1.0
-        weights = RerankWeights(
-            similarity=0.3, recency=0.1, confidence=0.1, session=0.1, access=0.1
-        )
-        assert weights.validate_weights_sum() is False
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            RerankWeights(similarity=0.3, recency=0.1, confidence=0.1, session=0.1, access=0.1)
+        user_warnings = [x for x in w if issubclass(x.category, UserWarning)]
+        assert len(user_warnings) == 1
+        assert "RerankWeights sum to 0.700" in str(user_warnings[0].message)
 
 
 class TestSettingsReranking:
