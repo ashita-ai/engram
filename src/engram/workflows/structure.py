@@ -364,9 +364,13 @@ async def run_structure(
     await storage.store_structured(structured)
 
     # 7. Update Episode with structured flag and quick_extracts
-    episode.structured = True
-    episode.structured_into = structured.id
-    episode.quick_extracts = quick_extracts
+    episode = episode.model_copy(
+        update={
+            "structured": True,
+            "structured_into": structured.id,
+            "quick_extracts": quick_extracts,
+        }
+    )
 
     # Update episode in storage
     await storage.update_episode(episode)

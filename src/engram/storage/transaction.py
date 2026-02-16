@@ -170,6 +170,7 @@ class TransactionContext:
                 operation=OperationType.LOG_AUDIT,
                 entity_id=audit_id,
                 user_id=entry.user_id,
+                original_data=entry.model_dump(mode="json"),
             )
         )
         return audit_id
@@ -219,12 +220,22 @@ class TransactionContext:
                         logger.debug("Rolled back update_episode: %s", op.entity_id)
 
                 elif op.operation == OperationType.LOG_AUDIT:
-                    # Don't delete audit entries - they're forensic records
-                    # Instead, log that this was part of a rolled-back transaction
-                    logger.debug(
-                        "Audit entry %s was part of rolled-back transaction",
-                        op.entity_id,
-                    )
+                    # Don't delete audit entries - they're forensic records.
+                    # Instead, mark them as rolled_back so the paper trail shows
+                    # the operation was attempted but did not persist.
+                    if op.original_data:
+                        from engram.models import AuditEntry
+
+                        original_entry = AuditEntry.model_validate(op.original_data)
+                        rolled_back_entry = original_entry.model_copy(update={"rolled_back": True})
+                        await self.storage.log_audit(rolled_back_entry)
+                        rolled_back += 1
+                        logger.info("Marked audit entry %s as rolled_back", op.entity_id)
+                    else:
+                        logger.warning(
+                            "Cannot mark audit entry %s as rolled_back: no original data",
+                            op.entity_id,
+                        )
 
             except Exception as e:
                 # Log but continue rolling back other operations

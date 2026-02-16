@@ -30,6 +30,10 @@ class Episode(MemoryBase):
     interactions and are never modified after creation. All derived
     memories (Facts, Semantic, Procedural) trace back to Episodes.
 
+    The model is frozen to enforce immutability at the Python level.
+    Use ``episode.model_copy(update={...})`` to create modified copies
+    for metadata updates (consolidated, summarized, etc.).
+
     Attributes:
         content: The verbatim text content of the interaction.
         role: Who produced this content (user, assistant, system).
@@ -37,6 +41,8 @@ class Episode(MemoryBase):
         session_id: Optional session grouping for conversations.
         importance: How important is this episode (0.0-1.0).
     """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: str = Field(default_factory=lambda: generate_id("ep"))
     content: str = Field(description="Verbatim content of the interaction")
