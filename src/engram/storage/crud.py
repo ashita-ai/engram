@@ -1407,8 +1407,22 @@ class CRUDMixin:
         # Remove immutable fields — episode content is ground truth and must
         # never be overwritten. Only metadata fields (consolidated, summarized,
         # structured, importance, quick_extracts, etc.) are mutable.
-        for immutable_field in ("content", "role"):
-            payload.pop(immutable_field, None)
+        immutable_fields = ("content", "role", "timestamp", "session_id")
+        original_payload = point.payload or {}
+        for field in immutable_fields:
+            if field in payload:
+                stored_value = original_payload.get(field)
+                incoming_value = payload[field]
+                if stored_value is not None and incoming_value != stored_value:
+                    logger.warning(
+                        "Dropping mutation of immutable episode field '%s' "
+                        "(stored=%r, incoming=%r) for episode %s",
+                        field,
+                        stored_value,
+                        incoming_value,
+                        episode.id,
+                    )
+                payload.pop(field)
 
         await self.client.set_payload(
             collection_name=collection,
