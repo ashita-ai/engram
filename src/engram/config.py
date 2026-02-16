@@ -343,6 +343,15 @@ class Settings(BaseSettings):
             "Semantic memories above this threshold are merged instead of created."
         ),
     )
+    consolidation_checkpoint_dir: str | None = Field(
+        default=None,
+        description=(
+            "Directory for consolidation checkpoint files. When set, map-reduce "
+            "consolidation persists each chunk result to disk as it completes, "
+            "enabling resume after process crashes. Set to a writable path "
+            "(e.g., '/tmp/engram-checkpoints' or '~/.engram/checkpoints')."
+        ),
+    )
 
     # Retrieval Strengthening (Testing Effect)
     retrieval_strengthening_enabled: bool = Field(

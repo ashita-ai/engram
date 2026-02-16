@@ -9,6 +9,7 @@ import pytest
 from engram.config import Settings
 from engram.workflows import DurableAgentFactory, init_workflows, shutdown_workflows
 from engram.workflows.consolidation import (
+    CheckpointStore,
     ConsolidationResult,
     ExtractedFact,
     IdentifiedLink,
@@ -1177,3 +1178,300 @@ class TestConsolidationConfidenceCap:
             stored_memory.confidence.value <= 0.6
         ), f"Inferred confidence should be capped at 0.6, got {stored_memory.confidence.value}"
         assert stored_memory.confidence.extraction_base == 0.6
+
+
+# ---------------------------------------------------------------------------
+# CheckpointStore
+# ---------------------------------------------------------------------------
+
+
+class TestCheckpointStore:
+    """Tests for consolidation checkpoint persistence."""
+
+    @pytest.fixture
+    def ckpt_dir(self, tmp_path: object) -> str:
+        """Return a temporary directory path for checkpoints."""
+        from pathlib import Path
+
+        return str(Path(str(tmp_path)) / "ckpts")
+
+    def test_run_key_deterministic(self) -> None:
+        """Same inputs always produce the same run key."""
+        ids = ["ep_3", "ep_1", "ep_2"]
+        key1 = CheckpointStore.run_key("u1", "org1", ids)
+        key2 = CheckpointStore.run_key("u1", "org1", list(reversed(ids)))
+        assert key1 == key2  # sorted internally
+
+    def test_run_key_varies_with_inputs(self) -> None:
+        """Different inputs produce different run keys."""
+        key_a = CheckpointStore.run_key("u1", "org1", ["ep_1"])
+        key_b = CheckpointStore.run_key("u1", "org2", ["ep_1"])
+        assert key_a != key_b
+
+    def test_save_and_load_chunk(self, ckpt_dir: str) -> None:
+        """Saved chunk round-trips through JSON correctly."""
+        store = CheckpointStore(ckpt_dir)
+        summary = SummaryOutput(
+            summary="test",
+            key_facts=["fact1"],
+            keywords=["kw"],
+            context="ctx",
+            confidence=0.5,
+            confidence_reasoning="ok",
+        )
+        key = "test_run_1"
+        store.save_chunk(key, 0, summary)
+        loaded = store.load(key)
+
+        assert 0 in loaded
+        restored = SummaryOutput.model_validate(loaded[0])
+        assert restored.summary == "test"
+        assert restored.key_facts == ["fact1"]
+        assert restored.confidence == 0.5
+
+    def test_save_multiple_chunks(self, ckpt_dir: str) -> None:
+        """Multiple chunks accumulate in one checkpoint file."""
+        store = CheckpointStore(ckpt_dir)
+        key = "multi_chunk"
+
+        for i in range(3):
+            store.save_chunk(
+                key,
+                i,
+                SummaryOutput(summary=f"chunk_{i}", confidence=0.5),
+            )
+
+        loaded = store.load(key)
+        assert len(loaded) == 3
+        assert SummaryOutput.model_validate(loaded[2]).summary == "chunk_2"
+
+    def test_load_nonexistent_returns_empty(self, ckpt_dir: str) -> None:
+        """Loading a missing checkpoint returns an empty dict."""
+        store = CheckpointStore(ckpt_dir)
+        assert store.load("does_not_exist") == {}
+
+    def test_clear_deletes_checkpoint(self, ckpt_dir: str) -> None:
+        """Clear removes the checkpoint file."""
+        store = CheckpointStore(ckpt_dir)
+        key = "to_clear"
+        store.save_chunk(key, 0, SummaryOutput(summary="x", confidence=0.5))
+        assert store.load(key) != {}
+
+        store.clear(key)
+        assert store.load(key) == {}
+
+    def test_clear_missing_is_noop(self, ckpt_dir: str) -> None:
+        """Clearing a nonexistent checkpoint doesn't raise."""
+        store = CheckpointStore(ckpt_dir)
+        store.clear("nonexistent")  # should not raise
+
+    def test_corrupt_checkpoint_handled_gracefully(self, ckpt_dir: str) -> None:
+        """Corrupt JSON is treated as missing checkpoint."""
+
+        store = CheckpointStore(ckpt_dir)
+        key = "corrupt"
+        path = store._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("not valid json {{{")
+
+        loaded = store.load(key)
+        assert loaded == {}
+        # Corrupt file should be cleaned up
+        assert not path.exists()
+
+    def test_creates_directory_if_needed(self, tmp_path: object) -> None:
+        """CheckpointStore creates the directory tree on construction."""
+        from pathlib import Path
+
+        deep_path = Path(str(tmp_path)) / "a" / "b" / "c"
+        store = CheckpointStore(str(deep_path))
+        store.save_chunk("k", 0, SummaryOutput(summary="hi", confidence=0.5))
+        assert store.load("k") != {}
+
+
+class TestCheckpointIntegration:
+    """Tests that consolidation actually uses checkpoints when configured."""
+
+    @pytest.mark.asyncio
+    async def test_run_consolidation_uses_checkpoint(self, tmp_path: object) -> None:
+        """Consolidation saves chunks to checkpoint and clears on success."""
+        from pathlib import Path
+
+        ckpt_dir = str(Path(str(tmp_path)) / "ckpts")
+
+        mock_storage = MagicMock()
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=[])
+        mock_embedder = MagicMock()
+
+        # Pre-create a checkpoint that simulates a previous partial run
+        store = CheckpointStore(ckpt_dir)
+        summary = SummaryOutput(
+            summary="cached summary",
+            key_facts=["cached fact"],
+            keywords=["cached"],
+            confidence=0.5,
+        )
+
+        # Build the episode IDs that will be "fetched"
+        from engram.models import Episode
+
+        episodes = [
+            Episode(
+                id=f"ep_{i}",
+                content=f"Content {i}",
+                role="user",
+                user_id="u1",
+                org_id="org1",
+                embedding=[0.1] * 3,
+            )
+            for i in range(5)
+        ]
+        ep_ids = [ep.id for ep in episodes]
+        run_key = CheckpointStore.run_key("u1", "org1", ep_ids)
+
+        # Save a checkpoint for chunk 0 (simulating a crash after chunk 0 completed)
+        store.save_chunk(run_key, 0, summary)
+
+        # Configure storage to return our episodes
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=episodes)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.store_semantic = AsyncMock()
+        mock_storage.update_semantic_memory = AsyncMock()
+        mock_storage.mark_episodes_summarized = AsyncMock()
+        mock_storage.search_semantic = AsyncMock(return_value=[])
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 3)
+
+        # Mock the LLM call — it should only be called for chunk 0 since
+        # all 5 episodes fit in one chunk (< MAX_EPISODES_PER_CHUNK=20)
+        mock_summary = SummaryOutput(
+            summary="fresh summary",
+            key_facts=["fresh fact"],
+            keywords=["kw"],
+            confidence=0.5,
+        )
+
+        with (
+            patch(
+                "engram.workflows.consolidation._summarize_chunk",
+                new_callable=AsyncMock,
+                return_value=mock_summary,
+            ),
+            patch(
+                "engram.config.settings.consolidation_checkpoint_dir",
+                ckpt_dir,
+            ),
+            patch(
+                "engram.workflows.consolidation._check_for_near_duplicate",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            result = await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="u1",
+                org_id="org1",
+            )
+
+        assert result.episodes_processed == 5
+        assert result.semantic_memories_created == 1
+
+        # Checkpoint should be cleaned up after successful completion
+        assert store.load(run_key) == {}
+
+    @pytest.mark.asyncio
+    async def test_checkpoint_resumes_cached_chunks(self, tmp_path: object) -> None:
+        """When a checkpoint exists, cached chunks skip the LLM call."""
+        from pathlib import Path
+
+        from engram.workflows.consolidation import MAX_EPISODES_PER_CHUNK
+
+        ckpt_dir = str(Path(str(tmp_path)) / "ckpts")
+
+        mock_storage = MagicMock()
+        mock_embedder = MagicMock()
+        mock_embedder.embed = AsyncMock(return_value=[0.1] * 3)
+
+        # Create enough episodes for 2 chunks
+        from engram.models import Episode
+
+        episode_count = MAX_EPISODES_PER_CHUNK + 5
+        episodes = [
+            Episode(
+                id=f"ep_{i}",
+                content=f"Content {i}",
+                role="user",
+                user_id="u1",
+                org_id="org1",
+                embedding=[0.1] * 3,
+            )
+            for i in range(episode_count)
+        ]
+
+        ep_ids = [ep.id for ep in episodes]
+        run_key = CheckpointStore.run_key("u1", "org1", ep_ids)
+
+        # Pre-save chunk 0 as if it completed in a prior run
+        store = CheckpointStore(ckpt_dir)
+        cached_summary = SummaryOutput(
+            summary="cached from prior run",
+            key_facts=["prior fact"],
+            keywords=["cached"],
+            confidence=0.5,
+        )
+        store.save_chunk(run_key, 0, cached_summary)
+
+        # The LLM should only be called for chunk 1 (chunk 0 is cached)
+        fresh_summary = SummaryOutput(
+            summary="fresh",
+            key_facts=["fresh fact"],
+            keywords=["fresh"],
+            confidence=0.5,
+        )
+
+        mock_storage.get_unsummarized_episodes = AsyncMock(return_value=episodes)
+        mock_storage.list_semantic_memories = AsyncMock(return_value=[])
+        mock_storage.store_semantic = AsyncMock()
+        mock_storage.update_semantic_memory = AsyncMock()
+        mock_storage.mark_episodes_summarized = AsyncMock()
+        mock_storage.search_semantic = AsyncMock(return_value=[])
+
+        reduced_summary = MapReduceSummary(
+            summary="reduced",
+            key_facts=["reduced fact"],
+            keywords=["kw"],
+            confidence=0.5,
+        )
+
+        with (
+            patch(
+                "engram.workflows.consolidation._summarize_chunk",
+                new_callable=AsyncMock,
+                return_value=fresh_summary,
+            ) as mock_summarize,
+            patch(
+                "engram.workflows.consolidation._reduce_summaries",
+                new_callable=AsyncMock,
+                return_value=reduced_summary,
+            ),
+            patch(
+                "engram.config.settings.consolidation_checkpoint_dir",
+                ckpt_dir,
+            ),
+            patch(
+                "engram.workflows.consolidation._check_for_near_duplicate",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            result = await run_consolidation(
+                storage=mock_storage,
+                embedder=mock_embedder,
+                user_id="u1",
+                org_id="org1",
+            )
+
+        # _summarize_chunk should only be called once (for chunk 1)
+        # chunk 0 was loaded from checkpoint
+        assert mock_summarize.call_count == 1
+        assert result.episodes_processed == episode_count

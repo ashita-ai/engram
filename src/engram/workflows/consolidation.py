@@ -12,8 +12,11 @@ hippocampus (episodic) → neocortex (semantic) transfer with compression.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,6 +35,76 @@ MAX_EPISODES_PER_CHUNK = 20
 
 # Minimum token efficiency - skip summarization if already concise
 MIN_COMPRESSION_RATIO = 2.0
+
+
+class CheckpointStore:
+    """File-based checkpoint storage for map-reduce consolidation.
+
+    Persists each chunk's SummaryOutput to disk as it completes, so a
+    process crash doesn't lose already-completed LLM work. On restart,
+    completed chunks are loaded from disk and skipped.
+
+    Each consolidation run gets a unique key derived from the sorted
+    episode/structured-memory IDs being processed. This means a resumed
+    run loads only the checkpoint that matches its exact input set.
+
+    Checkpoint files are JSON, one per run, stored in the configured
+    directory. They are deleted on successful completion.
+    """
+
+    def __init__(self, checkpoint_dir: str) -> None:
+        self._dir = Path(checkpoint_dir).expanduser()
+        self._dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def run_key(user_id: str, org_id: str, item_ids: list[str]) -> str:
+        """Deterministic key for a consolidation run.
+
+        Hashing the sorted IDs means the same input set always maps to
+        the same checkpoint file, regardless of ordering.
+        """
+        digest = hashlib.sha256(
+            f"{user_id}:{org_id}:{','.join(sorted(item_ids))}".encode()
+        ).hexdigest()[:16]
+        return f"ckpt_{user_id}_{org_id}_{digest}"
+
+    def _path(self, run_key: str) -> Path:
+        return self._dir / f"{run_key}.json"
+
+    def load(self, run_key: str) -> dict[int, dict[str, object]]:
+        """Load completed chunk results for a run.
+
+        Returns:
+            Mapping of chunk_index -> SummaryOutput dict. Empty if no
+            checkpoint exists.
+        """
+        path = self._path(run_key)
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text())
+            return {int(k): v for k, v in data.get("chunks", {}).items()}
+        except (json.JSONDecodeError, KeyError, ValueError):
+            logger.warning("Corrupt checkpoint %s — starting fresh", path)
+            path.unlink(missing_ok=True)
+            return {}
+
+    def save_chunk(self, run_key: str, chunk_index: int, summary: SummaryOutput) -> None:
+        """Persist a completed chunk result."""
+        path = self._path(run_key)
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+            except (json.JSONDecodeError, ValueError):
+                data = {"chunks": {}}
+        else:
+            data = {"chunks": {}}
+        data["chunks"][str(chunk_index)] = summary.model_dump(mode="json")
+        path.write_text(json.dumps(data))
+
+    def clear(self, run_key: str) -> None:
+        """Delete a checkpoint after successful completion."""
+        self._path(run_key).unlink(missing_ok=True)
 
 
 class SummaryOutput(BaseModel):
@@ -562,22 +635,50 @@ async def run_consolidation(
         # Parallel summarization with semaphore to control concurrency
         from engram.config import settings
 
-        async def _summarize_with_logging(
+        # Set up checkpointing if configured
+        ckpt_store: CheckpointStore | None = None
+        ckpt_key: str = ""
+        cached_chunks: dict[int, dict[str, object]] = {}
+        if settings.consolidation_checkpoint_dir:
+            ckpt_store = CheckpointStore(settings.consolidation_checkpoint_dir)
+            all_ep_ids = [ep.id for ep in episodes]
+            ckpt_key = CheckpointStore.run_key(user_id, org_id, all_ep_ids)
+            cached_chunks = ckpt_store.load(ckpt_key)
+            if cached_chunks:
+                logger.info(
+                    "Resuming from checkpoint: %d/%d chunks already complete",
+                    len(cached_chunks),
+                    len(chunks),
+                )
+
+        async def _summarize_with_checkpoint(
             sem: asyncio.Semaphore,
             chunk: list[dict[str, str]],
             ctx: str,
             idx: int,
             total: int,
+            *,
+            _cached: dict[int, dict[str, object]] = cached_chunks,
+            _store: CheckpointStore | None = ckpt_store,
+            _key: str = ckpt_key,
         ) -> SummaryOutput:
-            """Summarize chunk with semaphore to limit concurrent LLM calls."""
+            """Summarize chunk, saving result to checkpoint on success."""
+            # Return cached result if available
+            if idx in _cached:
+                logger.debug(f"Chunk {idx + 1}/{total} loaded from checkpoint")
+                return SummaryOutput.model_validate(_cached[idx])
+
             async with sem:
                 logger.debug(f"Summarizing chunk {idx + 1}/{total} ({len(chunk)} episodes)")
-                return await _summarize_chunk(chunk, ctx)
+                result = await _summarize_chunk(chunk, ctx)
+                if _store:
+                    _store.save_chunk(_key, idx, result)
+                return result
 
         # Process all chunks in parallel, tolerating individual failures
         semaphore = asyncio.Semaphore(settings.max_concurrent_llm_calls)
         tasks = [
-            _summarize_with_logging(semaphore, chunk, existing_context, i, len(chunks))
+            _summarize_with_checkpoint(semaphore, chunk, existing_context, i, len(chunks))
             for i, chunk in enumerate(chunks)
         ]
         raw_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -682,6 +783,9 @@ async def run_consolidation(
             await storage.update_semantic_memory(existing_duplicate)
             # Mark all episodes as summarized
             await storage.mark_episodes_summarized(all_episode_ids, user_id, existing_duplicate.id)
+            # Clean up checkpoint on success
+            if ckpt_store and ckpt_key:
+                ckpt_store.clear(ckpt_key)
             total_episodes += len(episodes)
             continue
 
@@ -829,6 +933,10 @@ async def run_consolidation(
 
         if mark_ids:
             await storage.mark_episodes_summarized(mark_ids, user_id, memory.id)
+
+        # Clean up checkpoint on success
+        if ckpt_store and ckpt_key:
+            ckpt_store.clear(ckpt_key)
 
         total_episodes += len(episodes)
         total_memories += 1
@@ -1003,6 +1111,21 @@ async def run_consolidation_from_structured(
     # 4. Synthesize into semantic memory (chunked for large batches)
     from engram.config import settings
 
+    # Set up checkpointing if configured
+    struct_ckpt_store: CheckpointStore | None = None
+    struct_ckpt_key: str = ""
+    struct_cached_chunks: dict[int, dict[str, object]] = {}
+    if settings.consolidation_checkpoint_dir:
+        struct_ckpt_store = CheckpointStore(settings.consolidation_checkpoint_dir)
+        struct_ids_for_key = [s.id for s in structured]
+        struct_ckpt_key = CheckpointStore.run_key(user_id, org_id, struct_ids_for_key)
+        struct_cached_chunks = struct_ckpt_store.load(struct_ckpt_key)
+        if struct_cached_chunks:
+            logger.info(
+                "Resuming structured consolidation from checkpoint: %d chunks cached",
+                len(struct_cached_chunks),
+            )
+
     if len(struct_data) > MAX_EPISODES_PER_CHUNK:
         struct_chunks = [
             struct_data[i : i + MAX_EPISODES_PER_CHUNK]
@@ -1020,12 +1143,27 @@ async def run_consolidation_from_structured(
             sem: asyncio.Semaphore,
             chunk: list[dict[str, str | list[str]]],
             ctx: str,
+            idx: int,
+            *,
+            _cached: dict[int, dict[str, object]] = struct_cached_chunks,
+            _store: CheckpointStore | None = struct_ckpt_store,
+            _key: str = struct_ckpt_key,
         ) -> SummaryOutput:
+            # Return cached result if available
+            if idx in _cached:
+                logger.debug(f"Structured chunk {idx + 1} loaded from checkpoint")
+                return SummaryOutput.model_validate(_cached[idx])
             async with sem:
-                return await _synthesize_structured(chunk, ctx)
+                result = await _synthesize_structured(chunk, ctx)
+                if _store:
+                    _store.save_chunk(_key, idx, result)
+                return result
 
         raw_synth_results = await asyncio.gather(
-            *[_synth_chunk(synth_semaphore, c, existing_context) for c in struct_chunks],
+            *[
+                _synth_chunk(synth_semaphore, c, existing_context, i)
+                for i, c in enumerate(struct_chunks)
+            ],
             return_exceptions=True,
         )
 
@@ -1114,6 +1252,9 @@ async def run_consolidation_from_structured(
         await storage.update_semantic_memory(existing_duplicate)
         await storage.mark_structured_consolidated(structured_ids, user_id, existing_duplicate.id)
         await storage.mark_episodes_summarized(source_episode_ids, user_id, existing_duplicate.id)
+        # Clean up checkpoint on success
+        if struct_ckpt_store and struct_ckpt_key:
+            struct_ckpt_store.clear(struct_ckpt_key)
 
         return ConsolidationResult(
             episodes_processed=len(structured),
@@ -1255,6 +1396,10 @@ async def run_consolidation_from_structured(
     # Also mark source episodes as summarized
     await storage.mark_episodes_summarized(source_episode_ids, user_id, memory.id)
 
+    # Clean up checkpoint on success
+    if struct_ckpt_store and struct_ckpt_key:
+        struct_ckpt_store.clear(struct_ckpt_key)
+
     compression_ratio = float(len(structured)) if len(structured) > 0 else 0.0
 
     logger.info(
@@ -1354,6 +1499,7 @@ def _find_matching_memory(
 
 
 __all__ = [
+    "CheckpointStore",
     "ConsolidationResult",
     "ExtractedFact",
     "IdentifiedLink",
