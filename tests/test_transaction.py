@@ -119,13 +119,22 @@ class TestTransactionContext:
     async def test_update_episode_captures_original(self) -> None:
         """update_episode should capture original state for rollback."""
         storage = create_mock_storage()
-        original_episode = create_test_episode()
-        original_episode.id = "ep_original"
+        original_episode = Episode(
+            id="ep_original",
+            content="Test content",
+            role="user",
+            user_id="user_1",
+            embedding=[0.1] * 1536,
+        )
         storage.get_episode = AsyncMock(return_value=original_episode)
 
-        episode = create_test_episode()
-        episode.id = "ep_original"
-        episode.content = "updated content"
+        episode = Episode(
+            id="ep_original",
+            content="updated content",
+            role="user",
+            user_id="user_1",
+            embedding=[0.1] * 1536,
+        )
 
         async with TransactionContext(storage=storage) as txn:
             await txn.update_episode(episode)
@@ -187,14 +196,22 @@ class TestTransactionContext:
     async def test_rollback_restores_updated_episode(self) -> None:
         """rollback should restore original episode data."""
         storage = create_mock_storage()
-        original_episode = create_test_episode()
-        original_episode.id = "ep_restore"
-        original_episode.content = "original content"
+        original_episode = Episode(
+            id="ep_restore",
+            content="original content",
+            role="user",
+            user_id="user_1",
+            embedding=[0.1] * 1536,
+        )
         storage.get_episode = AsyncMock(return_value=original_episode)
 
-        episode = create_test_episode()
-        episode.id = "ep_restore"
-        episode.content = "updated content"
+        episode = Episode(
+            id="ep_restore",
+            content="updated content",
+            role="user",
+            user_id="user_1",
+            embedding=[0.1] * 1536,
+        )
 
         txn = TransactionContext(storage=storage)
         await txn.update_episode(episode)

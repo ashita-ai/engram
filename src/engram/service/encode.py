@@ -129,7 +129,7 @@ class EncodeMixin:
 
         # Store quick extracts on episode for fast access
         quick_extracts = QuickExtracts(emails=emails, phones=phones, urls=urls)
-        episode.quick_extracts = quick_extracts
+        episode = episode.model_copy(update={"quick_extracts": quick_extracts})
 
         # Create StructuredMemory (always, fast mode by default)
         structured = StructuredMemory.from_episode_fast(
@@ -153,8 +153,12 @@ class EncodeMixin:
             await txn.store_structured(structured)
 
             # Link episode to structured
-            episode.structured = True
-            episode.structured_into = structured.id
+            episode = episode.model_copy(
+                update={
+                    "structured": True,
+                    "structured_into": structured.id,
+                }
+            )
             await txn.update_episode(episode)
 
             # Calculate importance based on extracts + surprise
@@ -168,7 +172,7 @@ class EncodeMixin:
                     user_id=user_id,
                     org_id=org_id,
                 )
-                episode.importance = calculated_importance
+                episode = episode.model_copy(update={"importance": calculated_importance})
                 await txn.update_episode(episode)
             else:
                 calculated_importance = importance

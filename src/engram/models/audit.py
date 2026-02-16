@@ -18,6 +18,7 @@ AuditEventType = Literal[
     "bulk_delete",
     "structure",
     "promote",
+    "mutation_rejected",
 ]
 
 
@@ -58,6 +59,10 @@ class AuditEntry(BaseModel):
     duration_ms: int | None = Field(
         default=None,
         description="Operation duration in milliseconds",
+    )
+    rolled_back: bool = Field(
+        default=False,
+        description="Whether the transaction that created this entry was rolled back",
     )
 
     @classmethod
@@ -234,6 +239,45 @@ class AuditEntry(BaseModel):
                 "total_deleted": sum(deleted_counts.values()),
             },
             duration_ms=duration_ms,
+        )
+
+    @classmethod
+    def for_mutation_rejected(
+        cls,
+        user_id: str,
+        memory_id: str,
+        memory_type: str,
+        field: str,
+        stored_value: str,
+        attempted_value: str,
+        org_id: str | None = None,
+    ) -> "AuditEntry":
+        """Create audit entry when an immutable field mutation is rejected.
+
+        This records attempted modifications to ground truth for forensic
+        analysis. If someone or something is trying to mutate immutable
+        data, we want a permanent record.
+
+        Args:
+            user_id: User who attempted the mutation.
+            memory_id: ID of the memory targeted.
+            memory_type: Type of memory (e.g., "episodic").
+            field: Name of the immutable field.
+            stored_value: Current stored value (repr-truncated for safety).
+            attempted_value: Value that was rejected (repr-truncated for safety).
+            org_id: Optional organization ID.
+        """
+        return cls(
+            event="mutation_rejected",
+            user_id=user_id,
+            org_id=org_id,
+            details={
+                "memory_id": memory_id,
+                "memory_type": memory_type,
+                "field": field,
+                "stored_value": stored_value[:200],
+                "attempted_value": attempted_value[:200],
+            },
         )
 
     def __str__(self) -> str:

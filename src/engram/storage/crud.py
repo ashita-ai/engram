@@ -1484,6 +1484,28 @@ class CRUDMixin:
                         incoming_value,
                         episode.id,
                     )
+                    # Create forensic audit entry for the rejected mutation
+                    try:
+                        from engram.models import AuditEntry as AuditEntryModel
+
+                        await self.log_audit(
+                            AuditEntryModel.for_mutation_rejected(
+                                user_id=episode.user_id,
+                                memory_id=episode.id,
+                                memory_type="episodic",
+                                field=field,
+                                stored_value=repr(stored_value),
+                                attempted_value=repr(incoming_value),
+                                org_id=getattr(episode, "org_id", None),
+                            )
+                        )
+                    except Exception as audit_err:
+                        logger.error(
+                            "Failed to log mutation_rejected audit for episode %s field %s: %s",
+                            episode.id,
+                            field,
+                            audit_err,
+                        )
                 payload.pop(field)
 
         await self.client.set_payload(
@@ -2008,7 +2030,7 @@ class CRUDMixin:
             if point.payload is not None:
                 episode = self._payload_to_memory(point.payload, Episode)
                 if isinstance(point.vector, list):
-                    episode.embedding = point.vector
+                    episode = episode.model_copy(update={"embedding": point.vector})
                 episodes.append(episode)
 
         # Sort by timestamp

@@ -647,16 +647,16 @@ class TestBiTemporalRecall:
             role="user",
             user_id="test_user",
             embedding=[0.1, 0.9, 0.5],
+            timestamp=now - timedelta(days=30),
         )
-        old_episode.timestamp = now - timedelta(days=30)
 
         new_episode = Episode(
             content="New email: new@example.com",
             role="user",
             user_id="test_user",
             embedding=[0.2, 0.8, 0.5],
+            timestamp=now,
         )
-        new_episode.timestamp = now
 
         storage._episodes[old_episode.id] = old_episode
         storage._episodes[new_episode.id] = new_episode
