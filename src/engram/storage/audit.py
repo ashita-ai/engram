@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, Any
 
 from qdrant_client import models
 
+from engram.storage.retry import qdrant_retry
+
 if TYPE_CHECKING:
     from engram.models import AuditEntry
 
@@ -33,6 +35,7 @@ class AuditMixin:
     _embedding_dim: int
     client: Any
 
+    @qdrant_retry
     async def log_audit(self, entry: AuditEntry) -> str:
         """Log an audit entry.
 
@@ -65,6 +68,7 @@ class AuditMixin:
 
         return entry.id
 
+    @qdrant_retry
     async def get_audit_log(
         self,
         user_id: str,
