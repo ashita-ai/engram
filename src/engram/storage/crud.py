@@ -175,6 +175,7 @@ class CRUDMixin:
         semantic_updated = 0
         procedural_deleted = 0
         procedural_updated = 0
+        errors: list[str] = []
 
         # First verify the episode exists
         episode = await self.get_episode(episode_id, user_id)
@@ -197,43 +198,43 @@ class CRUDMixin:
                 ep_org_id = None
 
             # Handle StructuredMemory (1:1 with episode, always delete)
-            structured = await self.get_structured_for_episode(episode_id, user_id)
-            if structured:
-                await self._delete_by_id(structured.id, user_id, "structured")
-                await self.log_audit(
-                    AuditEntryModel.for_delete(
-                        user_id=user_id,
-                        memory_id=structured.id,
-                        memory_type="structured",
-                        org_id=ep_org_id,
-                    )
-                )
-                structured_deleted = 1
-
-            # Handle SemanticMemory
-            semantics = await self._find_semantics_by_source_episode(episode_id, user_id)
-            for sem in semantics:
-                if cascade == "hard":
-                    # Hard cascade: delete any semantic that references this episode
-                    await self._delete_by_id(sem.id, user_id, "semantic")
+            try:
+                structured = await self.get_structured_for_episode(episode_id, user_id)
+                if structured:
+                    await self._delete_by_id(structured.id, user_id, "structured")
                     await self.log_audit(
                         AuditEntryModel.for_delete(
                             user_id=user_id,
-                            memory_id=sem.id,
-                            memory_type="semantic",
+                            memory_id=structured.id,
+                            memory_type="structured",
                             org_id=ep_org_id,
                         )
                     )
-                    semantic_deleted += 1
-                else:
-                    # Soft cascade: remove reference, reduce confidence
-                    original_count = len(sem.source_episode_ids)
-                    sem.source_episode_ids = [
-                        eid for eid in sem.source_episode_ids if eid != episode_id
-                    ]
+                    structured_deleted = 1
+            except Exception as e:
+                errors.append(f"structured delete failed: {e}")
+                logger.error(
+                    "Cascade: failed to delete structured memory for episode %s: %s",
+                    episode_id,
+                    e,
+                )
 
-                    if not sem.source_episode_ids:
-                        # No sources left, delete
+            # Handle SemanticMemory
+            try:
+                semantics = await self._find_semantics_by_source_episode(episode_id, user_id)
+            except Exception as e:
+                semantics = []
+                errors.append(f"semantic search failed: {e}")
+                logger.error(
+                    "Cascade: failed to find semantic memories for episode %s: %s",
+                    episode_id,
+                    e,
+                )
+
+            for sem in semantics:
+                try:
+                    if cascade == "hard":
+                        # Hard cascade: delete any semantic that references this episode
                         await self._delete_by_id(sem.id, user_id, "semantic")
                         await self.log_audit(
                             AuditEntryModel.for_delete(
@@ -245,37 +246,53 @@ class CRUDMixin:
                         )
                         semantic_deleted += 1
                     else:
-                        # Reduce confidence proportionally
-                        remaining_count = len(sem.source_episode_ids)
-                        confidence_factor = remaining_count / original_count
-                        sem.confidence.value *= confidence_factor
-                        sem.confidence.value = max(0.1, sem.confidence.value)  # Floor at 0.1
-                        await self.update_semantic_memory(sem)
-                        semantic_updated += 1
+                        # Soft cascade: remove reference, recompute confidence
+                        sem.source_episode_ids = [
+                            eid for eid in sem.source_episode_ids if eid != episode_id
+                        ]
+
+                        if not sem.source_episode_ids:
+                            # No sources left, delete
+                            await self._delete_by_id(sem.id, user_id, "semantic")
+                            await self.log_audit(
+                                AuditEntryModel.for_delete(
+                                    user_id=user_id,
+                                    memory_id=sem.id,
+                                    memory_type="semantic",
+                                    org_id=ep_org_id,
+                                )
+                            )
+                            semantic_deleted += 1
+                        else:
+                            # Update corroboration and recompute via canonical formula
+                            sem.confidence.supporting_episodes = len(sem.source_episode_ids)
+                            sem.confidence.recompute()
+                            await self.update_semantic_memory(sem)
+                            semantic_updated += 1
+                except Exception as e:
+                    errors.append(f"semantic {sem.id} cascade failed: {e}")
+                    logger.error(
+                        "Cascade: failed to process semantic %s for episode %s: %s",
+                        sem.id,
+                        episode_id,
+                        e,
+                    )
 
             # Handle ProceduralMemory
-            procedurals = await self._find_procedurals_by_source_episode(episode_id, user_id)
-            for proc in procedurals:
-                if cascade == "hard":
-                    await self._delete_by_id(proc.id, user_id, "procedural")
-                    await self.log_audit(
-                        AuditEntryModel.for_delete(
-                            user_id=user_id,
-                            memory_id=proc.id,
-                            memory_type="procedural",
-                            org_id=ep_org_id,
-                        )
-                    )
-                    procedural_deleted += 1
-                else:
-                    # Soft cascade: remove reference
-                    original_count = len(proc.source_episode_ids)
-                    proc.source_episode_ids = [
-                        eid for eid in proc.source_episode_ids if eid != episode_id
-                    ]
+            try:
+                procedurals = await self._find_procedurals_by_source_episode(episode_id, user_id)
+            except Exception as e:
+                procedurals = []
+                errors.append(f"procedural search failed: {e}")
+                logger.error(
+                    "Cascade: failed to find procedural memories for episode %s: %s",
+                    episode_id,
+                    e,
+                )
 
-                    if not proc.source_episode_ids and not proc.source_semantic_ids:
-                        # No sources left at all, delete
+            for proc in procedurals:
+                try:
+                    if cascade == "hard":
                         await self._delete_by_id(proc.id, user_id, "procedural")
                         await self.log_audit(
                             AuditEntryModel.for_delete(
@@ -287,21 +304,61 @@ class CRUDMixin:
                         )
                         procedural_deleted += 1
                     else:
-                        # Reduce confidence proportionally (only if episode sources changed)
-                        if original_count > 0:
-                            remaining_count = len(proc.source_episode_ids)
-                            confidence_factor = (
-                                remaining_count / original_count if original_count > 0 else 1.0
+                        # Soft cascade: remove reference
+                        proc.source_episode_ids = [
+                            eid for eid in proc.source_episode_ids if eid != episode_id
+                        ]
+
+                        if not proc.source_episode_ids and not proc.source_semantic_ids:
+                            # No sources left at all, delete
+                            await self._delete_by_id(proc.id, user_id, "procedural")
+                            await self.log_audit(
+                                AuditEntryModel.for_delete(
+                                    user_id=user_id,
+                                    memory_id=proc.id,
+                                    memory_type="procedural",
+                                    org_id=ep_org_id,
+                                )
                             )
-                            proc.confidence.value *= confidence_factor
-                            proc.confidence.value = max(0.1, proc.confidence.value)
-                        await self.update_procedural_memory(proc)
-                        procedural_updated += 1
+                            procedural_deleted += 1
+                        else:
+                            # Update corroboration and recompute via canonical formula
+                            proc.confidence.supporting_episodes = len(proc.source_episode_ids)
+                            if proc.source_semantic_ids:
+                                proc.confidence.supporting_episodes += len(proc.source_semantic_ids)
+                            proc.confidence.recompute()
+                            await self.update_procedural_memory(proc)
+                            procedural_updated += 1
+                except Exception as e:
+                    errors.append(f"procedural {proc.id} cascade failed: {e}")
+                    logger.error(
+                        "Cascade: failed to process procedural %s for episode %s: %s",
+                        proc.id,
+                        episode_id,
+                        e,
+                    )
 
-        # Delete the episode itself
-        deleted = await self._delete_by_id(episode_id, user_id, "episodic")
+        # Always attempt to delete the episode itself, even if cascade had errors
+        try:
+            deleted = await self._delete_by_id(episode_id, user_id, "episodic")
+        except Exception as e:
+            deleted = False
+            errors.append(f"episode delete failed: {e}")
+            logger.error(
+                "Cascade: failed to delete episode %s itself: %s",
+                episode_id,
+                e,
+            )
 
-        return {
+        if errors:
+            logger.warning(
+                "Cascade delete for episode %s completed with %d error(s): %s",
+                episode_id,
+                len(errors),
+                "; ".join(errors),
+            )
+
+        result: dict[str, object] = {
             "deleted": deleted,
             "structured_deleted": structured_deleted,
             "semantic_deleted": semantic_deleted,
@@ -309,6 +366,11 @@ class CRUDMixin:
             "procedural_deleted": procedural_deleted,
             "procedural_updated": procedural_updated,
         }
+
+        if errors:
+            result["errors"] = errors
+
+        return result
 
     async def _find_semantics_by_source_episode(
         self,
